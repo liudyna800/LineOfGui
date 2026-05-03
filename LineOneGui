@@ -1,422 +1,26 @@
--- ============ GUI БИБЛИОТЕКА ============
-local GuiLibrary = {}
+-- Delta Hub | Rayfield Edition
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-function GuiLibrary:CreateWindow(config)
-    config = config or {}
-    local title = config.Title or "Delta Hub"
-    local changelog = config.Changelog or ""
-    
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = title
-    ScreenGui.Parent = game:GetService("CoreGui")
-    syn.protect_gui and syn.protect_gui(ScreenGui)
-    
-    local Background = Instance.new("Frame")
-    Background.Size = UDim2.new(1, 0, 1, 0)
-    Background.BackgroundTransparency = 1
-    Background.Parent = ScreenGui
-    
-    local NotifyFrame = Instance.new("Frame")
-    NotifyFrame.Size = UDim2.new(0, 300, 0, 50)
-    NotifyFrame.Position = UDim2.new(0.5, -150, 0, 20)
-    NotifyFrame.BackgroundTransparency = 1
-    NotifyFrame.Parent = Background
-    NotifyFrame.ZIndex = 100
-    
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 600, 0, 400)
-    MainFrame.Position = UDim2.new(0.5, -300, 0.5, -200)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    MainFrame.Parent = Background
-    
-    Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
-    
-    local Shadow = Instance.new("ImageLabel")
-    Shadow.Size = UDim2.new(1, 20, 1, 20)
-    Shadow.Position = UDim2.new(0, -10, 0, -10)
-    Shadow.BackgroundTransparency = 1
-    Shadow.Image = "rbxassetid://5028857084"
-    Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
-    Shadow.ImageTransparency = 0.7
-    Shadow.ScaleType = Enum.ScaleType.Slice
-    Shadow.SliceCenter = Rect.new(10, 10, 118, 118)
-    Shadow.Parent = MainFrame
-    Shadow.ZIndex = 0
-    
-    local TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 35)
-    TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    TitleBar.BorderSizePixel = 0
-    TitleBar.Parent = MainFrame
-    TitleBar.ZIndex = 2
-    
-    Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
-    
-    local TitleText = Instance.new("TextLabel")
-    TitleText.Size = UDim2.new(1, -80, 1, 0)
-    TitleText.Position = UDim2.new(0, 15, 0, 0)
-    TitleText.BackgroundTransparency = 1
-    TitleText.Text = title
-    TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
-    TitleText.Font = Enum.Font.GothamBold
-    TitleText.TextSize = 14
-    TitleText.TextXAlignment = Enum.TextXAlignment.Left
-    TitleText.Parent = TitleBar
-    TitleText.ZIndex = 2
-    
-    local MinimizeButton = Instance.new("TextButton")
-    MinimizeButton.Size = UDim2.new(0, 32, 0, 32)
-    MinimizeButton.Position = UDim2.new(1, -42, 0, 2)
-    MinimizeButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    MinimizeButton.Text = "_"
-    MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    MinimizeButton.Font = Enum.Font.GothamBold
-    MinimizeButton.TextSize = 20
-    MinimizeButton.Parent = TitleBar
-    MinimizeButton.ZIndex = 3
-    
-    Instance.new("UICorner", MinimizeButton).CornerRadius = UDim.new(0, 16)
-    
-    local Minimized = false
-    local MinimizedCircle
-    
-    MinimizeButton.MouseButton1Click:Connect(function()
-        Minimized = not Minimized
-        if Minimized then
-            MainFrame.Visible = false
-            MinimizedCircle = Instance.new("TextButton")
-            MinimizedCircle.Size = UDim2.new(0, 50, 0, 50)
-            MinimizedCircle.Position = UDim2.new(1, -70, 0, 20)
-            MinimizedCircle.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-            MinimizedCircle.Text = "D"
-            MinimizedCircle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            MinimizedCircle.Font = Enum.Font.GothamBold
-            MinimizedCircle.TextSize = 24
-            MinimizedCircle.Parent = Background
-            Instance.new("UICorner", MinimizedCircle).CornerRadius = UDim.new(0, 25)
-            
-            MinimizedCircle.MouseButton1Click:Connect(function()
-                Minimized = false
-                MainFrame.Visible = true
-                MinimizedCircle:Destroy()
-            end)
-            
-            local dragging
-            local dragStart
-            local startPos
-            MinimizedCircle.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    dragging = true
-                    dragStart = input.Position
-                    startPos = MinimizedCircle.Position
-                end
-            end)
-            MinimizedCircle.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    dragging = false
-                end
-            end)
-            game:GetService("UserInputService").InputChanged:Connect(function(input)
-                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                    local delta = input.Position - dragStart
-                    MinimizedCircle.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-                end
-            end)
-        else
-            MainFrame.Visible = true
-            if MinimizedCircle then MinimizedCircle:Destroy() end
-        end
-    end)
-    
-    local TabPanel = Instance.new("Frame")
-    TabPanel.Size = UDim2.new(0, 140, 1, -35)
-    TabPanel.Position = UDim2.new(0, 0, 0, 35)
-    TabPanel.BackgroundColor3 = Color3.fromRGB(22, 22, 27)
-    TabPanel.BorderSizePixel = 0
-    TabPanel.Parent = MainFrame
-    TabPanel.ZIndex = 1
-    
-    local TabButtons = {}
-    
-    local Divider = Instance.new("Frame")
-    Divider.Size = UDim2.new(0, 1, 1, 0)
-    Divider.Position = UDim2.new(1, 0, 0, 0)
-    Divider.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    Divider.BorderSizePixel = 0
-    Divider.Parent = TabPanel
-    
-    local ContentContainer = Instance.new("Frame")
-    ContentContainer.Size = UDim2.new(1, -141, 1, -35)
-    ContentContainer.Position = UDim2.new(0, 141, 0, 35)
-    ContentContainer.BackgroundTransparency = 1
-    ContentContainer.Parent = MainFrame
-    ContentContainer.ZIndex = 1
-    
-    local self = {}
-    
-    -- Changelog текст
-    if changelog ~= "" then
-        local changelogLabel = Instance.new("TextLabel")
-        changelogLabel.Size = UDim2.new(1, -16, 0, 200)
-        changelogLabel.Position = UDim2.new(0, 8, 0, 8)
-        changelogLabel.BackgroundTransparency = 1
-        changelogLabel.Text = changelog
-        changelogLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-        changelogLabel.Font = Enum.Font.Gotham
-        changelogLabel.TextSize = 12
-        changelogLabel.TextXAlignment = Enum.TextXAlignment.Left
-        changelogLabel.TextYAlignment = Enum.TextYAlignment.Top
-        changelogLabel.Visible = false
-        changelogLabel.Parent = ContentContainer
-    end
-    
-    function self:CreateTab(tabName)
-        local tabButton = Instance.new("TextButton")
-        tabButton.Size = UDim2.new(1, 0, 0, 35)
-        tabButton.BackgroundTransparency = 1
-        tabButton.Text = tabName
-        tabButton.TextColor3 = Color3.fromRGB(170, 170, 170)
-        tabButton.Font = Enum.Font.Gotham
-        tabButton.TextSize = 13
-        tabButton.Parent = TabPanel
-        
-        local contentFrame = Instance.new("ScrollingFrame")
-        contentFrame.Size = UDim2.new(1, 0, 1, 0)
-        contentFrame.BackgroundTransparency = 1
-        contentFrame.Visible = false
-        contentFrame.ScrollBarThickness = 3
-        contentFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 65)
-        contentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-        contentFrame.Parent = ContentContainer
-        
-        local UIListLayout = Instance.new("UIListLayout")
-        UIListLayout.Padding = UDim.new(0, 6)
-        UIListLayout.Parent = contentFrame
-        
-        local UIPadding = Instance.new("UIPadding")
-        UIPadding.PaddingTop = UDim.new(0, 8)
-        UIPadding.PaddingLeft = UDim.new(0, 8)
-        UIPadding.PaddingRight = UDim.new(0, 8)
-        UIPadding.Parent = contentFrame
-        
-        table.insert(TabButtons, {button = tabButton, frame = contentFrame})
-        
-        tabButton.MouseButton1Click:Connect(function()
-            for _, tab in pairs(TabButtons) do
-                tab.frame.Visible = false
-                tab.button.TextColor3 = Color3.fromRGB(170, 170, 170)
-            end
-            contentFrame.Visible = true
-            tabButton.TextColor3 = Color3.fromRGB(100, 180, 255)
-        end)
-        
-        if #TabButtons == 1 then
-            contentFrame.Visible = true
-            tabButton.TextColor3 = Color3.fromRGB(100, 180, 255)
-        end
-        
-        local tabMethods = {}
-        
-        function tabMethods:CreateButton(btnText, callback, ...)
-            local args = {...}
-            local button = Instance.new("TextButton")
-            button.Size = UDim2.new(1, 0, 0, 34)
-            button.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-            button.Text = "  " .. btnText
-            button.TextColor3 = Color3.fromRGB(255, 255, 255)
-            button.Font = Enum.Font.Gotham
-            button.TextSize = 13
-            button.TextXAlignment = Enum.TextXAlignment.Left
-            button.Parent = contentFrame
-            
-            Instance.new("UICorner", button).CornerRadius = UDim.new(0, 4)
-            
-            button.MouseButton1Click:Connect(function()
-                if #args > 0 then
-                    callback(table.unpack(args))
-                else
-                    callback()
-                end
-            end)
-            
-            contentFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + UIPadding.PaddingTop.Offset + 8)
-            UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                contentFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + UIPadding.PaddingTop.Offset + 8)
-            end)
-            
-            return button
-        end
-        
-        function tabMethods:CreateToggle(toggleText, callback)
-            local toggleFrame = Instance.new("Frame")
-            toggleFrame.Size = UDim2.new(1, 0, 0, 34)
-            toggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-            toggleFrame.Parent = contentFrame
-            
-            Instance.new("UICorner", toggleFrame).CornerRadius = UDim.new(0, 4)
-            
-            local label = Instance.new("TextLabel")
-            label.Size = UDim2.new(1, -60, 1, 0)
-            label.Position = UDim2.new(0, 12, 0, 0)
-            label.BackgroundTransparency = 1
-            label.Text = toggleText
-            label.TextColor3 = Color3.fromRGB(255, 255, 255)
-            label.Font = Enum.Font.Gotham
-            label.TextSize = 13
-            label.TextXAlignment = Enum.TextXAlignment.Left
-            label.Parent = toggleFrame
-            
-            local toggle = Instance.new("Frame")
-            toggle.Size = UDim2.new(0, 38, 0, 20)
-            toggle.Position = UDim2.new(1, -48, 0.5, -10)
-            toggle.BackgroundColor3 = Color3.fromRGB(55, 55, 60)
-            toggle.Parent = toggleFrame
-            
-            Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 10)
-            
-            local toggleDot = Instance.new("Frame")
-            toggleDot.Size = UDim2.new(0, 16, 0, 16)
-            toggleDot.Position = UDim2.new(0, 2, 0.5, -8)
-            toggleDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            toggleDot.Parent = toggle
-            
-            Instance.new("UICorner", toggleDot).CornerRadius = UDim.new(0, 8)
-            
-            local tweenService = game:GetService("TweenService")
-            local enabled = false
-            
-            toggleFrame.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    enabled = not enabled
-                    if enabled then
-                        toggle.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-                        tweenService:Create(toggleDot, TweenInfo.new(0.15), {Position = UDim2.new(1, -18, 0.5, -8)}):Play()
-                    else
-                        toggle.BackgroundColor3 = Color3.fromRGB(55, 55, 60)
-                        tweenService:Create(toggleDot, TweenInfo.new(0.15), {Position = UDim2.new(0, 2, 0.5, -8)}):Play()
-                    end
-                    callback(enabled)
-                end
-            end)
-            
-            contentFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + UIPadding.PaddingTop.Offset + 8)
-            UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                contentFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + UIPadding.PaddingTop.Offset + 8)
-            end)
-            
-            local toggleObj = {
-                Enabled = false,
-                GetPropertyChangedSignal = function() return nil end,
-                Destroy = function() toggleFrame:Destroy() end
-            }
-            
-            local mt = {
-                __index = function(t, k)
-                    if k == "Enabled" then return enabled end
-                end,
-                __newindex = function(t, k, v)
-                    if k == "Enabled" then
-                        enabled = v
-                        if v then
-                            toggle.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-                            tweenService:Create(toggleDot, TweenInfo.new(0.15), {Position = UDim2.new(1, -18, 0.5, -8)}):Play()
-                        else
-                            toggle.BackgroundColor3 = Color3.fromRGB(55, 55, 60)
-                            tweenService:Create(toggleDot, TweenInfo.new(0.15), {Position = UDim2.new(0, 2, 0.5, -8)}):Play()
-                        end
-                    end
-                end
-            }
-            setmetatable(toggleObj, mt)
-            
-            return toggleObj
-        end
-        
-        return tabMethods
-    end
-    
-    function self:Notify(text)
-        local notif = Instance.new("Frame")
-        notif.Size = UDim2.new(1, 0, 0, 40)
-        notif.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-        notif.BorderSizePixel = 0
-        notif.Position = UDim2.new(0, 0, 0, -50)
-        notif.Parent = NotifyFrame
-        
-        Instance.new("UICorner", notif).CornerRadius = UDim.new(0, 6)
-        
-        local notifText = Instance.new("TextLabel")
-        notifText.Size = UDim2.new(1, -16, 1, 0)
-        notifText.Position = UDim2.new(0, 8, 0, 0)
-        notifText.BackgroundTransparency = 1
-        notifText.Text = text
-        notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        notifText.Font = Enum.Font.Gotham
-        notifText.TextSize = 13
-        notifText.TextXAlignment = Enum.TextXAlignment.Left
-        notifText.Parent = notif
-        
-        notif:TweenPosition(UDim2.new(0, 0, 0, 0), "Out", "Quad", 0.3)
-        delay(3, function()
-            notif:TweenPosition(UDim2.new(0, 0, 0, -50), "In", "Quad", 0.3)
-            delay(0.3, function() notif:Destroy() end)
-        end)
-    end
-    
-    local dragging
-    local dragStart
-    local startPos
-    TitleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = MainFrame.Position
-        end
-    end)
-    TitleBar.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-    
-    return self
-end
-
--- ============ ИНИЦИАЛИЗАЦИЯ GUI ============
-local gui = GuiLibrary:CreateWindow({
-    Title = "Delta Hub",
-    Changelog = [[+ kill all is back and better then ever
-+ insta kill is back
-+ majority of og features have returned
-
-+ zombie/human team change is back
-- cure/virus items are patched]]
+local Window = Rayfield:CreateWindow({
+    Name = "Delta Hub",
+    LoadingTitle = "Delta Hub Loading...",
+    LoadingSubtitle = "by lazy dev",
+    ConfigurationSaving = {Enabled = false}
 })
 
-local tabs = {
-    Player = gui:CreateTab("Player"),
-    Server = gui:CreateTab("Server"),
-    Teleports = gui:CreateTab("Teleports"),
-    Cosmetics = gui:CreateTab("Cosmetics")
-}
+local Tab = {}
+Tab.Player = Window:CreateTab("Player", 4483362458)
+Tab.Server = Window:CreateTab("Server", 4483362458)
+Tab.Teleports = Window:CreateTab("Teleports", 4483362458)
+Tab.Cosmetics = Window:CreateTab("Cosmetics", 4483362458)
 
-local cons = {}
-
--- ============ ОРИГИНАЛЬНЫЙ КОД БЕЗ ИЗМЕНЕНИЙ ============
+local gui = {cons = {}}
+local function Notify(txt) Rayfield:Notify({Title = "Delta Hub", Content = txt, Duration = 3, Image = 4483362458}) end
+local cons = gui.cons
 local emptyFunc = function() end
 
 local plrs = cloneref(game:GetService("Players"))
 local starGui = cloneref(game:GetService("StarterGui"))
-local starPlr = cloneref(game:GetService("StarterPlayer"))
 local rStor = cloneref(game:GetService("ReplicatedStorage"))
 local runServ = cloneref(game:GetService("RunService"))
 local networkCli = cloneref(game:GetService("NetworkClient"))
@@ -427,35 +31,22 @@ local lplr = plrs.LocalPlayer
 local pStats = lplr:WaitForChild("stats")
 
 function GetHumRootPart(char)
-    local HumRootPart = char:FindFirstChild("HumanoidRootPart")
-    return HumRootPart
+    return char:FindFirstChild("HumanoidRootPart")
 end
 
-local find = {
-    Gun = "InflictTarget",
-    Knife = "SecondaryEquipment",
-    Infect = "Infect"
-}
+local find = {Gun = "InflictTarget", Knife = "SecondaryEquipment", Infect = "Infect"}
 
 do
     local desFind = function(res, class)
         local last = res
-        
         while true do
-            local s, r = pcall(function()
-                return last and typeof(last) == "Instance" and last.Parent and last.ClassName
-            end)
-            
-            if not s or string.find(string.lower(last.ClassName), class) then
-                break
-            end
+            local s, r = pcall(function() return last and typeof(last) == "Instance" and last.Parent and last.ClassName end)
+            if not s or string.find(string.lower(last.ClassName), class) then break end
             last = last.Parent
             task.wait()
         end
-        
         return last
     end
-
     for i, v in find do
         find[i] = function(recurs)
             local res = (recurs and (plrs:FindFirstChild(v, true) or workspace:FindFirstChild(v, true))) or (lplr.Backpack:FindFirstChild(v, true) or lplr.Character:FindFirstChild(v, true))
@@ -465,165 +56,84 @@ do
 end
 
 do
-    local blacklistedScripts = {
-        "States",
-    }
-
-    if lplr.Character then
-        for _, v in blacklistedScripts do
-            if lplr.Character:FindFirstChild(v) then
-                lplr.Character[v]:Destroy()
-            end
-        end
-    end
-    table.insert(cons, lplr.CharacterAdded:Connect(function(chr)
-        for _, v in blacklistedScripts do
-            chr:WaitForChild(v):Destroy()
-        end
-    end))
+    local blacklistedScripts = {"States"}
+    if lplr.Character then for _, v in blacklistedScripts do if lplr.Character:FindFirstChild(v) then lplr.Character[v]:Destroy() end end end
+    table.insert(cons, lplr.CharacterAdded:Connect(function(chr) for _, v in blacklistedScripts do chr:WaitForChild(v):Destroy() end end))
     networkCli:SetOutgoingKBPSLimit(tonumber("-inf"))
 end
 
-tabs.Player:CreateButton("Destroy Zones", function()
+Tab.Player:CreateButton({Name = "Destroy Zones", Callback = function()
     for _, v in {starGui:FindFirstChild("PlayerLocalScripts(ReOnSp)"), lplr.PlayerGui:FindFirstChild("PlayerLocalScripts(ReOnSp)")} do
-        if v then
-            for _, v in v:GetChildren() do
-                if v.ClassName == "LocalScript" then
-                    v:Destroy()
-                end
-            end
-        end
+        if v then for _, v in v:GetChildren() do if v.ClassName == "LocalScript" then v:Destroy() end end end
     end
-
     workspace.AntiGlitch:Destroy()
     workspace.ZombieBlockers:Destroy()
     workspace["Map Wall"].BaseWalls:Destroy()
-end)
+end})
 
 do
     local function AddHighlight(plr)
-        local res = plr.Character and plr.Character:FindFirstChildWhichIsA("Highlight")
-
-        if not res then
+        if plr.Character and not plr.Character:FindFirstChildWhichIsA("Highlight") then
             local highlight = Instance.new("Highlight")
             highlight.Adornee = plr.Character
-            highlight.Parent = plr.Character 
+            highlight.Parent = plr.Character
             highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             highlight.FillColor = plr.TeamColor.Color
             highlight.OutlineColor = Color3.fromRGB(235,235,235)
             highlight.FillTransparency = .3
-
             return highlight
         end
     end
-
     local function RemoveHighlights(plr)
-        local highlight = plr.Character and plr.Character:FindFirstChildWhichIsA("Highlight")
-
-        if highlight then
-            highlight:Destroy()
-        end
+        local hl = plr.Character and plr.Character:FindFirstChildWhichIsA("Highlight")
+        if hl then hl:Destroy() end
     end
-
-    local function ActuallyAddingHighlights(plr) 
+    local function ActuallyAddingHighlights(plr)
         local ratlight
-
-        if plr.CharacterAdded then
-            ratlight = AddHighlight(plr)
-        end
-
-        if plr.CharacterRemoving then
-            RemoveHighlights(plr)
-        end
-
-        if plrs.PlayerAdded then
-            ratlight = AddHighlight(plr)
-        end
-
-        if plr.Character then
-            ratlight = AddHighlight(plr)
-        end
-
+        if plr.CharacterAdded then ratlight = AddHighlight(plr) end
+        if plr.Character then ratlight = AddHighlight(plr) end
         plr:GetPropertyChangedSignal("TeamColor"):connect(function()
-            if ratlight and ratlight.Parent then
-                ratlight.FillColor = plr.TeamColor.Color
-            end
+            if ratlight and ratlight.Parent then ratlight.FillColor = plr.TeamColor.Color end
         end)
     end
-
-    local tgl
-    tgl = tabs.Player:CreateToggle("ESP", function()
-        if tgl.Enabled then
+    local espTbl = {}
+    local tgl = Tab.Player:CreateToggle({Name = "ESP", CurrentValue = false, Callback = function(v)
+        espTbl.enabled = v
+        if v then
             repeat
-                for _,v in plrs:GetPlayers() do 
-                    if lplr ~= v then
-                    ActuallyAddingHighlights(v)
-                    end
-                end
-            task.wait(0.1)
-            until not tgl.Enabled
-            for _,v in plrs:GetPlayers() do
-                RemoveHighlights(v)
-            end
+                for _,pl in plrs:GetPlayers() do if lplr ~= pl then ActuallyAddingHighlights(pl) end end
+                task.wait(0.1)
+            until not espTbl.enabled
+            for _,pl in plrs:GetPlayers() do RemoveHighlights(pl) end
         end
-    end)
+    end})
 end
 
 do
-    local godGun = {
-        FireRate = 0,
-        Auto = true,
-        AmmoPerClip = math.huge,
-        ReloadTime = 0,
-        BaseDamage = 9e9,
-        HeadshotDamageMultiplier = 9e9,
-        Spread = 0,
-        CameraShakingEnabled = false,
-        BulletSpeed = 9e9,
-        Piercing = 1
-    }
+    local godGun = {FireRate = 0, Auto = true, AmmoPerClip = math.huge, ReloadTime = 0, BaseDamage = 9e9, HeadshotDamageMultiplier = 9e9, Spread = 0, CameraShakingEnabled = false, BulletSpeed = 9e9, Piercing = 1}
     local spamGun = table.clone(godGun)
     spamGun.Auto = false
     spamGun.FireRate = 0
-
     local modGun = function(conf)
         local gun = find.Gun()
         assert(gun, "You dont have a gun")
-
         local mod = gun:FindFirstChild("Setting")
         assert(mod, "Your gun is broken")
         mod = require(mod)
-
-        for i, v in conf do
-            mod[i] = v
-        end
-
-        if gun.Parent == lplr.Character then
-            lplr.Character.Humanoid:UnequipTools()
-            lplr.Character.Humanoid:EquipTool(gun)
-        end
+        for i, v in conf do mod[i] = v end
+        if gun.Parent == lplr.Character then lplr.Character.Humanoid:UnequipTools(); lplr.Character.Humanoid:EquipTool(gun) end
     end
-    tabs.Player:CreateButton("God Gun", modGun, godGun)
-    tabs.Player:CreateButton("Spam Gun", modGun, spamGun)
+    Tab.Player:CreateButton({Name = "God Gun", Callback = function() modGun(godGun) end})
+    Tab.Player:CreateButton({Name = "Spam Gun", Callback = function() modGun(spamGun) end})
 end
 
-tabs.Player:CreateToggle("Ragdoll", function()
-    rStor.Remotes.ChangeState:FireServer("Ragdoll")
-end)
+Tab.Player:CreateToggle({Name = "Ragdoll", CurrentValue = false, Callback = function() rStor.Remotes.ChangeState:FireServer("Ragdoll") end})
 
-local itemFuncs = { 
-    Virus = emptyFunc,
-    Cure = emptyFunc
-}
+local itemFuncs = {Virus = emptyFunc, Cure = emptyFunc}
 do
-    local transTbl = {
-        Virus = Teams.Zombie,
-        Cure = Teams.Human
-    }
-
+    local transTbl = {Virus = Teams.Zombie, Cure = Teams.Human}
     local room = workspace.Lab.Machines["Virus Room"]
     local prompt = room.Button.Button.Trigger
-    local selfInfect
     itemFuncs.Virus = function()
         if not room.Smoke:FindFirstChildWhichIsA("TouchTransmitter") then
             repeat
@@ -632,55 +142,30 @@ do
                 task.wait()
             until room.Smoke:FindFirstChildWhichIsA("TouchTransmitter")
         end
-        
-        for i = 0, 1 do
-            firetouchinterest(lplr.Character.PrimaryPart, room.Smoke, i)
-        end
-        
+        for i = 0, 1 do firetouchinterest(lplr.Character.PrimaryPart, room.Smoke, i) end
         local timeout = tick() + .5
-        repeat
-            task.wait()
-        until lplr.Character.Ragdoll.Value or (tick() >= timeout)
+        repeat task.wait() until lplr.Character.Ragdoll.Value or (tick() >= timeout)
         if tick() >= timeout then return itemFuncs.Virus() end
     end
-    
     itemFuncs.Cure = function()
-        if #plrs:GetPlayers() <= 1 then
-            lplr:Kick()
-        end
+        if #plrs:GetPlayers() <= 1 then lplr:Kick() end
         TeleportService:Teleport(game.PlaceId)
     end
-    
-    for i, v in itemFuncs do
-        tabs.Player:CreateButton("Become " .. transTbl[i].Name, v)
-    end
+    for i, v in itemFuncs do Tab.Player:CreateButton({Name = "Become " .. transTbl[i].Name, Callback = v}) end
 end
 
 local changeTeam
 do
-    local transTbl = {
-        Zombie = itemFuncs.Virus,
-        Human = itemFuncs.Cure
-    }
-    changeTeam = function(t)
-        return transTbl[t.Name]()
-    end
+    local transTbl = {Zombie = itemFuncs.Virus, Human = itemFuncs.Cure}
+    changeTeam = function(t) return transTbl[t.Name]() end
 end
 
 local checkTeam = function(v)
-    if v:IsA("Team") and lplr.Team ~= v then
-        changeTeam(v)
-
-        repeat
-            task.wait()
-        until lplr.Team == v
-    end
+    if v:IsA("Team") and lplr.Team ~= v then changeTeam(v) repeat task.wait() until lplr.Team == v end
 end
 
 local buyItem = rStor:WaitForChild("BuyItem")
-local remote
-local gun
-local cooldown = 0
+local remote, gun, cooldown = nil, nil, 0
 local findRemote = function()
     if not remote or not remote.Parent or not gun or not gun.Parent then
         gun = find.Gun(true)
@@ -690,21 +175,12 @@ local findRemote = function()
 end
 
 local shootPlr
-local lastShot = 0
 do
     shootPlr = function(v, dmg)
-        local v = (v.ClassName == "Player" and v.Character and v.Character:FindFirstChild("Humanoid")) or v:FindFirstChild("Humanoid")
-        local part = (v and v.Parent and v.Parent:FindFirstChildWhichIsA("BasePart")) or nil
-        if v and part then
-            coroutine.wrap(remote.FireServer)(remote,
-                v,
-                part,
-                (dmg or v.MaxHealth),
-                Vector3.zero,
-                2,
-                0,
-                false
-            )
+        local hum = (v.ClassName == "Player" and v.Character and v.Character:FindFirstChild("Humanoid")) or v:FindFirstChild("Humanoid")
+        local part = (hum and hum.Parent and hum.Parent:FindFirstChildWhichIsA("BasePart")) or nil
+        if hum and part then
+            coroutine.wrap(remote.FireServer)(remote, hum, part, (dmg or hum.MaxHealth), Vector3.zero, 2, 0, false)
         end
     end
 end
@@ -712,105 +188,67 @@ end
 local shootTillDead = shootPlr
 
 do
-    local waitForChild = game.WaitForChild
-
     local isAlive = function(p, await)
         local p = (p.ClassName == "Player" and p.Character) or p
-        if p then
-            return ((await and p.WaitForChild) or p.FindFirstChild)(p, "Head")
-        end
+        if p then return ((await and p.WaitForChild) or p.FindFirstChild)(p, "Head") end
     end
-
     local loopTbl = {}
     local hookChr = function(p)
         if p.ClassName == "Player" and p.Team == lplr.Team then return end
-        if isAlive(p, true) then
-            table.insert(loopTbl, p)
-        end
+        if isAlive(p, true) then table.insert(loopTbl, p) end
     end
     local tCons = {}
     local hookPlr = function(p)
-        if p.Character then
-            coroutine.wrap(hookChr)(p)
-        end
-        table.insert(tCons, p.CharacterAdded:Connect(function(c)
-            hookChr(p)
-        end))
+        if p.Character then coroutine.wrap(hookChr)(p) end
+        table.insert(tCons, p.CharacterAdded:Connect(function(c) hookChr(p) end))
     end
-
-    local transTbl = {
-        Zombie = "Humans",
-        Human = "Zombies",
-        Zombies = "NPCs"
-    }
+    local transTbl = {Zombie = "Humans", Human = "Zombies", Zombies = "NPCs"}
     local teamScan = Teams:GetTeams()
     table.insert(teamScan, workspace:WaitForChild("Zombies"))
     for _, team in teamScan do
         if team then
             local tName = transTbl[team.Name]
             local isTeam = (team.ClassName == "Team")
-            tabs.Server:CreateButton("Kill " .. tName, function()
+            Tab.Server:CreateButton({Name = "Kill " .. tName, Callback = function()
                 checkTeam(team)
                 findRemote()
-
                 for _, v in ((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then
-                        shootTillDead(v)
-                    end
+                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then shootTillDead(v) end
                 end
-            end)
-
-            tabs.Server:CreateButton("God " .. tName, function()
+            end})
+            Tab.Server:CreateButton({Name = "God " .. tName, Callback = function()
                 checkTeam(team)
                 findRemote()
-                
                 for _, v in ((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then
-                        shootPlr(v, tonumber("nan"))
-                    end
+                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then shootPlr(v, tonumber("nan")) end
                 end
-                gui:Notify(string.format("made %s immune", tName))
-            end)
-
-            local loop
-            loop = tabs.Server:CreateToggle("Loop Kill " .. transTbl[team.Name], function(v)
+                Notify("made " .. tName .. " immune")
+            end})
+            local loopTgl
+            Tab.Server:CreateToggle({Name = "Loop Kill " .. transTbl[team.Name], CurrentValue = false, Callback = function(v)
                 if v then
                     checkTeam(team)
-
                     table.insert(tCons, (isTeam and plrs.PlayerAdded:Connect(hookPlr)) or team.ChildAdded:Connect(hookChr))
-                    if isTeam then
-                        for _, v in plrs:GetPlayers() do
-                            coroutine.wrap(hookPlr)(v)
-                        end
-                    else
-                        for _, v in team:GetChildren() do
-                            coroutine.wrap(hookChr)(v)
-                        end
-                    end
-                    
+                    if isTeam then for _, pl in plrs:GetPlayers() do coroutine.wrap(hookPlr)(pl) end
+                    else for _, c in team:GetChildren() do coroutine.wrap(hookChr)(c) end end
                     repeat
-                        for i, v in loopTbl do
-                            if (isTeam and v.Team and v.Team == lplr.Team) then table.remove(loopTbl, i) continue end
-                            if isAlive(v, true) then
-                                findRemote()
-                                shootTillDead(v)
-                            end
+                        for i, pl in loopTbl do
+                            if isTeam and pl.Team and pl.Team == lplr.Team then table.remove(loopTbl, i) end
+                            if isAlive(pl, true) then findRemote(); shootTillDead(pl) end
                         end
                         task.wait()
-                    until not loop.Enabled
+                    until not loopTgl or not loopTgl.CurrentValue
                 else
-                    for _, v in tCons do
-                        v:Disconnect()
-                    end
+                    for _, c in tCons do c:Disconnect() end
                     table.clear(tCons)
                     table.clear(loopTbl)
                 end
-            end)
+            end})
         end
     end
 end
 
-tabs.Server:CreateButton("Infect Humans", function()
+Tab.Server:CreateButton({Name = "Infect Humans", Callback = function()
     checkTeam(Teams.Zombie)
     local inf = find.Infect()
     if inf then
@@ -822,178 +260,98 @@ tabs.Server:CreateButton("Infect Humans", function()
                 end
             end
         end))
-        gui:Notify("Equip and spam the infect tool to infect")
-    else
-        gui:Notify("You must have a infect tool inorder to use this")
-    end
-end)
+        Notify("Equip and spam the infect tool to infect")
+    else Notify("You must have a infect tool") end
+end})
 
 do
     local remotes = {}
     local tCons = {}
     local warning
-    local tog
-    tog = tabs.Server:CreateToggle("Lag Server", function(callback)
-        if not warning then
-            warning = true
-            tog.Enabled = false
-            gui:Notify("Your ping will NOT recover, rejoin after disabling")
-            return
-        end
-
-        if callback then
+    Tab.Server:CreateToggle({Name = "Lag Server", CurrentValue = false, Callback = function(c)
+        if not warning then warning = true; Notify("Your ping will NOT recover, rejoin after disabling"); return end
+        if c then
             for _, v in plrs:GetPlayers() do
                 table.insert(remotes, v.Backpack:FindFirstChild("reload", true))
-                if v.Character then
-                    table.insert(remotes, v.Character:FindFirstChild("reload", true))
-                end
+                if v.Character then table.insert(remotes, v.Character:FindFirstChild("reload", true)) end
             end
-
             local packetSize = #remotes * 700
             for i = 1, #remotes do
                 local v = remotes[i]
                 table.insert(tCons, runServ.PreRender:Connect(function()
-                    coroutine.wrap(function()
-                        for _ = 1, packetSize do
-                            coroutine.wrap(v.FireServer)(v)
-                        end
-                    end)()
+                    coroutine.wrap(function() for _ = 1, packetSize do coroutine.wrap(v.FireServer)(v) end end)()
                 end))
             end
         else
             coroutine.wrap(TeleportService.TeleportToPlaceInstance)(TeleportService, game.PlaceId, game.JobId)
-            for _, v in tCons do
-                v:Disconnect()
-            end
+            for _, v in tCons do v:Disconnect() end
             table.clear(tCons)
             table.clear(remotes)
         end
-    end)
+    end})
 end
 
 do
-    local tog
     local cache = {}
-    
-    local forceParent
-    forceParent = function(og, new)
-        local s, r = pcall(function()
-            og.Parent = new
-        end)
-    end
-    
-    tog = tabs.Server:CreateToggle("Lag Other Players", function(callback)
-        if callback then
-            if lplr.Team ~= Teams.Zombie then
-                itemFuncs.Virus()
-            end
-            coroutine.wrap(gui.Notify)(gui, "disable knife lag server to release buffer")
-            
-            local ogWeight = #lplr.Character:GetChildren()
+    local forceParent = function(og, new) pcall(function() og.Parent = new end) end
+    Tab.Server:CreateToggle({Name = "Lag Other Players", CurrentValue = false, Callback = function(c)
+        if c then
+            if lplr.Team ~= Teams.Zombie then itemFuncs.Virus() end
+            Notify("disable knife lag server to release buffer")
             repeat
                 buyItem:InvokeServer("Knife")
                 for _, v in lplr.Backpack:GetChildren() do
-                    if v.Name == "Knife" and not table.find(cache, v) then
-                        table.insert(cache, v)
-                        coroutine.wrap(forceParent)(v, lplr.Character)
-                    end
+                    if v.Name == "Knife" and not table.find(cache, v) then table.insert(cache, v); coroutine.wrap(forceParent)(v, lplr.Character) end
                 end
                 task.wait()
-            until not tog.Enabled
-            
-            for _, v in cache do
-                coroutine.wrap(forceParent)(v, lplr.Character)
-            end
-            for _, v in cache do
-                coroutine.wrap(forceParent)(v, workspace)
-            end
-            for _, v in cache do
-                coroutine.wrap(forceParent)(v, nil)
-            end
+            until not c
+            for _, v in cache do coroutine.wrap(forceParent)(v, lplr.Character) end
+            for _, v in cache do coroutine.wrap(forceParent)(v, workspace) end
+            for _, v in cache do coroutine.wrap(forceParent)(v, nil) end
         end
-    end)
+    end})
 end
 
 do
     local stats = game:GetService("Stats")
-    local knife
-    local con
-    local ping
-    
-    tabs.Player:CreateToggle("Spam Knife", function(c)
+    local knife, con, ping
+    Tab.Player:CreateToggle({Name = "Spam Knife", CurrentValue = false, Callback = function(c)
         if c then
             con = lplr:GetMouse().Button1Down:Connect(function()
                 if knife and knife.Parent then
-                    if knife.Parent == lplr.Character and lplr.Character and lplr.Character and lplr.Character:FindFirstChild("Cooldown") and lplr.Character.Cooldown.Value then
+                    if knife.Parent == lplr.Character and lplr.Character:FindFirstChild("Cooldown") and lplr.Character.Cooldown.Value then
                         buyItem:InvokeServer(knife.Name)
                         knife = lplr.Backpack:WaitForChild(knife.Name)
                         ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
                         task.wait((ping < 150 and .1) or 0)
                         knife.Parent = lplr.Character
                     end
-                else
-                    knife = find.Knife()
-                end
+                else knife = find.Knife() end
             end)
-        elseif con and con.Connected then
-            con:Disconnect()
-        end
-    end)
+        elseif con and con.Connected then con:Disconnect() end
+    end})
 end
 
-tabs.Cosmetics:CreateButton("Change Zombie Face", function()
-    lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true
-end)
+Tab.Cosmetics:CreateButton({Name = "Change Zombie Face", Callback = function() lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true end})
+Tab.Cosmetics:CreateButton({Name = "Change Zombie Skincolor", Callback = function() lplr.PlayerGui.Main.ChooseColorFrame.Visible = true end})
 
-tabs.Cosmetics:CreateButton("Change Zombie Skincolor", function()
-    lplr.PlayerGui.Main.ChooseColorFrame.Visible = true
-end)
+Tab.Teleports:CreateButton({Name = "Human Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489) end})
+Tab.Teleports:CreateButton({Name = "Zombie Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748) end})
+Tab.Teleports:CreateButton({Name = "Virus Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429) end})
+Tab.Teleports:CreateButton({Name = "Upstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545) end})
+Tab.Teleports:CreateButton({Name = "Downstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734) end})
+Tab.Teleports:CreateButton({Name = "Security Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728) end})
+Tab.Teleports:CreateButton({Name = "Roof", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056) end})
+Tab.Teleports:CreateButton({Name = "Outside of Map", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642) end})
 
-tabs.Teleports:CreateButton("Human Spawn", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489)
-end)
+Tab.Cosmetics:CreateButton({Name = "Scientist outfit", Callback = function() fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector) end})
+Tab.Cosmetics:CreateButton({Name = "Patient outfit", Callback = function() fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector) end})
 
-tabs.Teleports:CreateButton("Zombie Spawn", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748)
-end)
-
-tabs.Teleports:CreateButton("Virus Room", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429)
-end)
-
-tabs.Teleports:CreateButton("Upstairs Cure room", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545)
-end)
-
-tabs.Teleports:CreateButton("Downstairs Cure room", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734)
-end)
-
-tabs.Teleports:CreateButton("Security Room", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728)
-end)
-
-tabs.Teleports:CreateButton("Roof", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056)
-end)
-
-tabs.Teleports:CreateButton("Outside of Map", function()
-    GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642)
-end)
-
-tabs.Cosmetics:CreateButton("Scientist outfit", function()
-    fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector)
-end)
-
-tabs.Cosmetics:CreateButton("Patient outfit", function()
-    fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector)
-end)
-
-tabs.Player:CreateButton("Godmode", function()
-    gui:Notify("If it fails then retry")
+Tab.Player:CreateButton({Name = "Godmode", Callback = function()
+    Notify("If it fails then retry")
     rStor.Remotes.ChangeState:FireServer("Died")
     task.wait(plrs.RespawnTime + .2)
     rStor.Remotes.ChangeState:FireServer("Died")
-end)
+end})
 
-gui:Notify("Delta Hub Loaded!")
+Notify("Delta Hub Loaded!")
