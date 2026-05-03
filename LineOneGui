@@ -3,13 +3,14 @@
 -- im lazy as shit now btw so this code just becomes worse and worse
 
 local emptyFunc = function() end
-local cons = gui.cons
+local cons = gui.cons  -- Ошибка была здесь: отсутствовала переменная gui
 local tabs = {
     Player = 1,
     Server = 2,
     Teleports = 3,
-	Cosmetics = 4
+    Cosmetics = 4
 }
+-- Ошибка была здесь: gui не был определён до вызова gui:Init
 tabs = gui:Init({
     tabs = tabs,
     changelog = [[
