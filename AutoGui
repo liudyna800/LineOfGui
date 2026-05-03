@@ -1,60 +1,21 @@
--- Orion модифицированный: только свернуть в круг, без закрытия
-local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
-local Window = OrionLib:MakeWindow({
+-- Delta Hub | Rayfield Edition
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
     Name = "Delta Hub",
-    HidePremium = false,
-    SaveConfig = false,
-    IntroEnabled = false,
-    CloseCallback = function() end -- Блокируем закрытие
+    LoadingTitle = "Delta Hub Loading...",
+    LoadingSubtitle = "by lazy dev",
+    ConfigurationSaving = {Enabled = false}
 })
 
--- Убираем кнопку закрытия, оставляем только свернуть
-local function FixOrionButtons()
-    local gui = game:GetService("CoreGui"):FindFirstChild("Orion")
-    if gui then
-        for _, v in ipairs(gui:GetDescendants()) do
-            if v:IsA("TextButton") and v.Name == "Close" then
-                v:Destroy() -- Удаляем кнопку закрытия
-            end
-        end
-        
-        -- Меняем minimize на круг
-        for _, v in ipairs(gui:GetDescendants()) do
-            if v:IsA("TextButton") and v.Name == "Minimize" then
-                v.Size = UDim2.new(0, 40, 0, 40)
-                v.Position = UDim2.new(1, -50, 0, 5)
-                v.Text = "—"
-                v.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-                Instance.new("UICorner", v).CornerRadius = UDim.new(0, 20)
-                
-                -- Когда свернуто - показываем круг
-                local originalCallback = v.MouseButton1Click
-                v.MouseButton1Click:Connect(function()
-                    task.wait(0.1)
-                    spawn(function()
-                        for _, circle in ipairs(gui:GetDescendants()) do
-                            if circle:IsA("TextButton") and circle.Size == UDim2.new(0, 50, 0, 50) then
-                                Instance.new("UICorner", circle).CornerRadius = UDim.new(0, 25)
-                                circle.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-                            end
-                        end
-                    end)
-                end)
-            end
-        end
-    end
-end
-
-task.wait(0.5)
-FixOrionButtons()
-
 local Tab = {}
-Tab.Player = Window:MakeTab({Name = "Player", Icon = "rbxassetid://4483345998", PremiumOnly = false})
-Tab.Server = Window:MakeTab({Name = "Server", Icon = "rbxassetid://4483345998", PremiumOnly = false})
-Tab.Teleports = Window:MakeTab({Name = "Teleports", Icon = "rbxassetid://4483345998", PremiumOnly = false})
-Tab.Cosmetics = Window:MakeTab({Name = "Cosmetics", Icon = "rbxassetid://4483345998", PremiumOnly = false})
+Tab.Player = Window:CreateTab("Player", 4483362458)
+Tab.Server = Window:CreateTab("Server", 4483362458)
+Tab.Teleports = Window:CreateTab("Teleports", 4483362458)
+Tab.Cosmetics = Window:CreateTab("Cosmetics", 4483362458)
 
-local gui = {cons = {}, Notify = function(txt) OrionLib:MakeNotification({Name = "Delta Hub", Content = txt, Image = "rbxassetid://4483345998", Time = 3}) end}
+local gui = {cons = {}}
+local function Notify(txt) Rayfield:Notify({Title = "Delta Hub", Content = txt, Duration = 3, Image = 4483362458}) end
 local cons = gui.cons
 local emptyFunc = function() end
 
@@ -79,14 +40,14 @@ do
     local desFind = function(res, class)
         local last = res
         while true do
-            local s = pcall(function() return last and typeof(last) == "Instance" and last.Parent and last.ClassName end)
+            local s, r = pcall(function() return last and typeof(last) == "Instance" and last.Parent and last.ClassName end)
             if not s or string.find(string.lower(last.ClassName), class) then break end
             last = last.Parent
             task.wait()
         end
         return last
     end
-    for i, v in pairs(find) do
+    for i, v in find do
         find[i] = function(recurs)
             local res = (recurs and (plrs:FindFirstChild(v, true) or workspace:FindFirstChild(v, true))) or (lplr.Backpack:FindFirstChild(v, true) or lplr.Character:FindFirstChild(v, true))
             return (res and desFind(res, "tool"))
@@ -96,37 +57,31 @@ end
 
 do
     local blacklistedScripts = {"States"}
-    if lplr.Character then
-        for _, v in pairs(blacklistedScripts) do
-            if lplr.Character:FindFirstChild(v) then lplr.Character[v]:Destroy() end
-        end
-    end
-    table.insert(cons, lplr.CharacterAdded:Connect(function(chr)
-        for _, v in pairs(blacklistedScripts) do chr:WaitForChild(v):Destroy() end
-    end))
+    if lplr.Character then for _, v in blacklistedScripts do if lplr.Character:FindFirstChild(v) then lplr.Character[v]:Destroy() end end end
+    table.insert(cons, lplr.CharacterAdded:Connect(function(chr) for _, v in blacklistedScripts do chr:WaitForChild(v):Destroy() end end))
     networkCli:SetOutgoingKBPSLimit(tonumber("-inf"))
 end
 
-Tab.Player:AddButton({Name = "Destroy Zones", Callback = function()
-    for _, v in pairs({starGui:FindFirstChild("PlayerLocalScripts(ReOnSp)"), lplr.PlayerGui:FindFirstChild("PlayerLocalScripts(ReOnSp)")}) do
-        if v then for _, x in pairs(v:GetChildren()) do if x.ClassName == "LocalScript" then x:Destroy() end end end
+Tab.Player:CreateButton({Name = "Destroy Zones", Callback = function()
+    for _, v in {starGui:FindFirstChild("PlayerLocalScripts(ReOnSp)"), lplr.PlayerGui:FindFirstChild("PlayerLocalScripts(ReOnSp)")} do
+        if v then for _, v in v:GetChildren() do if v.ClassName == "LocalScript" then v:Destroy() end end end
     end
-    pcall(function() workspace.AntiGlitch:Destroy() end)
-    pcall(function() workspace.ZombieBlockers:Destroy() end)
-    pcall(function() workspace["Map Wall"].BaseWalls:Destroy() end)
+    workspace.AntiGlitch:Destroy()
+    workspace.ZombieBlockers:Destroy()
+    workspace["Map Wall"].BaseWalls:Destroy()
 end})
 
 do
     local function AddHighlight(plr)
         if plr.Character and not plr.Character:FindFirstChildWhichIsA("Highlight") then
-            local hl = Instance.new("Highlight")
-            hl.Adornee = plr.Character
-            hl.Parent = plr.Character
-            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            hl.FillColor = plr.TeamColor.Color
-            hl.OutlineColor = Color3.fromRGB(235,235,235)
-            hl.FillTransparency = .3
-            return hl
+            local highlight = Instance.new("Highlight")
+            highlight.Adornee = plr.Character
+            highlight.Parent = plr.Character
+            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            highlight.FillColor = plr.TeamColor.Color
+            highlight.OutlineColor = Color3.fromRGB(235,235,235)
+            highlight.FillTransparency = .3
+            return highlight
         end
     end
     local function RemoveHighlights(plr)
@@ -135,24 +90,23 @@ do
     end
     local function ActuallyAddingHighlights(plr)
         local ratlight
+        if plr.CharacterAdded then ratlight = AddHighlight(plr) end
         if plr.Character then ratlight = AddHighlight(plr) end
-        plr:GetPropertyChangedSignal("TeamColor"):Connect(function()
+        plr:GetPropertyChangedSignal("TeamColor"):connect(function()
             if ratlight and ratlight.Parent then ratlight.FillColor = plr.TeamColor.Color end
         end)
     end
-    local espEnabled = false
-    Tab.Player:AddToggle({Name = "ESP", Default = false, Callback = function(v) espEnabled = v end})
-    spawn(function()
-        while task.wait(0.1) do
-            if espEnabled then
-                for _, pl in pairs(plrs:GetPlayers()) do
-                    if lplr ~= pl then ActuallyAddingHighlights(pl) end
-                end
-            else
-                for _, pl in pairs(plrs:GetPlayers()) do RemoveHighlights(pl) end
-            end
+    local espTbl = {}
+    local tgl = Tab.Player:CreateToggle({Name = "ESP", CurrentValue = false, Callback = function(v)
+        espTbl.enabled = v
+        if v then
+            repeat
+                for _,pl in plrs:GetPlayers() do if lplr ~= pl then ActuallyAddingHighlights(pl) end end
+                task.wait(0.1)
+            until not espTbl.enabled
+            for _,pl in plrs:GetPlayers() do RemoveHighlights(pl) end
         end
-    end)
+    end})
 end
 
 do
@@ -166,17 +120,14 @@ do
         local mod = gun:FindFirstChild("Setting")
         assert(mod, "Your gun is broken")
         mod = require(mod)
-        for i, v in pairs(conf) do mod[i] = v end
-        if gun.Parent == lplr.Character then
-            lplr.Character.Humanoid:UnequipTools()
-            lplr.Character.Humanoid:EquipTool(gun)
-        end
+        for i, v in conf do mod[i] = v end
+        if gun.Parent == lplr.Character then lplr.Character.Humanoid:UnequipTools(); lplr.Character.Humanoid:EquipTool(gun) end
     end
-    Tab.Player:AddButton({Name = "God Gun", Callback = function() modGun(godGun) end})
-    Tab.Player:AddButton({Name = "Spam Gun", Callback = function() modGun(spamGun) end})
+    Tab.Player:CreateButton({Name = "God Gun", Callback = function() modGun(godGun) end})
+    Tab.Player:CreateButton({Name = "Spam Gun", Callback = function() modGun(spamGun) end})
 end
 
-Tab.Player:AddToggle({Name = "Ragdoll", Default = false, Callback = function() rStor.Remotes.ChangeState:FireServer("Ragdoll") end})
+Tab.Player:CreateToggle({Name = "Ragdoll", CurrentValue = false, Callback = function() rStor.Remotes.ChangeState:FireServer("Ragdoll") end})
 
 local itemFuncs = {Virus = emptyFunc, Cure = emptyFunc}
 do
@@ -186,7 +137,7 @@ do
     itemFuncs.Virus = function()
         if not room.Smoke:FindFirstChildWhichIsA("TouchTransmitter") then
             repeat
-                pcall(function() lplr.Character.PrimaryPart.CFrame = prompt.Parent.CFrame end)
+                lplr.Character.PrimaryPart.CFrame = prompt.Parent.CFrame
                 fireproximityprompt(prompt)
                 task.wait()
             until room.Smoke:FindFirstChildWhichIsA("TouchTransmitter")
@@ -200,7 +151,7 @@ do
         if #plrs:GetPlayers() <= 1 then lplr:Kick() end
         TeleportService:Teleport(game.PlaceId)
     end
-    for i, v in pairs(itemFuncs) do Tab.Player:AddButton({Name = "Become " .. transTbl[i].Name, Callback = v}) end
+    for i, v in itemFuncs do Tab.Player:CreateButton({Name = "Become " .. transTbl[i].Name, Callback = v}) end
 end
 
 local changeTeam
@@ -214,20 +165,23 @@ local checkTeam = function(v)
 end
 
 local buyItem = rStor:WaitForChild("BuyItem")
-local remote, gun = nil, nil
+local remote, gun, cooldown = nil, nil, 0
 local findRemote = function()
     if not remote or not remote.Parent or not gun or not gun.Parent then
         gun = find.Gun(true)
-        if not gun then return end
+        if not gun then return find.Gun(true) end
         remote = gun:FindFirstChild("InflictTarget", true)
     end
 end
 
-local shootPlr = function(v, dmg)
-    local hum = (v.ClassName == "Player" and v.Character and v.Character:FindFirstChild("Humanoid")) or v:FindFirstChild("Humanoid")
-    local part = (hum and hum.Parent and hum.Parent:FindFirstChildWhichIsA("BasePart"))
-    if hum and part and remote then
-        coroutine.wrap(remote.FireServer)(remote, hum, part, (dmg or hum.MaxHealth), Vector3.zero, 2, 0, false)
+local shootPlr
+do
+    shootPlr = function(v, dmg)
+        local hum = (v.ClassName == "Player" and v.Character and v.Character:FindFirstChild("Humanoid")) or v:FindFirstChild("Humanoid")
+        local part = (hum and hum.Parent and hum.Parent:FindFirstChildWhichIsA("BasePart")) or nil
+        if hum and part then
+            coroutine.wrap(remote.FireServer)(remote, hum, part, (dmg or hum.MaxHealth), Vector3.zero, 2, 0, false)
+        end
     end
 end
 
@@ -235,8 +189,8 @@ local shootTillDead = shootPlr
 
 do
     local isAlive = function(p, await)
-        local c = (p.ClassName == "Player" and p.Character) or p
-        if c then return (await and c.WaitForChild or c.FindFirstChild)(c, "Head") end
+        local p = (p.ClassName == "Player" and p.Character) or p
+        if p then return ((await and p.WaitForChild) or p.FindFirstChild)(p, "Head") end
     end
     local loopTbl = {}
     local hookChr = function(p)
@@ -246,71 +200,91 @@ do
     local tCons = {}
     local hookPlr = function(p)
         if p.Character then coroutine.wrap(hookChr)(p) end
-        table.insert(tCons, p.CharacterAdded:Connect(function() hookChr(p) end))
+        table.insert(tCons, p.CharacterAdded:Connect(function(c) hookChr(p) end))
     end
     local transTbl = {Zombie = "Humans", Human = "Zombies", Zombies = "NPCs"}
     local teamScan = Teams:GetTeams()
     table.insert(teamScan, workspace:WaitForChild("Zombies"))
-    for _, team in pairs(teamScan) do
-        if team and transTbl[team.Name] then
+    for _, team in teamScan do
+        if team then
             local tName = transTbl[team.Name]
             local isTeam = (team.ClassName == "Team")
-            Tab.Server:AddButton({Name = "Kill " .. tName, Callback = function()
+            Tab.Server:CreateButton({Name = "Kill " .. tName, Callback = function()
                 checkTeam(team)
                 findRemote()
-                for _, v in pairs((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                    if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then shootTillDead(v) end
+                for _, v in ((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
+                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then shootTillDead(v) end
                 end
             end})
-            Tab.Server:AddButton({Name = "God " .. tName, Callback = function()
+            Tab.Server:CreateButton({Name = "God " .. tName, Callback = function()
                 checkTeam(team)
                 findRemote()
-                for _, v in pairs((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                    if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then shootPlr(v, tonumber("nan")) end
+                for _, v in ((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
+                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then shootPlr(v, tonumber("nan")) end
                 end
-                gui.Notify("made " .. tName .. " immune")
+                Notify("made " .. tName .. " immune")
+            end})
+            local loopTgl
+            Tab.Server:CreateToggle({Name = "Loop Kill " .. transTbl[team.Name], CurrentValue = false, Callback = function(v)
+                if v then
+                    checkTeam(team)
+                    table.insert(tCons, (isTeam and plrs.PlayerAdded:Connect(hookPlr)) or team.ChildAdded:Connect(hookChr))
+                    if isTeam then for _, pl in plrs:GetPlayers() do coroutine.wrap(hookPlr)(pl) end
+                    else for _, c in team:GetChildren() do coroutine.wrap(hookChr)(c) end end
+                    repeat
+                        for i, pl in loopTbl do
+                            if isTeam and pl.Team and pl.Team == lplr.Team then table.remove(loopTbl, i) end
+                            if isAlive(pl, true) then findRemote(); shootTillDead(pl) end
+                        end
+                        task.wait()
+                    until not loopTgl or not loopTgl.CurrentValue
+                else
+                    for _, c in tCons do c:Disconnect() end
+                    table.clear(tCons)
+                    table.clear(loopTbl)
+                end
             end})
         end
     end
 end
 
-Tab.Server:AddButton({Name = "Infect Humans", Callback = function()
+Tab.Server:CreateButton({Name = "Infect Humans", Callback = function()
     checkTeam(Teams.Zombie)
     local inf = find.Infect()
     if inf then
         table.insert(cons, inf.Activated:Connect(function()
-            for _, v in pairs(plrs:GetPlayers()) do
+            for _, v in plrs:GetPlayers() do
                 if lplr ~= v and v.Character and v.Team ~= lplr.Team and v.Character.PrimaryPart then
                     firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 0)
                     firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 1)
                 end
             end
         end))
-        gui.Notify("Equip and spam the infect tool to infect")
-    else gui.Notify("You must have a infect tool") end
+        Notify("Equip and spam the infect tool to infect")
+    else Notify("You must have a infect tool") end
 end})
 
 do
     local remotes = {}
     local tCons = {}
     local warning
-    Tab.Server:AddToggle({Name = "Lag Server", Default = false, Callback = function(c)
-        if not warning then warning = true; gui.Notify("Ping will NOT recover, rejoin to fix"); return end
+    Tab.Server:CreateToggle({Name = "Lag Server", CurrentValue = false, Callback = function(c)
+        if not warning then warning = true; Notify("Your ping will NOT recover, rejoin after disabling"); return end
         if c then
-            for _, v in pairs(plrs:GetPlayers()) do
+            for _, v in plrs:GetPlayers() do
                 table.insert(remotes, v.Backpack:FindFirstChild("reload", true))
                 if v.Character then table.insert(remotes, v.Character:FindFirstChild("reload", true)) end
             end
-            local ps = #remotes * 700
+            local packetSize = #remotes * 700
             for i = 1, #remotes do
                 local v = remotes[i]
                 table.insert(tCons, runServ.PreRender:Connect(function()
-                    coroutine.wrap(function() for _ = 1, ps do coroutine.wrap(v.FireServer)(v) end end)()
+                    coroutine.wrap(function() for _ = 1, packetSize do coroutine.wrap(v.FireServer)(v) end end)()
                 end))
             end
         else
             coroutine.wrap(TeleportService.TeleportToPlaceInstance)(TeleportService, game.PlaceId, game.JobId)
-            for _, v in pairs(tCons) do v:Disconnect() end
+            for _, v in tCons do v:Disconnect() end
             table.clear(tCons)
             table.clear(remotes)
         end
@@ -319,24 +293,21 @@ end
 
 do
     local cache = {}
-    local fp = function(og, new) pcall(function() og.Parent = new end) end
-    Tab.Server:AddToggle({Name = "Lag Other Players", Default = false, Callback = function(c)
+    local forceParent = function(og, new) pcall(function() og.Parent = new end) end
+    Tab.Server:CreateToggle({Name = "Lag Other Players", CurrentValue = false, Callback = function(c)
         if c then
             if lplr.Team ~= Teams.Zombie then itemFuncs.Virus() end
-            gui.Notify("disable to release buffer")
+            Notify("disable knife lag server to release buffer")
             repeat
                 buyItem:InvokeServer("Knife")
-                for _, v in pairs(lplr.Backpack:GetChildren()) do
-                    if v.Name == "Knife" and not table.find(cache, v) then
-                        table.insert(cache, v)
-                        coroutine.wrap(fp)(v, lplr.Character)
-                    end
+                for _, v in lplr.Backpack:GetChildren() do
+                    if v.Name == "Knife" and not table.find(cache, v) then table.insert(cache, v); coroutine.wrap(forceParent)(v, lplr.Character) end
                 end
                 task.wait()
             until not c
-            for _, v in pairs(cache) do coroutine.wrap(fp)(v, workspace) end
-            for _, v in pairs(cache) do coroutine.wrap(fp)(v, nil) end
-            table.clear(cache)
+            for _, v in cache do coroutine.wrap(forceParent)(v, lplr.Character) end
+            for _, v in cache do coroutine.wrap(forceParent)(v, workspace) end
+            for _, v in cache do coroutine.wrap(forceParent)(v, nil) end
         end
     end})
 end
@@ -344,40 +315,43 @@ end
 do
     local stats = game:GetService("Stats")
     local knife, con, ping
-    Tab.Player:AddToggle({Name = "Spam Knife", Default = false, Callback = function(c)
+    Tab.Player:CreateToggle({Name = "Spam Knife", CurrentValue = false, Callback = function(c)
         if c then
             con = lplr:GetMouse().Button1Down:Connect(function()
-                if knife and knife.Parent and knife.Parent == lplr.Character and lplr.Character:FindFirstChild("Cooldown") and lplr.Character.Cooldown.Value then
-                    buyItem:InvokeServer(knife.Name)
-                    knife = lplr.Backpack:WaitForChild(knife.Name)
-                    ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-                    task.wait((ping < 150 and .1) or 0)
-                    knife.Parent = lplr.Character
+                if knife and knife.Parent then
+                    if knife.Parent == lplr.Character and lplr.Character:FindFirstChild("Cooldown") and lplr.Character.Cooldown.Value then
+                        buyItem:InvokeServer(knife.Name)
+                        knife = lplr.Backpack:WaitForChild(knife.Name)
+                        ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+                        task.wait((ping < 150 and .1) or 0)
+                        knife.Parent = lplr.Character
+                    end
                 else knife = find.Knife() end
             end)
         elseif con and con.Connected then con:Disconnect() end
     end})
 end
 
-Tab.Cosmetics:AddButton({Name = "Change Zombie Face", Callback = function() lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true end})
-Tab.Cosmetics:AddButton({Name = "Change Zombie Skincolor", Callback = function() lplr.PlayerGui.Main.ChooseColorFrame.Visible = true end})
-Tab.Cosmetics:AddButton({Name = "Scientist outfit", Callback = function() fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector) end})
-Tab.Cosmetics:AddButton({Name = "Patient outfit", Callback = function() fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector) end})
+Tab.Cosmetics:CreateButton({Name = "Change Zombie Face", Callback = function() lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true end})
+Tab.Cosmetics:CreateButton({Name = "Change Zombie Skincolor", Callback = function() lplr.PlayerGui.Main.ChooseColorFrame.Visible = true end})
 
-Tab.Teleports:AddButton({Name = "Human Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489) end})
-Tab.Teleports:AddButton({Name = "Zombie Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748) end})
-Tab.Teleports:AddButton({Name = "Virus Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429) end})
-Tab.Teleports:AddButton({Name = "Upstairs Cure", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545) end})
-Tab.Teleports:AddButton({Name = "Downstairs Cure", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734) end})
-Tab.Teleports:AddButton({Name = "Security Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728) end})
-Tab.Teleports:AddButton({Name = "Roof", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056) end})
-Tab.Teleports:AddButton({Name = "Outside Map", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642) end})
+Tab.Teleports:CreateButton({Name = "Human Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489) end})
+Tab.Teleports:CreateButton({Name = "Zombie Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748) end})
+Tab.Teleports:CreateButton({Name = "Virus Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429) end})
+Tab.Teleports:CreateButton({Name = "Upstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545) end})
+Tab.Teleports:CreateButton({Name = "Downstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734) end})
+Tab.Teleports:CreateButton({Name = "Security Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728) end})
+Tab.Teleports:CreateButton({Name = "Roof", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056) end})
+Tab.Teleports:CreateButton({Name = "Outside of Map", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642) end})
 
-Tab.Player:AddButton({Name = "Godmode", Callback = function()
-    gui.Notify("If it fails then retry")
+Tab.Cosmetics:CreateButton({Name = "Scientist outfit", Callback = function() fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector) end})
+Tab.Cosmetics:CreateButton({Name = "Patient outfit", Callback = function() fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector) end})
+
+Tab.Player:CreateButton({Name = "Godmode", Callback = function()
+    Notify("If it fails then retry")
     rStor.Remotes.ChangeState:FireServer("Died")
     task.wait(plrs.RespawnTime + .2)
     rStor.Remotes.ChangeState:FireServer("Died")
 end})
 
-gui.Notify("Delta Hub Loaded!")
+Notify("Delta Hub Loaded!")
