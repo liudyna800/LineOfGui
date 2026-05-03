@@ -1,1029 +1,383 @@
--- =============================================
--- AutoGui Library
--- =============================================
-local AutoGui = {}
-AutoGui.__index = AutoGui
-
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
-local RunService = game:GetService("RunService")
-
--- =============================================
--- UTILS
--- =============================================
-local function _default(val, default)
-    return val ~= nil and val or default
-end
-
-local function _tween(obj, props, time, easing)
-    time = time or 0.3
-    easing = easing or Enum.EasingStyle.Quad
-    return TweenService:Create(obj, TweenInfo.new(time, easing), props):Play()
-end
-
-local function _clamp(v, min, max)
-    return math.max(min, math.min(max, v))
-end
-
--- =============================================
--- WINDOW CREATION
--- =============================================
-function AutoGui:CreateWindow(params)
-    params = params or {}
-    local window = {
-        Title = _default(params.Title, "AutoGui"),
-        Theme = _default(params.Theme, "Dark"),
-        Size = _default(params.Size, UDim2.new(0, 500, 0, 400)),
-        Position = _default(params.Position, UDim2.new(0.5, -250, 0.5, -200)),
-        Resizable = _default(params.Resizable, true),
-        Draggable = _default(params.Draggable, true),
-        MinSize = _default(params.MinSize, Vector2.new(300, 200)),
-        Elements = {},
-        Tabs = {},
-        ActiveTab = nil,
-        UICache = {},
-        Flags = {},
-        Connections = {},
-    }
-    setmetatable(window, AutoGui)
-
-    -- ScreenGui
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = params.Name or "AutoGui"
-    ScreenGui.Parent = params.Parent or CoreGui
-    ScreenGui.ResetOnSpawn = _default(params.ResetOnSpawn, false)
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    window.ScreenGui = ScreenGui
-
-    -- Main container with shadow
-    local MainContainer = Instance.new("Frame")
-    MainContainer.Name = "MainContainer"
-    MainContainer.Parent = ScreenGui
-    MainContainer.AnchorPoint = Vector2.new(0.5, 0.5)
-    MainContainer.Position = window.Position
-    MainContainer.Size = window.Size
-    MainContainer.BackgroundTransparency = 1
-    MainContainer.BorderSizePixel = 0
-    MainContainer.ZIndex = 1
-    window.MainContainer = MainContainer
-
-    -- Shadow effect
-    local Shadow = Instance.new("ImageLabel")
-    Shadow.Name = "Shadow"
-    Shadow.Parent = MainContainer
-    Shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-    Shadow.Position = UDim2.new(0.5, 0, 0.5, 0)
-    Shadow.Size = UDim2.new(1, 20, 1, 20)
-    Shadow.BackgroundTransparency = 1
-    Shadow.Image = "rbxassetid://6014261993"
-    Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
-    Shadow.ImageTransparency = 0.7
-    Shadow.ScaleType = Enum.ScaleType.Slice
-    Shadow.SliceCenter = Rect.new(49, 49, 49, 49)
-    Shadow.ZIndex = 0
-
-    -- Main Frame
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Parent = MainContainer
-    MainFrame.Size = UDim2.new(1, 0, 1, 0)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    MainFrame.ZIndex = 1
-    Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
-    Instance.new("UIStroke", MainFrame):Assign({
-        Color = Color3.fromRGB(50, 50, 65),
-        Thickness = 1,
-        Transparency = 0.5,
-    })
-    window.MainFrame = MainFrame
-
-    -- Title Bar
-    local TitleBar = Instance.new("Frame")
-    TitleBar.Name = "TitleBar"
-    TitleBar.Parent = MainFrame
-    TitleBar.Size = UDim2.new(1, 0, 0, 36)
-    TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-    TitleBar.BorderSizePixel = 0
-    TitleBar.ZIndex = 2
-    local tc = Instance.new("UICorner", TitleBar)
-    tc.CornerRadius = UDim.new(0, 8)
-    local tcf = Instance.new("Frame", TitleBar)
-    tcf.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-    tcf.Size = UDim2.new(1, 0, 0, 8)
-    tcf.Position = UDim2.new(0, 0, 1, -8)
-    tcf.BorderSizePixel = 0
-    tcf.ZIndex = 2
-    window.TitleBar = TitleBar
-
-    -- Title text
-    local TitleText = Instance.new("TextLabel")
-    TitleText.Name = "TitleText"
-    TitleText.Parent = TitleBar
-    TitleText.Position = UDim2.new(0, 12, 0, 0)
-    TitleText.Size = UDim2.new(1, -80, 1, 0)
-    TitleText.BackgroundTransparency = 1
-    TitleText.Text = window.Title
-    TitleText.TextColor3 = Color3.fromRGB(220, 220, 235)
-    TitleText.TextSize = 14
-    TitleText.Font = Enum.Font.GothamBold
-    TitleText.TextXAlignment = Enum.TextXAlignment.Left
-    TitleText.ZIndex = 2
-
-    -- Close button
-    local CloseBtn = Instance.new("TextButton")
-    CloseBtn.Name = "CloseBtn"
-    CloseBtn.Parent = TitleBar
-    CloseBtn.Text = "✕"
-    CloseBtn.Size = UDim2.new(0, 28, 0, 28)
-    CloseBtn.Position = UDim2.new(1, -6, 0.5, -14)
-    CloseBtn.AnchorPoint = Vector2.new(1, 0)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(60, 30, 35)
-    CloseBtn.TextColor3 = Color3.fromRGB(255, 180, 180)
-    CloseBtn.TextSize = 14
-    CloseBtn.Font = Enum.Font.GothamBold
-    CloseBtn.BorderSizePixel = 0
-    CloseBtn.ZIndex = 3
-    Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
-    CloseBtn.MouseButton1Click:Connect(function()
-        ScreenGui:Destroy()
-        for _, conn in ipairs(window.Connections) do
-            pcall(function() conn:Disconnect() end)
-        end
-    end)
-
-    -- Minimize button
-    local MinimizeBtn = Instance.new("TextButton")
-    MinimizeBtn.Name = "MinimizeBtn"
-    MinimizeBtn.Parent = TitleBar
-    MinimizeBtn.Text = "—"
-    MinimizeBtn.Size = UDim2.new(0, 28, 0, 28)
-    MinimizeBtn.Position = UDim2.new(1, -38, 0.5, -14)
-    MinimizeBtn.AnchorPoint = Vector2.new(1, 0)
-    MinimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-    MinimizeBtn.TextColor3 = Color3.fromRGB(180, 180, 200)
-    MinimizeBtn.TextSize = 16
-    MinimizeBtn.Font = Enum.Font.GothamBold
-    MinimizeBtn.BorderSizePixel = 0
-    MinimizeBtn.ZIndex = 3
-    Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 6)
-
-    -- Bubble
-    local BubbleBtn = Instance.new("TextButton")
-    BubbleBtn.Name = "BubbleBtn"
-    BubbleBtn.Parent = ScreenGui
-    BubbleBtn.Size = UDim2.new(0, 48, 0, 48)
-    BubbleBtn.Position = UDim2.new(0.9, 0, 0.85, 0)
-    BubbleBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    BubbleBtn.Text = "📋"
-    BubbleBtn.TextSize = 20
-    BubbleBtn.BorderSizePixel = 0
-    BubbleBtn.Visible = false
-    BubbleBtn.ZIndex = 10
-    Instance.new("UICorner", BubbleBtn).CornerRadius = UDim.new(1, 0)
-    Instance.new("UIStroke", BubbleBtn):Assign({
-        Color = Color3.fromRGB(80, 150, 255),
-        Thickness = 1.5,
-    })
-
-    local minimized = false
-    MinimizeBtn.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        MainFrame.Visible = not minimized
-        BubbleBtn.Visible = minimized
-    end)
-    BubbleBtn.MouseButton1Click:Connect(function()
-        minimized = false
-        MainFrame.Visible = true
-        BubbleBtn.Visible = false
-    end)
-
-    -- Draggable
-    if window.Draggable then
-        local dragging = false
-        local dragStart = nil
-        local startPos = nil
-
-        TitleBar.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
-                dragStart = input.Position
-                startPos = MainContainer.Position
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-        local conn1 = UserInputService.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local delta = input.Position - dragStart
-                MainContainer.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-            end
-        end)
-        table.insert(window.Connections, conn1)
-    end
-
-    -- Resizable
-    if window.Resizable then
-        local ResizeHandle = Instance.new("TextButton")
-        ResizeHandle.Name = "ResizeHandle"
-        ResizeHandle.Parent = MainFrame
-        ResizeHandle.Text = "◢"
-        ResizeHandle.Size = UDim2.new(0, 20, 0, 20)
-        ResizeHandle.Position = UDim2.new(1, -20, 1, -20)
-        ResizeHandle.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
-        ResizeHandle.TextColor3 = Color3.fromRGB(150, 150, 170)
-        ResizeHandle.TextSize = 12
-        ResizeHandle.Font = Enum.Font.GothamBold
-        ResizeHandle.BorderSizePixel = 0
-        ResizeHandle.ZIndex = 3
-        local rc = Instance.new("UICorner", ResizeHandle)
-        rc.CornerRadius = UDim.new(0, 4)
-
-        local resizing = false
-        local resizeStart = nil
-        local startSize = nil
-
-        ResizeHandle.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                resizing = true
-                resizeStart = input.Position
-                startSize = MainContainer.AbsoluteSize
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        resizing = false
-                    end
-                end)
-            end
-        end)
-        local conn2 = UserInputService.InputChanged:Connect(function(input)
-            if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local delta = input.Position - resizeStart
-                local newWidth = math.max(window.MinSize.X, startSize.X + delta.X)
-                local newHeight = math.max(window.MinSize.Y, startSize.Y + delta.Y)
-                MainContainer.Size = UDim2.new(0, newWidth, 0, newHeight)
-            end
-        end)
-        table.insert(window.Connections, conn2)
-    end
-
-    -- Content area
-    local ContentArea = Instance.new("Frame")
-    ContentArea.Name = "ContentArea"
-    ContentArea.Parent = MainFrame
-    ContentArea.Size = UDim2.new(1, 0, 1, -36)
-    ContentArea.Position = UDim2.new(0, 0, 0, 36)
-    ContentArea.BackgroundTransparency = 1
-    ContentArea.BorderSizePixel = 0
-    ContentArea.ZIndex = 1
-    window.ContentArea = ContentArea
-
-    return window
-end
-
--- =============================================
--- TAB SYSTEM
--- =============================================
-function AutoGui:CreateTab(params)
-    params = params or {}
-    local tabIdx = #self.Tabs + 1
-
-    -- Tab bar
-    if not self.TabBar then
-        self.TabBar = Instance.new("Frame")
-        self.TabBar.Name = "TabBar"
-        self.TabBar.Parent = self.MainFrame
-        self.TabBar.Size = UDim2.new(0, 120, 1, -36)
-        self.TabBar.Position = UDim2.new(0, 0, 0, 36)
-        self.TabBar.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-        self.TabBar.BorderSizePixel = 0
-        self.TabBar.ZIndex = 1
-
-        local tabList = Instance.new("UIListLayout")
-        tabList.Parent = self.TabBar
-        tabList.SortOrder = Enum.SortOrder.LayoutOrder
-        tabList.Padding = UDim.new(0, 2)
-
-        local tabPad = Instance.new("UIPadding")
-        tabPad.Parent = self.TabBar
-        tabPad.PaddingLeft = UDim.new(0, 4)
-        tabPad.PaddingRight = UDim.new(0, 4)
-        tabPad.PaddingTop = UDim.new(0, 4)
-
-        -- Tab content area
-        local TabContent = Instance.new("Frame")
-        TabContent.Name = "TabContent"
-        TabContent.Parent = self.ContentArea
-        TabContent.Size = UDim2.new(1, -124, 1, 0)
-        TabContent.Position = UDim2.new(0, 124, 0, 4)
-        TabContent.BackgroundTransparency = 1
-        TabContent.BorderSizePixel = 0
-        TabContent.ZIndex = 1
-        self.TabContent = TabContent
-    end
-
-    local tabBtn = Instance.new("TextButton")
-    tabBtn.Name = "TabBtn_" .. tabIdx
-    tabBtn.Parent = self.TabBar
-    tabBtn.Text = "  " .. (params.Title or "Tab " .. tabIdx)
-    if params.Icon then
-        tabBtn.Text = params.Icon .. "  " .. (params.Title or "Tab " .. tabIdx)
-    end
-    tabBtn.Size = UDim2.new(1, -8, 0, 32)
-    tabBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
-    tabBtn.TextColor3 = Color3.fromRGB(160, 160, 180)
-    tabBtn.TextSize = 12
-    tabBtn.Font = Enum.Font.Gotham
-    tabBtn.TextXAlignment = Enum.TextXAlignment.Left
-    tabBtn.BorderSizePixel = 0
-    tabBtn.ZIndex = 1
-    Instance.new("UICorner", tabBtn).CornerRadius = UDim.new(0, 6)
-
-    -- Tab page (scrollable)
-    local tabPage = Instance.new("ScrollingFrame")
-    tabPage.Name = "TabPage_" .. tabIdx
-    tabPage.Parent = self.TabContent
-    tabPage.Size = UDim2.new(1, 0, 1, -4)
-    tabPage.BackgroundTransparency = 1
-    tabPage.BorderSizePixel = 0
-    tabPage.ScrollBarThickness = 4
-    tabPage.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
-    tabPage.ScrollingDirection = Enum.ScrollingDirection.Y
-    tabPage.CanvasSize = UDim2.new(0, 0, 0, 0)
-    tabPage.ZIndex = 1
-    tabPage.Visible = (tabIdx == 1)
-
-    local pageLayout = Instance.new("UIListLayout")
-    pageLayout.Parent = tabPage
-    pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    pageLayout.Padding = UDim.new(0, 8)
-
-    local pagePad = Instance.new("UIPadding")
-    pagePad.Parent = tabPage
-    pagePad.PaddingLeft = UDim.new(0, 8)
-    pagePad.PaddingRight = UDim.new(0, 8)
-    pagePad.PaddingTop = UDim.new(0, 6)
-    pagePad.PaddingBottom = UDim.new(0, 6)
-
-    local tab = {
-        Button = tabBtn,
-        Page = tabPage,
-        Layout = pageLayout,
-        Index = tabIdx,
-    }
-    table.insert(self.Tabs, tab)
-
-    -- Switch on click
-    tabBtn.MouseButton1Click:Connect(function()
-        self:ActivateTab(tabIdx)
-    end)
-
-    if tabIdx == 1 then
-        self:ActivateTab(1)
-    end
-
-    return {
-        tab = tab,
-        window = self,
-    }
-end
-
-function AutoGui:ActivateTab(idx)
-    self.ActiveTab = idx
-    for i, tab in ipairs(self.Tabs) do
-        tab.Page.Visible = (i == idx)
-        if i == idx then
-            tab.Button.BackgroundColor3 = Color3.fromRGB(60, 60, 85)
-            tab.Button.TextColor3 = Color3.fromRGB(200, 200, 230)
-        else
-            tab.Button.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
-            tab.Button.TextColor3 = Color3.fromRGB(160, 160, 180)
-        end
-    end
-end
-
--- =============================================
--- SECTIONS
--- =============================================
-function AutoGui:CreateSection(params, tabData)
-    local tab = tabData and tabData.tab
-    local parent = tab and tab.Page or self.ContentArea
-
-    params = params or {}
-    local sectionFrame = Instance.new("Frame")
-    sectionFrame.Name = "Section"
-    sectionFrame.Parent = parent
-    sectionFrame.Size = UDim2.new(1, 0, 0, 0)
-    sectionFrame.AutomaticSize = Enum.AutomaticSize.Y
-    sectionFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 45)
-    sectionFrame.BorderSizePixel = 0
-    sectionFrame.ZIndex = 1
-    Instance.new("UICorner", sectionFrame).CornerRadius = UDim.new(0, 8)
-    Instance.new("UIStroke", sectionFrame):Assign({
-        Color = Color3.fromRGB(50, 50, 65),
-        Thickness = 1,
-        Transparency = 0.7,
-    })
-
-    local sectionLayout = Instance.new("UIListLayout")
-    sectionLayout.Parent = sectionFrame
-    sectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    sectionLayout.Padding = UDim.new(0, 6)
-
-    local sectionPad = Instance.new("UIPadding")
-    sectionPad.Parent = sectionFrame
-    sectionPad.PaddingLeft = UDim.new(0, 10)
-    sectionPad.PaddingRight = UDim.new(0, 10)
-    sectionPad.PaddingTop = UDim.new(0, 8)
-    sectionPad.PaddingBottom = UDim.new(0, 10)
-
-    local titleLabel
-    if params.Title then
-        titleLabel = Instance.new("TextLabel")
-        titleLabel.Name = "SectionTitle"
-        titleLabel.Parent = sectionFrame
-        titleLabel.Text = params.Title
-        titleLabel.Size = UDim2.new(1, 0, 0, 20)
-        titleLabel.BackgroundTransparency = 1
-        titleLabel.TextColor3 = Color3.fromRGB(150, 150, 200)
-        titleLabel.TextSize = 12
-        titleLabel.Font = Enum.Font.GothamBold
-        titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-        titleLabel.ZIndex = 1
-    end
-
-    -- Update canvas size
-    sectionFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-        if tab then
-            tab.Page.CanvasSize = UDim2.new(0, 0, 0, tab.Layout.AbsoluteContentSize.Y + 16)
-        end
-    end)
-
-    return {
-        frame = sectionFrame,
-        layout = sectionLayout,
-        window = self,
-    }
-end
-
--- =============================================
--- LABEL
--- =============================================
-function AutoGui:AddLabel(section, text, params)
-    params = params or {}
-    local lbl = Instance.new("TextLabel")
-    lbl.Name = "Label"
-    lbl.Parent = section.frame
-    lbl.Text = text
-    lbl.Size = UDim2.new(1, 0, 0, 0)
-    lbl.AutomaticSize = Enum.AutomaticSize.Y
-    lbl.BackgroundTransparency = 1
-    lbl.TextColor3 = _default(params.Color, Color3.fromRGB(200, 200, 220))
-    lbl.TextSize = _default(params.TextSize, 12)
-    lbl.Font = _default(params.Font, Enum.Font.Gotham)
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.TextWrapped = _default(params.TextWrapped, true)
-    lbl.ZIndex = 1
-    return lbl
-end
-
--- =============================================
--- BUTTON
--- =============================================
-function AutoGui:AddButton(section, text, callback, params)
-    params = params or {}
-    local btn = Instance.new("TextButton")
-    btn.Name = "Button"
-    btn.Parent = section.frame
-    btn.Text = text
-    btn.Size = UDim2.new(1, 0, 0, _default(params.Height, 34))
-    btn.BackgroundColor3 = _default(params.ButtonColor, Color3.fromRGB(60, 60, 90))
-    btn.TextColor3 = _default(params.TextColor, Color3.fromRGB(255, 255, 255))
-    btn.TextSize = _default(params.TextSize, 13)
-    btn.Font = _default(params.Font, Enum.Font.GothamBold)
-    btn.BorderSizePixel = 0
-    btn.ZIndex = 1
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, _default(params.CornerRadius, 6))
-
-    local origColor = btn.BackgroundColor3
-    btn.MouseEnter:Connect(function()
-        _tween(btn, {BackgroundColor3 = Color3.fromRGB(
-            math.min(origColor.R * 255 + 25, 255),
-            math.min(origColor.G * 255 + 25, 255),
-            math.min(origColor.B * 255 + 25, 255)
-        )}, 0.15)
-    end)
-    btn.MouseLeave:Connect(function()
-        _tween(btn, {BackgroundColor3 = origColor}, 0.15)
-    end)
-    if callback then
-        btn.MouseButton1Click:Connect(callback)
-    end
-    return btn
-end
-
--- =============================================
--- TOGGLE
--- =============================================
-function AutoGui:AddToggle(section, text, callback, params)
-    params = params or {}
-    local defaultValue = _default(params.Default, false)
-    local enabled = defaultValue
-
-    local container = Instance.new("Frame")
-    container.Name = "Toggle"
-    container.Parent = section.frame
-    container.Size = UDim2.new(1, 0, 0, _default(params.Height, 32))
-    container.BackgroundTransparency = 1
-    container.BorderSizePixel = 0
-    container.ZIndex = 1
-
-    local toggleLabel = Instance.new("TextLabel")
-    toggleLabel.Name = "ToggleLabel"
-    toggleLabel.Parent = container
-    toggleLabel.Position = UDim2.new(0, 0, 0, 0)
-    toggleLabel.Size = UDim2.new(1, -50, 1, 0)
-    toggleLabel.BackgroundTransparency = 1
-    toggleLabel.Text = text
-    toggleLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
-    toggleLabel.TextSize = 12
-    toggleLabel.Font = Enum.Font.Gotham
-    toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    toggleLabel.ZIndex = 1
-
-    local toggleFrame = Instance.new("Frame")
-    toggleFrame.Name = "ToggleFrame"
-    toggleFrame.Parent = container
-    toggleFrame.Size = UDim2.new(0, 40, 0, 20)
-    toggleFrame.Position = UDim2.new(1, -44, 0.5, -10)
-    toggleFrame.BackgroundColor3 = defaultValue and Color3.fromRGB(80, 160, 80) or Color3.fromRGB(50, 50, 60)
-    toggleFrame.BorderSizePixel = 0
-    toggleFrame.ZIndex = 1
-    Instance.new("UICorner", toggleFrame).CornerRadius = UDim.new(1, 0)
-
-    local toggleDot = Instance.new("Frame")
-    toggleDot.Name = "ToggleDot"
-    toggleDot.Parent = toggleFrame
-    toggleDot.Size = UDim2.new(0, 16, 0, 16)
-    toggleDot.Position = defaultValue and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-    toggleDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    toggleDot.BorderSizePixel = 0
-    toggleDot.ZIndex = 2
-    Instance.new("UICorner", toggleDot).CornerRadius = UDim.new(1, 0)
-
-    local function updateToggle()
-        enabled = not enabled
-        local targetColor = enabled and Color3.fromRGB(80, 160, 80) or Color3.fromRGB(50, 50, 60)
-        local targetPos = enabled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-        _tween(toggleFrame, {BackgroundColor3 = targetColor}, 0.2)
-        _tween(toggleDot, {Position = targetPos}, 0.2)
-        if callback then
-            callback(enabled)
-        end
-    end
-
-    container.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            updateToggle()
-        end
-    end)
-
-    if defaultValue and callback then
-        task.spawn(function() callback(true) end)
-    end
-
-    return {
-        Container = container,
-        ToggleFrame = toggleFrame,
-        ToggleDot = toggleDot,
-        GetState = function() return enabled end,
-        SetState = function(state)
-            if state ~= enabled then
-                enabled = state
-                toggleFrame.BackgroundColor3 = enabled and Color3.fromRGB(80, 160, 80) or Color3.fromRGB(50, 50, 60)
-                toggleDot.Position = enabled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-                if callback then callback(enabled) end
-            end
-        end,
-    }
-end
-
--- =============================================
--- TEXTBOX
--- =============================================
-function AutoGui:AddTextBox(section, placeholder, callback, params)
-    params = params or {}
-    local container = Instance.new("Frame")
-    container.Name = "TextBox"
-    container.Parent = section.frame
-    container.Size = UDim2.new(1, 0, 0, _default(params.Height, 34))
-    container.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-    container.BorderSizePixel = 0
-    container.ZIndex = 1
-    Instance.new("UICorner", container).CornerRadius = UDim.new(0, _default(params.CornerRadius, 6))
-    Instance.new("UIStroke", container):Assign({
-        Color = Color3.fromRGB(60, 60, 85),
-        Thickness = 1,
-    })
-
-    local textBox = Instance.new("TextBox")
-    textBox.Name = "TextBoxInput"
-    textBox.Parent = container
-    textBox.Position = UDim2.new(0, 8, 0, 0)
-    textBox.Size = UDim2.new(1, -16, 1, 0)
-    textBox.BackgroundTransparency = 1
-    textBox.PlaceholderText = placeholder or ""
-    textBox.PlaceholderColor3 = Color3.fromRGB(130, 130, 150)
-    textBox.Text = _default(params.Default, "")
-    textBox.TextColor3 = Color3.fromRGB(220, 220, 240)
-    textBox.TextSize = _default(params.TextSize, 12)
-    textBox.Font = _default(params.Font, Enum.Font.Gotham)
-    textBox.TextXAlignment = Enum.TextXAlignment.Left
-    textBox.ClearTextOnFocus = _default(params.ClearTextOnFocus, false)
-    textBox.ZIndex = 1
-
-    if callback then
-        textBox.FocusLost:Connect(function(enterPressed)
-            callback(textBox.Text, enterPressed)
-        end)
-    end
-
-    return {
-        Container = container,
-        TextBox = textBox,
-        GetText = function() return textBox.Text end,
-        SetText = function(text) textBox.Text = text end,
-    }
-end
-
--- =============================================
--- SLIDER
--- =============================================
-function AutoGui:AddSlider(section, text, min, max, default, callback, params)
-    params = params or {}
-    min = min or 0
-    max = max or 100
-    default = _default(default, min)
-    local value = math.clamp(default, min, max)
-
-    local container = Instance.new("Frame")
-    container.Name = "Slider"
-    container.Parent = section.frame
-    container.Size = UDim2.new(1, 0, 0, _default(params.Height, 50))
-    container.BackgroundTransparency = 1
-    container.BorderSizePixel = 0
-    container.ZIndex = 1
-
-    local sliderLabel = Instance.new("TextLabel")
-    sliderLabel.Name = "SliderLabel"
-    sliderLabel.Parent = container
-    sliderLabel.Size = UDim2.new(1, 0, 0, 16)
-    sliderLabel.BackgroundTransparency = 1
-    sliderLabel.Text = text .. " (" .. value .. ")"
-    sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
-    sliderLabel.TextSize = 11
-    sliderLabel.Font = Enum.Font.Gotham
-    sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
-    sliderLabel.ZIndex = 1
-
-    local sliderBg = Instance.new("Frame")
-    sliderBg.Name = "SliderBg"
-    sliderBg.Parent = container
-    sliderBg.Position = UDim2.new(0, 0, 0, 20)
-    sliderBg.Size = UDim2.new(1, 0, 0, 6)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
-    sliderBg.BorderSizePixel = 0
-    sliderBg.ZIndex = 1
-    Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
-
-    local sliderFill = Instance.new("Frame")
-    sliderFill.Name = "SliderFill"
-    sliderFill.Parent = sliderBg
-    sliderFill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
-    sliderFill.BackgroundColor3 = Color3.fromRGB(80, 150, 255)
-    sliderFill.BorderSizePixel = 0
-    sliderFill.ZIndex = 1
-    Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(1, 0)
-
-    local sliderBtn = Instance.new("TextButton")
-    sliderBtn.Name = "SliderBtn"
-    sliderBtn.Parent = sliderBg
-    sliderBtn.Size = UDim2.new(0, 14, 0, 14)
-    sliderBtn.Position = UDim2.new((value - min) / (max - min), -7, 0.5, -7)
-    sliderBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    sliderBtn.Text = ""
-    sliderBtn.BorderSizePixel = 0
-    sliderBtn.ZIndex = 2
-    Instance.new("UICorner", sliderBtn).CornerRadius = UDim.new(1, 0)
-
-    local dragging = false
-    sliderBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-        end
-    end)
-    local conn = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-    table.insert(self.Connections, conn)
-
-    local conn2 = UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local mousePos = UserInputService:GetMouseLocation()
-            local sliderAbsPos = sliderBg.AbsolutePosition
-            local sliderAbsSize = sliderBg.AbsoluteSize
-            local relativeX = math.clamp((mousePos.X - sliderAbsPos.X) / sliderAbsSize.X, 0, 1)
-            value = math.floor(min + (max - min) * relativeX + 0.5)
-            value = math.clamp(value, min, max)
-
-            sliderFill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
-            sliderBtn.Position = UDim2.new((value - min) / (max - min), -7, 0.5, -7)
-            sliderLabel.Text = text .. " (" .. value .. ")"
-
-            if callback then
-                callback(value)
+-- Orion модифицированный: только свернуть в круг, без закрытия
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local Window = OrionLib:MakeWindow({
+    Name = "Delta Hub",
+    HidePremium = false,
+    SaveConfig = false,
+    IntroEnabled = false,
+    CloseCallback = function() end -- Блокируем закрытие
+})
+
+-- Убираем кнопку закрытия, оставляем только свернуть
+local function FixOrionButtons()
+    local gui = game:GetService("CoreGui"):FindFirstChild("Orion")
+    if gui then
+        for _, v in ipairs(gui:GetDescendants()) do
+            if v:IsA("TextButton") and v.Name == "Close" then
+                v:Destroy() -- Удаляем кнопку закрытия
             end
         end
-    end)
-    table.insert(self.Connections, conn2)
-
-    if callback then
-        callback(value)
-    end
-
-    return {
-        Container = container,
-        GetValue = function() return value end,
-        SetValue = function(val)
-            value = math.clamp(val, min, max)
-            sliderFill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
-            sliderBtn.Position = UDim2.new((value - min) / (max - min), -7, 0.5, -7)
-            sliderLabel.Text = text .. " (" .. value .. ")"
-            if callback then callback(value) end
-        end,
-    }
-end
-
--- =============================================
--- DROPDOWN
--- =============================================
-function AutoGui:AddDropdown(section, text, options, callback, params)
-    params = params or {}
-    options = options or {}
-    local selected = _default(params.Default, options[1] or "")
-    local opened = false
-    local dropdownButtons = {}
-
-    local container = Instance.new("Frame")
-    container.Name = "Dropdown"
-    container.Parent = section.frame
-    container.Size = UDim2.new(1, 0, 0, _default(params.Height, 34))
-    container.BackgroundTransparency = 1
-    container.BorderSizePixel = 0
-    container.ZIndex = 1
-
-    local dropdownBtn = Instance.new("TextButton")
-    dropdownBtn.Name = "DropdownBtn"
-    dropdownBtn.Parent = container
-    dropdownBtn.Text = "  ▼  " .. text .. ": " .. selected
-    dropdownBtn.Size = UDim2.new(1, 0, 1, 0)
-    dropdownBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-    dropdownBtn.TextColor3 = Color3.fromRGB(220, 220, 240)
-    dropdownBtn.TextSize = 12
-    dropdownBtn.Font = Enum.Font.Gotham
-    dropdownBtn.TextXAlignment = Enum.TextXAlignment.Left
-    dropdownBtn.BorderSizePixel = 0
-    dropdownBtn.ZIndex = 1
-    Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0, 6)
-
-    local optionsFrame = Instance.new("Frame")
-    optionsFrame.Name = "OptionsFrame"
-    optionsFrame.Parent = container
-    optionsFrame.Position = UDim2.new(0, 0, 1, 2)
-    optionsFrame.Size = UDim2.new(1, 0, 0, 0)
-    optionsFrame.AutomaticSize = Enum.AutomaticSize.Y
-    optionsFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 48)
-    optionsFrame.BorderSizePixel = 0
-    optionsFrame.Visible = false
-    optionsFrame.ZIndex = 5
-    Instance.new("UICorner", optionsFrame).CornerRadius = UDim.new(0, 6)
-    Instance.new("UIStroke", optionsFrame):Assign({
-        Color = Color3.fromRGB(60, 60, 85),
-        Thickness = 1,
-    })
-
-    local optionsLayout = Instance.new("UIListLayout")
-    optionsLayout.Parent = optionsFrame
-    optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-    local optionsPad = Instance.new("UIPadding")
-    optionsPad.Parent = optionsFrame
-    optionsPad.PaddingLeft = UDim.new(0, 4)
-    optionsPad.PaddingRight = UDim.new(0, 4)
-    optionsPad.PaddingTop = UDim.new(0, 4)
-    optionsPad.PaddingBottom = UDim.new(0, 4)
-
-    -- Track for outside click close
-    local dropdownConnection
-    local function closeDropdown()
-        opened = false
-        optionsFrame.Visible = false
-        container.Size = UDim2.new(1, 0, 0, 34)
-        if dropdownConnection then
-            dropdownConnection:Disconnect()
-            dropdownConnection = nil
-        end
-    end
-
-    dropdownBtn.MouseButton1Click:Connect(function()
-        opened = not opened
-        optionsFrame.Visible = opened
-        if opened then
-            container.Size = UDim2.new(1, 0, 0, 34 + optionsFrame.AbsoluteSize.Y + 4)
-            dropdownConnection = UserInputService.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    local mousePos = Vector2.new(input.Position.X, input.Position.Y)
-                    local optAbsPos = optionsFrame.AbsolutePosition
-                    local optAbsSize = optionsFrame.AbsoluteSize
-                    if mousePos.X < optAbsPos.X or mousePos.X > optAbsPos.X + optAbsSize.X
-                    or mousePos.Y < optAbsPos.Y or mousePos.Y > optAbsPos.Y + optAbsSize.Y then
-                        local btnAbsPos = dropdownBtn.AbsolutePosition
-                        local btnAbsSize = dropdownBtn.AbsoluteSize
-                        if mousePos.X < btnAbsPos.X or mousePos.X > btnAbsPos.X + btnAbsSize.X
-                        or mousePos.Y < btnAbsPos.Y or mousePos.Y > btnAbsPos.Y + btnAbsSize.Y then
-                            closeDropdown()
+        
+        -- Меняем minimize на круг
+        for _, v in ipairs(gui:GetDescendants()) do
+            if v:IsA("TextButton") and v.Name == "Minimize" then
+                v.Size = UDim2.new(0, 40, 0, 40)
+                v.Position = UDim2.new(1, -50, 0, 5)
+                v.Text = "—"
+                v.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+                Instance.new("UICorner", v).CornerRadius = UDim.new(0, 20)
+                
+                -- Когда свернуто - показываем круг
+                local originalCallback = v.MouseButton1Click
+                v.MouseButton1Click:Connect(function()
+                    task.wait(0.1)
+                    spawn(function()
+                        for _, circle in ipairs(gui:GetDescendants()) do
+                            if circle:IsA("TextButton") and circle.Size == UDim2.new(0, 50, 0, 50) then
+                                Instance.new("UICorner", circle).CornerRadius = UDim.new(0, 25)
+                                circle.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+                            end
                         end
-                    end
+                    end)
+                end)
+            end
+        end
+    end
+end
+
+task.wait(0.5)
+FixOrionButtons()
+
+local Tab = {}
+Tab.Player = Window:MakeTab({Name = "Player", Icon = "rbxassetid://4483345998", PremiumOnly = false})
+Tab.Server = Window:MakeTab({Name = "Server", Icon = "rbxassetid://4483345998", PremiumOnly = false})
+Tab.Teleports = Window:MakeTab({Name = "Teleports", Icon = "rbxassetid://4483345998", PremiumOnly = false})
+Tab.Cosmetics = Window:MakeTab({Name = "Cosmetics", Icon = "rbxassetid://4483345998", PremiumOnly = false})
+
+local gui = {cons = {}, Notify = function(txt) OrionLib:MakeNotification({Name = "Delta Hub", Content = txt, Image = "rbxassetid://4483345998", Time = 3}) end}
+local cons = gui.cons
+local emptyFunc = function() end
+
+local plrs = cloneref(game:GetService("Players"))
+local starGui = cloneref(game:GetService("StarterGui"))
+local rStor = cloneref(game:GetService("ReplicatedStorage"))
+local runServ = cloneref(game:GetService("RunService"))
+local networkCli = cloneref(game:GetService("NetworkClient"))
+local Teams = cloneref(game:GetService("Teams"))
+local TeleportService = cloneref(game:GetService("TeleportService"))
+
+local lplr = plrs.LocalPlayer
+local pStats = lplr:WaitForChild("stats")
+
+function GetHumRootPart(char)
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+local find = {Gun = "InflictTarget", Knife = "SecondaryEquipment", Infect = "Infect"}
+
+do
+    local desFind = function(res, class)
+        local last = res
+        while true do
+            local s = pcall(function() return last and typeof(last) == "Instance" and last.Parent and last.ClassName end)
+            if not s or string.find(string.lower(last.ClassName), class) then break end
+            last = last.Parent
+            task.wait()
+        end
+        return last
+    end
+    for i, v in pairs(find) do
+        find[i] = function(recurs)
+            local res = (recurs and (plrs:FindFirstChild(v, true) or workspace:FindFirstChild(v, true))) or (lplr.Backpack:FindFirstChild(v, true) or lplr.Character:FindFirstChild(v, true))
+            return (res and desFind(res, "tool"))
+        end
+    end
+end
+
+do
+    local blacklistedScripts = {"States"}
+    if lplr.Character then
+        for _, v in pairs(blacklistedScripts) do
+            if lplr.Character:FindFirstChild(v) then lplr.Character[v]:Destroy() end
+        end
+    end
+    table.insert(cons, lplr.CharacterAdded:Connect(function(chr)
+        for _, v in pairs(blacklistedScripts) do chr:WaitForChild(v):Destroy() end
+    end))
+    networkCli:SetOutgoingKBPSLimit(tonumber("-inf"))
+end
+
+Tab.Player:AddButton({Name = "Destroy Zones", Callback = function()
+    for _, v in pairs({starGui:FindFirstChild("PlayerLocalScripts(ReOnSp)"), lplr.PlayerGui:FindFirstChild("PlayerLocalScripts(ReOnSp)")}) do
+        if v then for _, x in pairs(v:GetChildren()) do if x.ClassName == "LocalScript" then x:Destroy() end end end
+    end
+    pcall(function() workspace.AntiGlitch:Destroy() end)
+    pcall(function() workspace.ZombieBlockers:Destroy() end)
+    pcall(function() workspace["Map Wall"].BaseWalls:Destroy() end)
+end})
+
+do
+    local function AddHighlight(plr)
+        if plr.Character and not plr.Character:FindFirstChildWhichIsA("Highlight") then
+            local hl = Instance.new("Highlight")
+            hl.Adornee = plr.Character
+            hl.Parent = plr.Character
+            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.FillColor = plr.TeamColor.Color
+            hl.OutlineColor = Color3.fromRGB(235,235,235)
+            hl.FillTransparency = .3
+            return hl
+        end
+    end
+    local function RemoveHighlights(plr)
+        local hl = plr.Character and plr.Character:FindFirstChildWhichIsA("Highlight")
+        if hl then hl:Destroy() end
+    end
+    local function ActuallyAddingHighlights(plr)
+        local ratlight
+        if plr.Character then ratlight = AddHighlight(plr) end
+        plr:GetPropertyChangedSignal("TeamColor"):Connect(function()
+            if ratlight and ratlight.Parent then ratlight.FillColor = plr.TeamColor.Color end
+        end)
+    end
+    local espEnabled = false
+    Tab.Player:AddToggle({Name = "ESP", Default = false, Callback = function(v) espEnabled = v end})
+    spawn(function()
+        while task.wait(0.1) do
+            if espEnabled then
+                for _, pl in pairs(plrs:GetPlayers()) do
+                    if lplr ~= pl then ActuallyAddingHighlights(pl) end
                 end
-            end)
+            else
+                for _, pl in pairs(plrs:GetPlayers()) do RemoveHighlights(pl) end
+            end
+        end
+    end)
+end
+
+do
+    local godGun = {FireRate = 0, Auto = true, AmmoPerClip = math.huge, ReloadTime = 0, BaseDamage = 9e9, HeadshotDamageMultiplier = 9e9, Spread = 0, CameraShakingEnabled = false, BulletSpeed = 9e9, Piercing = 1}
+    local spamGun = table.clone(godGun)
+    spamGun.Auto = false
+    spamGun.FireRate = 0
+    local modGun = function(conf)
+        local gun = find.Gun()
+        assert(gun, "You dont have a gun")
+        local mod = gun:FindFirstChild("Setting")
+        assert(mod, "Your gun is broken")
+        mod = require(mod)
+        for i, v in pairs(conf) do mod[i] = v end
+        if gun.Parent == lplr.Character then
+            lplr.Character.Humanoid:UnequipTools()
+            lplr.Character.Humanoid:EquipTool(gun)
+        end
+    end
+    Tab.Player:AddButton({Name = "God Gun", Callback = function() modGun(godGun) end})
+    Tab.Player:AddButton({Name = "Spam Gun", Callback = function() modGun(spamGun) end})
+end
+
+Tab.Player:AddToggle({Name = "Ragdoll", Default = false, Callback = function() rStor.Remotes.ChangeState:FireServer("Ragdoll") end})
+
+local itemFuncs = {Virus = emptyFunc, Cure = emptyFunc}
+do
+    local transTbl = {Virus = Teams.Zombie, Cure = Teams.Human}
+    local room = workspace.Lab.Machines["Virus Room"]
+    local prompt = room.Button.Button.Trigger
+    itemFuncs.Virus = function()
+        if not room.Smoke:FindFirstChildWhichIsA("TouchTransmitter") then
+            repeat
+                pcall(function() lplr.Character.PrimaryPart.CFrame = prompt.Parent.CFrame end)
+                fireproximityprompt(prompt)
+                task.wait()
+            until room.Smoke:FindFirstChildWhichIsA("TouchTransmitter")
+        end
+        for i = 0, 1 do firetouchinterest(lplr.Character.PrimaryPart, room.Smoke, i) end
+        local timeout = tick() + .5
+        repeat task.wait() until lplr.Character.Ragdoll.Value or (tick() >= timeout)
+        if tick() >= timeout then return itemFuncs.Virus() end
+    end
+    itemFuncs.Cure = function()
+        if #plrs:GetPlayers() <= 1 then lplr:Kick() end
+        TeleportService:Teleport(game.PlaceId)
+    end
+    for i, v in pairs(itemFuncs) do Tab.Player:AddButton({Name = "Become " .. transTbl[i].Name, Callback = v}) end
+end
+
+local changeTeam
+do
+    local transTbl = {Zombie = itemFuncs.Virus, Human = itemFuncs.Cure}
+    changeTeam = function(t) return transTbl[t.Name]() end
+end
+
+local checkTeam = function(v)
+    if v:IsA("Team") and lplr.Team ~= v then changeTeam(v) repeat task.wait() until lplr.Team == v end
+end
+
+local buyItem = rStor:WaitForChild("BuyItem")
+local remote, gun = nil, nil
+local findRemote = function()
+    if not remote or not remote.Parent or not gun or not gun.Parent then
+        gun = find.Gun(true)
+        if not gun then return end
+        remote = gun:FindFirstChild("InflictTarget", true)
+    end
+end
+
+local shootPlr = function(v, dmg)
+    local hum = (v.ClassName == "Player" and v.Character and v.Character:FindFirstChild("Humanoid")) or v:FindFirstChild("Humanoid")
+    local part = (hum and hum.Parent and hum.Parent:FindFirstChildWhichIsA("BasePart"))
+    if hum and part and remote then
+        coroutine.wrap(remote.FireServer)(remote, hum, part, (dmg or hum.MaxHealth), Vector3.zero, 2, 0, false)
+    end
+end
+
+local shootTillDead = shootPlr
+
+do
+    local isAlive = function(p, await)
+        local c = (p.ClassName == "Player" and p.Character) or p
+        if c then return (await and c.WaitForChild or c.FindFirstChild)(c, "Head") end
+    end
+    local loopTbl = {}
+    local hookChr = function(p)
+        if p.ClassName == "Player" and p.Team == lplr.Team then return end
+        if isAlive(p, true) then table.insert(loopTbl, p) end
+    end
+    local tCons = {}
+    local hookPlr = function(p)
+        if p.Character then coroutine.wrap(hookChr)(p) end
+        table.insert(tCons, p.CharacterAdded:Connect(function() hookChr(p) end))
+    end
+    local transTbl = {Zombie = "Humans", Human = "Zombies", Zombies = "NPCs"}
+    local teamScan = Teams:GetTeams()
+    table.insert(teamScan, workspace:WaitForChild("Zombies"))
+    for _, team in pairs(teamScan) do
+        if team and transTbl[team.Name] then
+            local tName = transTbl[team.Name]
+            local isTeam = (team.ClassName == "Team")
+            Tab.Server:AddButton({Name = "Kill " .. tName, Callback = function()
+                checkTeam(team)
+                findRemote()
+                for _, v in pairs((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
+                    if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then shootTillDead(v) end
+                end
+            end})
+            Tab.Server:AddButton({Name = "God " .. tName, Callback = function()
+                checkTeam(team)
+                findRemote()
+                for _, v in pairs((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
+                    if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then shootPlr(v, tonumber("nan")) end
+                end
+                gui.Notify("made " .. tName .. " immune")
+            end})
+        end
+    end
+end
+
+Tab.Server:AddButton({Name = "Infect Humans", Callback = function()
+    checkTeam(Teams.Zombie)
+    local inf = find.Infect()
+    if inf then
+        table.insert(cons, inf.Activated:Connect(function()
+            for _, v in pairs(plrs:GetPlayers()) do
+                if lplr ~= v and v.Character and v.Team ~= lplr.Team and v.Character.PrimaryPart then
+                    firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 0)
+                    firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 1)
+                end
+            end
+        end))
+        gui.Notify("Equip and spam the infect tool to infect")
+    else gui.Notify("You must have a infect tool") end
+end})
+
+do
+    local remotes = {}
+    local tCons = {}
+    local warning
+    Tab.Server:AddToggle({Name = "Lag Server", Default = false, Callback = function(c)
+        if not warning then warning = true; gui.Notify("Ping will NOT recover, rejoin to fix"); return end
+        if c then
+            for _, v in pairs(plrs:GetPlayers()) do
+                table.insert(remotes, v.Backpack:FindFirstChild("reload", true))
+                if v.Character then table.insert(remotes, v.Character:FindFirstChild("reload", true)) end
+            end
+            local ps = #remotes * 700
+            for i = 1, #remotes do
+                local v = remotes[i]
+                table.insert(tCons, runServ.PreRender:Connect(function()
+                    coroutine.wrap(function() for _ = 1, ps do coroutine.wrap(v.FireServer)(v) end end)()
+                end))
+            end
         else
-            closeDropdown()
+            coroutine.wrap(TeleportService.TeleportToPlaceInstance)(TeleportService, game.PlaceId, game.JobId)
+            for _, v in pairs(tCons) do v:Disconnect() end
+            table.clear(tCons)
+            table.clear(remotes)
         end
-    end)
+    end})
+end
 
-    local function createOption(opt)
-        local optBtn = Instance.new("TextButton")
-        optBtn.Name = "Option_" .. opt
-        optBtn.Parent = optionsFrame
-        optBtn.Text = opt
-        optBtn.Size = UDim2.new(1, 0, 0, 28)
-        optBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
-        optBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
-        optBtn.TextSize = 11
-        optBtn.Font = Enum.Font.Gotham
-        optBtn.BorderSizePixel = 0
-        optBtn.ZIndex = 6
-        Instance.new("UICorner", optBtn).CornerRadius = UDim.new(0, 4)
-
-        optBtn.MouseButton1Click:Connect(function()
-            selected = opt
-            dropdownBtn.Text = "  ▼  " .. text .. ": " .. selected
-            closeDropdown()
-            if callback then
-                callback(selected)
-            end
-        end)
-
-        optBtn.MouseEnter:Connect(function()
-            _tween(optBtn, {BackgroundColor3 = Color3.fromRGB(60, 60, 80)}, 0.15)
-        end)
-        optBtn.MouseLeave:Connect(function()
-            _tween(optBtn, {BackgroundColor3 = Color3.fromRGB(45, 45, 60)}, 0.15)
-        end)
-
-        table.insert(dropdownButtons, optBtn)
-    end
-
-    for _, opt in ipairs(options) do
-        createOption(opt)
-    end
-
-    if callback then
-        callback(selected)
-    end
-
-    return {
-        Container = container,
-        GetValue = function() return selected end,
-        SetValue = function(val)
-            selected = val
-            dropdownBtn.Text = "  ▼  " .. text .. ": " .. selected
-            if callback then callback(selected) end
-        end,
-        AddOption = function(opt)
-            table.insert(options, opt)
-            createOption(opt)
-        end,
-        RemoveOption = function(opt)
-            for i, o in ipairs(options) do
-                if o == opt then
-                    table.remove(options, i)
-                    if selected == opt then
-                        selected = options[1] or ""
-                        dropdownBtn.Text = "  ▼  " .. text .. ": " .. selected
+do
+    local cache = {}
+    local fp = function(og, new) pcall(function() og.Parent = new end) end
+    Tab.Server:AddToggle({Name = "Lag Other Players", Default = false, Callback = function(c)
+        if c then
+            if lplr.Team ~= Teams.Zombie then itemFuncs.Virus() end
+            gui.Notify("disable to release buffer")
+            repeat
+                buyItem:InvokeServer("Knife")
+                for _, v in pairs(lplr.Backpack:GetChildren()) do
+                    if v.Name == "Knife" and not table.find(cache, v) then
+                        table.insert(cache, v)
+                        coroutine.wrap(fp)(v, lplr.Character)
                     end
-                    break
                 end
-            end
-            for _, btn in ipairs(dropdownButtons) do
-                if btn.Text == opt then
-                    btn:Destroy()
-                    table.remove(dropdownButtons, table.find(dropdownButtons, btn))
-                    break
-                end
-            end
-        end,
-    }
-end
-
--- =============================================
--- NOTIFICATION
--- =============================================
-function AutoGui:Notify(params)
-    params = params or {}
-    local text = params.Text or "Notification"
-    local duration = params.Duration or 3
-    local color = params.Color or Color3.fromRGB(80, 180, 255)
-
-    local notif = Instance.new("Frame")
-    notif.Name = "Notification"
-    notif.Parent = self.ScreenGui
-    notif.AnchorPoint = Vector2.new(0.5, 0)
-    notif.Position = UDim2.new(0.5, 0, 0, -60)
-    notif.Size = UDim2.new(0, 280, 0, 36)
-    notif.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    notif.BorderSizePixel = 0
-    notif.ZIndex = 100
-    Instance.new("UICorner", notif).CornerRadius = UDim.new(0, 8)
-    Instance.new("UIStroke", notif):Assign({
-        Color = color,
-        Thickness = 1.5,
-    })
-
-    local notifText = Instance.new("TextLabel")
-    notifText.Name = "NotifText"
-    notifText.Parent = notif
-    notifText.Size = UDim2.new(1, -8, 1, 0)
-    notifText.Position = UDim2.new(0, 4, 0, 0)
-    notifText.BackgroundTransparency = 1
-    notifText.Text = text
-    notifText.TextColor3 = Color3.fromRGB(220, 220, 240)
-    notifText.TextSize = 12
-    notifText.Font = Enum.Font.Gotham
-    notifText.ZIndex = 101
-
-    _tween(notif, {Position = UDim2.new(0.5, 0, 0, 10)}, 0.3, Enum.EasingStyle.Back)
-    task.delay(duration, function()
-        _tween(notif, {Position = UDim2.new(0.5, 0, 0, -60), BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
-        task.delay(0.3, function() notif:Destroy() end)
-    end)
-end
-
--- =============================================
--- FLAGS / CONFIG
--- =============================================
-function AutoGui:SetFlag(key, value)
-    self.Flags[key] = value
-end
-
-function AutoGui:GetFlag(key)
-    return self.Flags[key]
-end
-
-function AutoGui:SaveConfig(name)
-    name = name or "config"
-    local HttpService = game:GetService("HttpService")
-    local data = HttpService:JSONEncode(self.Flags)
-    if writefile then
-        writefile("AutoGui_" .. name .. ".json", data)
-    end
-    self:Notify({Text = "Config saved: " .. name, Duration = 2, Color = Color3.fromRGB(80, 255, 80)})
-end
-
-function AutoGui:LoadConfig(name)
-    name = name or "config"
-    local HttpService = game:GetService("HttpService")
-    if isfile and isfile("AutoGui_" .. name .. ".json") then
-        local data = readfile("AutoGui_" .. name .. ".json")
-        local decoded = HttpService:JSONDecode(data)
-        for k, v in pairs(decoded) do
-            self.Flags[k] = v
+                task.wait()
+            until not c
+            for _, v in pairs(cache) do coroutine.wrap(fp)(v, workspace) end
+            for _, v in pairs(cache) do coroutine.wrap(fp)(v, nil) end
+            table.clear(cache)
         end
-        self:Notify({Text = "Config loaded: " .. name, Duration = 2, Color = Color3.fromRGB(80, 255, 80)})
-    end
+    end})
 end
 
-function AutoGui:Destroy()
-    for _, conn in ipairs(self.Connections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    self.ScreenGui:Destroy()
+do
+    local stats = game:GetService("Stats")
+    local knife, con, ping
+    Tab.Player:AddToggle({Name = "Spam Knife", Default = false, Callback = function(c)
+        if c then
+            con = lplr:GetMouse().Button1Down:Connect(function()
+                if knife and knife.Parent and knife.Parent == lplr.Character and lplr.Character:FindFirstChild("Cooldown") and lplr.Character.Cooldown.Value then
+                    buyItem:InvokeServer(knife.Name)
+                    knife = lplr.Backpack:WaitForChild(knife.Name)
+                    ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+                    task.wait((ping < 150 and .1) or 0)
+                    knife.Parent = lplr.Character
+                else knife = find.Knife() end
+            end)
+        elseif con and con.Connected then con:Disconnect() end
+    end})
 end
 
-return AutoGui
+Tab.Cosmetics:AddButton({Name = "Change Zombie Face", Callback = function() lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true end})
+Tab.Cosmetics:AddButton({Name = "Change Zombie Skincolor", Callback = function() lplr.PlayerGui.Main.ChooseColorFrame.Visible = true end})
+Tab.Cosmetics:AddButton({Name = "Scientist outfit", Callback = function() fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector) end})
+Tab.Cosmetics:AddButton({Name = "Patient outfit", Callback = function() fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector) end})
+
+Tab.Teleports:AddButton({Name = "Human Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489) end})
+Tab.Teleports:AddButton({Name = "Zombie Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748) end})
+Tab.Teleports:AddButton({Name = "Virus Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429) end})
+Tab.Teleports:AddButton({Name = "Upstairs Cure", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545) end})
+Tab.Teleports:AddButton({Name = "Downstairs Cure", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734) end})
+Tab.Teleports:AddButton({Name = "Security Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728) end})
+Tab.Teleports:AddButton({Name = "Roof", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056) end})
+Tab.Teleports:AddButton({Name = "Outside Map", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642) end})
+
+Tab.Player:AddButton({Name = "Godmode", Callback = function()
+    gui.Notify("If it fails then retry")
+    rStor.Remotes.ChangeState:FireServer("Died")
+    task.wait(plrs.RespawnTime + .2)
+    rStor.Remotes.ChangeState:FireServer("Died")
+end})
+
+gui.Notify("Delta Hub Loaded!")
