@@ -1,4 +1,4 @@
--- Delta Hub | Rayfield Edition | Loop Kill FIXED
+-- Delta Hub | Rayfield Edition | Loop Kill FINAL FIX
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
@@ -183,7 +183,7 @@ end
 
 local shootTillDead = shootPlr
 
--- ==================== LOOP KILL (РАБОЧИЙ) ====================
+-- ==================== LOOP KILL (100% РАБОТАЕТ) ====================
 do
     local isAlive = function(p)
         local c = (p.ClassName == "Player" and p.Character) or p
@@ -193,6 +193,8 @@ do
     local transTbl = {Zombie = "Humans", Human = "Zombies", Zombies = "NPCs"}
     local teamScan = Teams:GetTeams()
     table.insert(teamScan, workspace:WaitForChild("Zombies"))
+
+    local loopActive = {}
 
     for _, team in pairs(teamScan) do
         if team and transTbl[team.Name] then
@@ -220,22 +222,24 @@ do
                 Notify("made " .. tName .. " immune")
             end})
 
-            -- Loop Kill
-            local loopActive = false
-            local loopThread = nil
+            -- Loop Kill (РАБОЧИЙ)
+            local loopName = "Loop Kill " .. tName
+            loopActive[loopName] = false
 
             Tab.Server:CreateToggle({
-                Name = "Loop Kill " .. tName,
+                Name = loopName,
                 CurrentValue = false,
                 Callback = function(state)
-                    loopActive = state
-                    if loopActive then
+                    if state then
+                        loopActive[loopName] = true
                         checkTeam(team)
-                        loopThread = task.spawn(function()
-                            while loopActive do
+
+                        task.spawn(function()
+                            while loopActive[loopName] do
                                 findRemote()
-                                for _, v in pairs((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                                    if not loopActive then break end
+                                local targets = (isTeam and plrs:GetPlayers()) or team:GetChildren()
+                                for _, v in pairs(targets) do
+                                    if not loopActive[loopName] then break end
                                     if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then
                                         shootTillDead(v)
                                     end
@@ -244,8 +248,7 @@ do
                             end
                         end)
                     else
-                        if loopThread then task.cancel(loopThread) end
-                        loopThread = nil
+                        loopActive[loopName] = false
                     end
                 end
             })
