@@ -1,4 +1,4 @@
--- Delta Hub | Rayfield Edition (FIXED Loop Kill)
+-- Delta Hub | Rayfield Edition | Loop Kill FIXED
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
@@ -183,7 +183,7 @@ end
 
 local shootTillDead = shootPlr
 
--- ==================== ИСПРАВЛЕННЫЙ LOOP KILL ====================
+-- ==================== LOOP KILL (РАБОЧИЙ) ====================
 do
     local isAlive = function(p)
         local c = (p.ClassName == "Player" and p.Character) or p
@@ -199,7 +199,6 @@ do
             local tName = transTbl[team.Name]
             local isTeam = (team.ClassName == "Team")
 
-            -- Kill Button
             Tab.Server:CreateButton({Name = "Kill " .. tName, Callback = function()
                 checkTeam(team)
                 findRemote()
@@ -210,7 +209,6 @@ do
                 end
             end})
 
-            -- God Button
             Tab.Server:CreateButton({Name = "God " .. tName, Callback = function()
                 checkTeam(team)
                 findRemote()
@@ -222,66 +220,32 @@ do
                 Notify("made " .. tName .. " immune")
             end})
 
-            -- Loop Kill Toggle (FIXED)
-            local loopRunning = false
-            local loopConnections = {}
+            -- Loop Kill
+            local loopActive = false
+            local loopThread = nil
+
             Tab.Server:CreateToggle({
                 Name = "Loop Kill " .. tName,
                 CurrentValue = false,
                 Callback = function(state)
-                    loopRunning = state
-                    if state then
+                    loopActive = state
+                    if loopActive then
                         checkTeam(team)
-
-                        -- Очищаем старые подключения
-                        local targets = {}
-
-                        local function scanTargets()
-                            table.clear(targets)
-                            local list = (isTeam and plrs:GetPlayers()) or team:GetChildren()
-                            for _, v in pairs(list) do
-                                if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then
-                                    table.insert(targets, v)
-                                end
-                            end
-                        end
-
-                        scanTargets()
-
-                        -- Отслеживаем новых игроков/NPC
-                        if isTeam then
-                            table.insert(loopConnections, plrs.PlayerAdded:Connect(function(pl)
-                                if pl.Team ~= lplr.Team then
-                                    task.wait(0.5)
-                                    if isAlive(pl) then table.insert(targets, pl) end
-                                end
-                            end))
-                        else
-                            table.insert(loopConnections, team.ChildAdded:Connect(function(c)
-                                task.wait(0.5)
-                                if isAlive(c) then table.insert(targets, c) end
-                            end))
-                        end
-
-                        -- Цикл убийства
-                        task.spawn(function()
-                            while loopRunning do
+                        loopThread = task.spawn(function()
+                            while loopActive do
                                 findRemote()
-                                scanTargets()
-                                for _, v in pairs(targets) do
-                                    if loopRunning and isAlive(v) then
+                                for _, v in pairs((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
+                                    if not loopActive then break end
+                                    if isAlive(v) and (not isTeam or (lplr ~= v and v.Team ~= lplr.Team)) then
                                         shootTillDead(v)
                                     end
                                 end
-                                task.wait(0.1)
+                                task.wait()
                             end
-                            -- Очистка при выключении
-                            for _, c in pairs(loopConnections) do
-                                c:Disconnect()
-                            end
-                            table.clear(loopConnections)
-                            table.clear(targets)
                         end)
+                    else
+                        if loopThread then task.cancel(loopThread) end
+                        loopThread = nil
                     end
                 end
             })
@@ -289,14 +253,12 @@ do
     end
 end
 
--- ==================== ОСТАЛЬНОЕ БЕЗ ИЗМЕНЕНИЙ ====================
-
 Tab.Server:CreateButton({Name = "Infect Humans", Callback = function()
     checkTeam(Teams.Zombie)
     local inf = find.Infect()
     if inf then
         table.insert(cons, inf.Activated:Connect(function()
-            for _, v in pairs(plrs:GetPlayers()) do
+            for _, v in plrs:GetPlayers() do
                 if lplr ~= v and v.Character and v.Team ~= lplr.Team and v.Character.PrimaryPart then
                     firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 0)
                     firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 1)
@@ -314,7 +276,7 @@ do
     Tab.Server:CreateToggle({Name = "Lag Server", CurrentValue = false, Callback = function(c)
         if not warning then warning = true; Notify("Your ping will NOT recover, rejoin after disabling"); return end
         if c then
-            for _, v in pairs(plrs:GetPlayers()) do
+            for _, v in plrs:GetPlayers() do
                 table.insert(remotes, v.Backpack:FindFirstChild("reload", true))
                 if v.Character then table.insert(remotes, v.Character:FindFirstChild("reload", true)) end
             end
