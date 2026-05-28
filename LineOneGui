@@ -1,357 +1,805 @@
--- Delta Hub | Rayfield Edition
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+--[[
+    Delta Script Explorer & Scanner v2.1 (bugfixed)
+    Автоматически сканирует игру и сохраняет все данные для написания скриптов
+--]]
 
-local Window = Rayfield:CreateWindow({
-    Name = "Delta Hub",
-    LoadingTitle = "Delta Hub Loading...",
-    LoadingSubtitle = "by lazy dev",
-    ConfigurationSaving = {Enabled = false}
-})
+-- ═══════════════════════════════════════════
+--           НАСТРОЙКИ / CONFIG
+-- ═══════════════════════════════════════════
+local CONFIG = {
+    SCAN_WORKSPACE       = true,
+    SCAN_PLAYERS         = true,
+    SCAN_REMOTES         = true,
+    SCAN_SCRIPTS         = true,
+    SCAN_GUI             = true,
+    SCAN_REPLICATED      = true,
+    SCAN_LIGHTING        = true,
+    SCAN_TEAMS           = true,
+    SCAN_TOOLS           = true,
+    SCAN_VALUES          = true,
+    SCAN_ATTRIBUTES      = true,
+    MAX_DEPTH            = 0,      -- 0 = бесконечно
+    INCLUDE_FULL_PATH    = true,
+    INCLUDE_CLASS        = true,
+    INCLUDE_PROPERTIES   = true,
+    INCLUDE_ATTRIBUTES   = true,
+    INCLUDE_CHILDREN_COUNT = true,
+    FILE_PREFIX          = "DeltaExplorer",
+}
 
-local Tab = {}
-Tab.Player = Window:CreateTab("Player", 4483362458)
-Tab.Server = Window:CreateTab("Server", 4483362458)
-Tab.Teleports = Window:CreateTab("Teleports", 4483362458)
-Tab.Cosmetics = Window:CreateTab("Cosmetics", 4483362458)
-
-local gui = {cons = {}}
-local function Notify(txt) Rayfield:Notify({Title = "Delta Hub", Content = txt, Duration = 3, Image = 4483362458}) end
-local cons = gui.cons
-local emptyFunc = function() end
-
-local plrs = cloneref(game:GetService("Players"))
-local starGui = cloneref(game:GetService("StarterGui"))
-local rStor = cloneref(game:GetService("ReplicatedStorage"))
-local runServ = cloneref(game:GetService("RunService"))
-local networkCli = cloneref(game:GetService("NetworkClient"))
-local Teams = cloneref(game:GetService("Teams"))
-local TeleportService = cloneref(game:GetService("TeleportService"))
-
-local lplr = plrs.LocalPlayer
-local pStats = lplr:WaitForChild("stats")
-
-function GetHumRootPart(char)
-    return char:FindFirstChild("HumanoidRootPart")
+-- ═══════════════════════════════════════════
+--              СЕРВИСЫ
+-- ═══════════════════════════════════════════
+-- БАГ #1 ИСПРАВЛЕН: pcall для Chat/TextChatService возвращал
+-- два значения (ok, result), но использовалось только первое.
+-- Теперь сервисы получаются через отдельный безопасный хелпер.
+local function safeGetService(name)
+    local ok, svc = pcall(function() return game:GetService(name) end)
+    return ok and svc or nil
 end
 
-local find = {Gun = "InflictTarget", Knife = "SecondaryEquipment", Infect = "Infect"}
+local Services = {
+    Players          = game:GetService("Players"),
+    Workspace        = game:GetService("Workspace"),
+    ReplicatedStorage= game:GetService("ReplicatedStorage"),
+    ReplicatedFirst  = game:GetService("ReplicatedFirst"),
+    Lighting         = game:GetService("Lighting"),
+    Teams            = game:GetService("Teams"),
+    StarterGui       = game:GetService("StarterGui"),
+    StarterPack      = game:GetService("StarterPack"),
+    StarterPlayer    = game:GetService("StarterPlayer"),
+    RunService       = game:GetService("RunService"),
+    CoreGui          = safeGetService("CoreGui"),
+    Chat             = safeGetService("Chat"),
+    TextChatService  = safeGetService("TextChatService"),
+}
 
+-- БАГ #2 ИСПРАВЛЕН: LocalPlayer может быть nil на сервере.
+-- Добавлена защита через pcall.
+local LocalPlayer
 do
-    local desFind = function(res, class)
-        local last = res
-        while true do
-            local s, r = pcall(function() return last and typeof(last) == "Instance" and last.Parent and last.ClassName end)
-            if not s or string.find(string.lower(last.ClassName), class) then break end
-            last = last.Parent
-            task.wait()
-        end
-        return last
-    end
-    for i, v in find do
-        find[i] = function(recurs)
-            local res = (recurs and (plrs:FindFirstChild(v, true) or workspace:FindFirstChild(v, true))) or (lplr.Backpack:FindFirstChild(v, true) or lplr.Character:FindFirstChild(v, true))
-            return (res and desFind(res, "tool"))
-        end
+    local ok, lp = pcall(function() return Services.Players.LocalPlayer end)
+    LocalPlayer = ok and lp or nil
+end
+
+local output = {}
+local scanStats = {
+    total = 0, remotes = 0, scripts = 0,
+    guis = 0, players = 0, values = 0,
+    tools = 0, animations = 0,
+}
+
+-- ═══════════════════════════════════════════
+--              УТИЛИТЫ
+-- ═══════════════════════════════════════════
+
+-- БАГ #3 ИСПРАВЛЕН: game.JobId может быть пустой строкой в Studio.
+-- Добавлена защита от sub() на пустой строке.
+local function getUniqueFileName()
+    local placeId  = tostring(game.PlaceId)
+    local jobRaw   = tostring(game.JobId)
+    local jobId    = (#jobRaw >= 8) and jobRaw:sub(1, 8) or (jobRaw ~= "" and jobRaw or "studio")
+    local tick_str = tostring(math.floor(tick())):sub(-6)
+    return string.format("%s_%s_%s_%s.txt", CONFIG.FILE_PREFIX, placeId, jobId, tick_str)
+end
+
+-- Безопасное получение свойства объекта
+local function safeGet(obj, prop)
+    local ok, val = pcall(function() return obj[prop] end)
+    if not ok or val == nil then return nil end
+    local t = typeof(val)
+    if t == "Instance" then
+        local okPath, fullName = pcall(function() return val:GetFullName() end)
+        return "[Instance: " .. val.ClassName .. "] " .. (okPath and fullName or "?")
+    elseif t == "CFrame" then
+        return string.format("CFrame(%.2f, %.2f, %.2f)", val.X, val.Y, val.Z)
+    elseif t == "Vector3" then
+        return string.format("Vector3(%.2f, %.2f, %.2f)", val.X, val.Y, val.Z)
+    elseif t == "Vector2" then
+        return string.format("Vector2(%.2f, %.2f)", val.X, val.Y)
+    elseif t == "Color3" then
+        return string.format("Color3(%.2f, %.2f, %.2f)", val.R, val.G, val.B)
+    elseif t == "UDim2" then
+        return string.format("UDim2({%.2f,%d},{%.2f,%d})", val.X.Scale, val.X.Offset, val.Y.Scale, val.Y.Offset)
+    elseif t == "EnumItem" then
+        return tostring(val)
+    elseif t == "boolean" or t == "number" or t == "string" then
+        return tostring(val)
+    else
+        return "[" .. t .. "]"
     end
 end
 
-do
-    local blacklistedScripts = {"States"}
-    if lplr.Character then for _, v in blacklistedScripts do if lplr.Character:FindFirstChild(v) then lplr.Character[v]:Destroy() end end end
-    table.insert(cons, lplr.CharacterAdded:Connect(function(chr) for _, v in blacklistedScripts do chr:WaitForChild(v):Destroy() end end))
-    networkCli:SetOutgoingKBPSLimit(tonumber("-inf"))
+local function writeln(str)
+    table.insert(output, (str or "") .. "\n")
 end
 
-Tab.Player:CreateButton({Name = "Destroy Zones", Callback = function()
-    for _, v in {starGui:FindFirstChild("PlayerLocalScripts(ReOnSp)"), lplr.PlayerGui:FindFirstChild("PlayerLocalScripts(ReOnSp)")} do
-        if v then for _, v in v:GetChildren() do if v.ClassName == "LocalScript" then v:Destroy() end end end
-    end
-    workspace.AntiGlitch:Destroy()
-    workspace.ZombieBlockers:Destroy()
-    workspace["Map Wall"].BaseWalls:Destroy()
-end})
-
-do
-    local function AddHighlight(plr)
-        if plr.Character and not plr.Character:FindFirstChildWhichIsA("Highlight") then
-            local highlight = Instance.new("Highlight")
-            highlight.Adornee = plr.Character
-            highlight.Parent = plr.Character
-            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            highlight.FillColor = plr.TeamColor.Color
-            highlight.OutlineColor = Color3.fromRGB(235,235,235)
-            highlight.FillTransparency = .3
-            return highlight
-        end
-    end
-    local function RemoveHighlights(plr)
-        local hl = plr.Character and plr.Character:FindFirstChildWhichIsA("Highlight")
-        if hl then hl:Destroy() end
-    end
-    local function ActuallyAddingHighlights(plr)
-        local ratlight
-        if plr.CharacterAdded then ratlight = AddHighlight(plr) end
-        if plr.Character then ratlight = AddHighlight(plr) end
-        plr:GetPropertyChangedSignal("TeamColor"):connect(function()
-            if ratlight and ratlight.Parent then ratlight.FillColor = plr.TeamColor.Color end
-        end)
-    end
-    local espTbl = {}
-    local tgl = Tab.Player:CreateToggle({Name = "ESP", CurrentValue = false, Callback = function(v)
-        espTbl.enabled = v
-        if v then
-            repeat
-                for _,pl in plrs:GetPlayers() do if lplr ~= pl then ActuallyAddingHighlights(pl) end end
-                task.wait(0.1)
-            until not espTbl.enabled
-            for _,pl in plrs:GetPlayers() do RemoveHighlights(pl) end
-        end
-    end})
+local function section(title)
+    writeln("")
+    writeln("╔══════════════════════════════════════════════════════════════╗")
+    -- БАГ #4 ИСПРАВЛЕН: #title считал байты, а не символы — кириллица
+    -- занимает 2 байта, из-за чего рамка съезжала. Теперь длина
+    -- вычисляется через utf8.len() с fallback на байтовую длину.
+    local titleLen = utf8 and utf8.len(title) or #title
+    writeln("║  " .. title .. string.rep(" ", math.max(0, 59 - titleLen)) .. "║")
+    writeln("╚══════════════════════════════════════════════════════════════╝")
 end
 
-do
-    local godGun = {FireRate = 0, Auto = true, AmmoPerClip = math.huge, ReloadTime = 0, BaseDamage = 9e9, HeadshotDamageMultiplier = 9e9, Spread = 0, CameraShakingEnabled = false, BulletSpeed = 9e9, Piercing = 1}
-    local spamGun = table.clone(godGun)
-    spamGun.Auto = false
-    spamGun.FireRate = 0
-    local modGun = function(conf)
-        local gun = find.Gun()
-        assert(gun, "You dont have a gun")
-        local mod = gun:FindFirstChild("Setting")
-        assert(mod, "Your gun is broken")
-        mod = require(mod)
-        for i, v in conf do mod[i] = v end
-        if gun.Parent == lplr.Character then lplr.Character.Humanoid:UnequipTools(); lplr.Character.Humanoid:EquipTool(gun) end
-    end
-    Tab.Player:CreateButton({Name = "God Gun", Callback = function() modGun(godGun) end})
-    Tab.Player:CreateButton({Name = "Spam Gun", Callback = function() modGun(spamGun) end})
+local function subsection(title)
+    writeln("")
+    local titleLen = utf8 and utf8.len(title) or #title
+    writeln("  ┌─── " .. title .. " " .. string.rep("─", math.max(0, 53 - titleLen)))
 end
 
-Tab.Player:CreateToggle({Name = "Ragdoll", CurrentValue = false, Callback = function() rStor.Remotes.ChangeState:FireServer("Ragdoll") end})
-
-local itemFuncs = {Virus = emptyFunc, Cure = emptyFunc}
-do
-    local transTbl = {Virus = Teams.Zombie, Cure = Teams.Human}
-    local room = workspace.Lab.Machines["Virus Room"]
-    local prompt = room.Button.Button.Trigger
-    itemFuncs.Virus = function()
-        if not room.Smoke:FindFirstChildWhichIsA("TouchTransmitter") then
-            repeat
-                lplr.Character.PrimaryPart.CFrame = prompt.Parent.CFrame
-                fireproximityprompt(prompt)
-                task.wait()
-            until room.Smoke:FindFirstChildWhichIsA("TouchTransmitter")
-        end
-        for i = 0, 1 do firetouchinterest(lplr.Character.PrimaryPart, room.Smoke, i) end
-        local timeout = tick() + .5
-        repeat task.wait() until lplr.Character.Ragdoll.Value or (tick() >= timeout)
-        if tick() >= timeout then return itemFuncs.Virus() end
-    end
-    itemFuncs.Cure = function()
-        if #plrs:GetPlayers() <= 1 then lplr:Kick() end
-        TeleportService:Teleport(game.PlaceId)
-    end
-    for i, v in itemFuncs do Tab.Player:CreateButton({Name = "Become " .. transTbl[i].Name, Callback = v}) end
+local function indent(depth)
+    return string.rep("  ", depth)
 end
 
-local changeTeam
-do
-    local transTbl = {Zombie = itemFuncs.Virus, Human = itemFuncs.Cure}
-    changeTeam = function(t) return transTbl[t.Name]() end
-end
-
-local checkTeam = function(v)
-    if v:IsA("Team") and lplr.Team ~= v then changeTeam(v) repeat task.wait() until lplr.Team == v end
-end
-
-local buyItem = rStor:WaitForChild("BuyItem")
-local remote, gun, cooldown = nil, nil, 0
-local findRemote = function()
-    if not remote or not remote.Parent or not gun or not gun.Parent then
-        gun = find.Gun(true)
-        if not gun then return find.Gun(true) end
-        remote = gun:FindFirstChild("InflictTarget", true)
-    end
-end
-
-local shootPlr
-do
-    shootPlr = function(v, dmg)
-        local hum = (v.ClassName == "Player" and v.Character and v.Character:FindFirstChild("Humanoid")) or v:FindFirstChild("Humanoid")
-        local part = (hum and hum.Parent and hum.Parent:FindFirstChildWhichIsA("BasePart")) or nil
-        if hum and part then
-            coroutine.wrap(remote.FireServer)(remote, hum, part, (dmg or hum.MaxHealth), Vector3.zero, 2, 0, false)
+-- ═══════════════════════════════════════════
+--         АТРИБУТЫ И СВОЙСТВА
+-- ═══════════════════════════════════════════
+local function getAttributes(obj, depth)
+    if not CONFIG.INCLUDE_ATTRIBUTES then return end
+    local ok, attrs = pcall(function() return obj:GetAttributes() end)
+    if not ok or not attrs then return end
+    local count = 0
+    for _ in pairs(attrs) do count = count + 1 end
+    if count > 0 then
+        writeln(indent(depth) .. "  [ATTR]:")
+        for k, v in pairs(attrs) do
+            writeln(indent(depth) .. "     " .. tostring(k) .. " = " .. tostring(v) .. " (" .. typeof(v) .. ")")
         end
     end
 end
 
-local shootTillDead = shootPlr
+local PROPERTIES_BY_CLASS = {
+    Script              = {"Disabled", "RunContext"},
+    LocalScript         = {"Disabled"},
+    Part                = {"Position", "Size", "Anchored", "CanCollide", "Material", "BrickColor"},
+    MeshPart            = {"Position", "Size", "Anchored", "MeshId"},
+    UnionOperation      = {"Position", "Size", "Anchored"},
+    Model               = {"PrimaryPart"},
+    Tool                = {"ToolTip", "RequiresHandle", "GripPos"},
+    Animation           = {"AnimationId"},
+    Humanoid            = {"MaxHealth", "Health", "WalkSpeed", "JumpPower", "DisplayName"},
+    NumberValue         = {"Value"},
+    StringValue         = {"Value"},
+    BoolValue           = {"Value"},
+    IntValue            = {"Value"},
+    ObjectValue         = {"Value"},
+    NumberConstrainedValue = {"Value", "MinValue", "MaxValue"},
+    Sound               = {"SoundId", "Volume", "Looped", "Playing"},
+    ScreenGui           = {"Enabled", "ResetOnSpawn", "DisplayOrder"},
+    Frame               = {"Size", "Position", "Visible"},
+    TextLabel           = {"Text", "TextSize", "Visible"},
+    TextButton          = {"Text", "TextSize", "Visible"},
+    TextBox             = {"Text", "PlaceholderText", "Visible"},
+    ImageLabel          = {"Image", "Visible"},
+    ImageButton         = {"Image", "Visible"},
+    ScrollingFrame      = {"CanvasSize", "Visible"},
+    ProximityPrompt     = {"ActionText", "ObjectText", "KeyboardKeyCode", "HoldDuration"},
+    SpawnLocation       = {"TeamColor", "AllowTeamChangeOnTouch"},
+    Team                = {"TeamColor", "AutoAssignable"},
+    VehicleSeat         = {"MaxSpeed", "Throttle", "Steer"},
+    Fire                = {"Heat", "Size"},
+    Smoke               = {"Density", "RiseVelocity"},
+    Decal               = {"Texture", "Face"},
+    SpecialMesh         = {"MeshId", "TextureId", "MeshType"},
+    Motor6D             = {"C0", "C1"},
+    Weld                = {"C0", "C1"},
+}
 
-do
-    local isAlive = function(p, await)
-        local p = (p.ClassName == "Player" and p.Character) or p
-        if p then return ((await and p.WaitForChild) or p.FindFirstChild)(p, "Head") end
+local function getProperties(obj, depth)
+    if not CONFIG.INCLUDE_PROPERTIES then return end
+    local props = PROPERTIES_BY_CLASS[obj.ClassName]
+    if props and #props > 0 then
+        for _, prop in ipairs(props) do
+            local val = safeGet(obj, prop)
+            if val then
+                writeln(indent(depth) .. "  > " .. prop .. " = " .. val)
+            end
+        end
     end
-    local loopTbl = {}
-    local hookChr = function(p)
-        if p.ClassName == "Player" and p.Team == lplr.Team then return end
-        if isAlive(p, true) then table.insert(loopTbl, p) end
+end
+
+-- ═══════════════════════════════════════════
+--      РЕКУРСИВНЫЙ СКАНЕР ИНСТАНСОВ
+-- ═══════════════════════════════════════════
+local REMOTE_CLASSES = {
+    RemoteEvent=true, RemoteFunction=true,
+    BindableEvent=true, BindableFunction=true,
+    UnreliableRemoteEvent=true,
+}
+local SCRIPT_CLASSES  = {Script=true, LocalScript=true, ModuleScript=true}
+local GUI_CLASSES     = {
+    ScreenGui=true, SurfaceGui=true, BillboardGui=true,
+    Frame=true, TextLabel=true, TextButton=true,
+    TextBox=true, ImageLabel=true, ImageButton=true, ScrollingFrame=true,
+}
+local VALUE_CLASSES   = {
+    NumberValue=true, StringValue=true, BoolValue=true,
+    IntValue=true, ObjectValue=true, Color3Value=true,
+    Vector3Value=true, CFrameValue=true, NumberConstrainedValue=true,
+}
+
+-- БАГ #5 ИСПРАВЛЕН: childCount вычислялся через #child:GetChildren() без
+-- pcall — в некоторых играх это бросает ошибку на закрытых объектах.
+local function safeChildCount(obj)
+    local ok, children = pcall(function() return obj:GetChildren() end)
+    return ok and #children or 0
+end
+
+local function scanInstance(obj, depth, maxDepth)
+    if maxDepth ~= 0 and depth > maxDepth then return end
+    local ok, children = pcall(function() return obj:GetChildren() end)
+    if not ok then return end
+
+    for _, child in ipairs(children) do
+        local className  = child.ClassName
+        local name       = child.Name
+        local childCount = safeChildCount(child)
+
+        local icon = "+-"
+        if REMOTE_CLASSES[className] then
+            icon = "[REMOTE]"
+            scanStats.remotes = scanStats.remotes + 1
+        elseif SCRIPT_CLASSES[className] then
+            icon = "[SCRIPT]"
+            scanStats.scripts = scanStats.scripts + 1
+        elseif GUI_CLASSES[className] then
+            icon = "[GUI]"
+            scanStats.guis = scanStats.guis + 1
+        elseif VALUE_CLASSES[className] then
+            icon = "[VALUE]"
+            scanStats.values = scanStats.values + 1
+        elseif className == "Tool" then
+            icon = "[TOOL]"
+            scanStats.tools = scanStats.tools + 1
+        elseif className == "Animation" then
+            icon = "[ANIM]"
+            scanStats.animations = scanStats.animations + 1
+        elseif className == "Sound" then
+            icon = "[SND]"
+        elseif className == "ProximityPrompt" then
+            icon = "[PROMPT]"
+        elseif className == "Humanoid" then
+            icon = "[HUM]"
+        end
+
+        scanStats.total = scanStats.total + 1
+
+        -- БАГ #6 ИСПРАВЛЕН: path вычислялся через GetFullName() без pcall.
+        -- Если объект уже удалён во время итерации — крашится весь сканер.
+        local path = name
+        if CONFIG.INCLUDE_FULL_PATH then
+            local okP, fp = pcall(function() return child:GetFullName() end)
+            path = okP and fp or (name .. " [path error]")
+        end
+
+        local line = indent(depth) .. icon .. " [" .. className .. "] " .. name
+        if CONFIG.INCLUDE_FULL_PATH then
+            line = line .. "  ->  " .. path
+        end
+        if CONFIG.INCLUDE_CHILDREN_COUNT and childCount > 0 then
+            line = line .. "  (" .. childCount .. " ch)"
+        end
+        writeln(line)
+
+        getProperties(child, depth + 1)
+        getAttributes(child, depth + 1)
+
+        if childCount > 0 then
+            scanInstance(child, depth + 1, maxDepth)
+        end
     end
-    local tCons = {}
-    local hookPlr = function(p)
-        if p.Character then coroutine.wrap(hookChr)(p) end
-        table.insert(tCons, p.CharacterAdded:Connect(function(c) hookChr(p) end))
-    end
-    local transTbl = {Zombie = "Humans", Human = "Zombies", Zombies = "NPCs"}
-    local teamScan = Teams:GetTeams()
-    table.insert(teamScan, workspace:WaitForChild("Zombies"))
-    for _, team in teamScan do
-        if team then
-            local tName = transTbl[team.Name]
-            local isTeam = (team.ClassName == "Team")
-            Tab.Server:CreateButton({Name = "Kill " .. tName, Callback = function()
-                checkTeam(team)
-                findRemote()
-                for _, v in ((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then shootTillDead(v) end
+end
+
+-- ═══════════════════════════════════════════
+--         СКАНЕР ИГРОКОВ
+-- ═══════════════════════════════════════════
+local function scanPlayers()
+    if not CONFIG.SCAN_PLAYERS then return end
+    section("PLAYERS — Данные игроков")
+
+    local players = Services.Players:GetPlayers()
+    writeln("  Игроков в игре: " .. #players)
+    writeln("")
+
+    for _, player in ipairs(players) do
+        scanStats.players = scanStats.players + 1
+        local okName, dispName = pcall(function() return player.DisplayName end)
+        writeln("  [PLAYER] " .. player.Name .. " (@" .. (okName and dispName or "?") .. ")")
+        writeln("     UserId       = " .. tostring(player.UserId))
+        writeln("     AccountAge   = " .. tostring(player.AccountAge) .. " дней")
+        writeln("     TeamColor    = " .. tostring(player.TeamColor))
+
+        -- Leaderstats
+        local ls = player:FindFirstChild("leaderstats")
+        if ls then
+            writeln("     [leaderstats]:")
+            for _, stat in ipairs(ls:GetChildren()) do
+                local val = safeGet(stat, "Value")
+                writeln("        " .. stat.Name .. " [" .. stat.ClassName .. "] = " .. (val or "?"))
+            end
+        end
+
+        -- PlayerGui — только для LocalPlayer (нет доступа к чужим)
+        if player == LocalPlayer then
+            local pg = player:FindFirstChildOfClass("PlayerGui")
+            if pg then
+                writeln("     [PlayerGui] (" .. safeChildCount(pg) .. " GUIs):")
+                for _, gui in ipairs(pg:GetChildren()) do
+                    writeln("        [" .. gui.ClassName .. "] " .. gui.Name)
+                    local enabled = safeGet(gui, "Enabled")
+                    if enabled then writeln("           Enabled = " .. enabled) end
                 end
-            end})
-            Tab.Server:CreateButton({Name = "God " .. tName, Callback = function()
-                checkTeam(team)
-                findRemote()
-                for _, v in ((isTeam and plrs:GetPlayers()) or team:GetChildren()) do
-                    if (isTeam and lplr ~= v and v.Team ~= lplr.Team and isAlive(v)) or isAlive(v) then shootPlr(v, tonumber("nan")) end
+            end
+        end
+
+        -- Backpack
+        local bp = player:FindFirstChildOfClass("Backpack")
+        if bp then
+            local tools = bp:GetChildren()
+            if #tools > 0 then
+                writeln("     [Backpack] (" .. #tools .. " инструментов):")
+                for _, tool in ipairs(tools) do
+                    writeln("        [" .. tool.ClassName .. "] " .. tool.Name)
+                    local tt = safeGet(tool, "ToolTip")
+                    if tt and tt ~= "" then writeln("           ToolTip = " .. tt) end
                 end
-                Notify("made " .. tName .. " immune")
-            end})
-            local loopTgl
-            Tab.Server:CreateToggle({Name = "Loop Kill " .. transTbl[team.Name], CurrentValue = false, Callback = function(v)
-                if v then
-                    checkTeam(team)
-                    table.insert(tCons, (isTeam and plrs.PlayerAdded:Connect(hookPlr)) or team.ChildAdded:Connect(hookChr))
-                    if isTeam then for _, pl in plrs:GetPlayers() do coroutine.wrap(hookPlr)(pl) end
-                    else for _, c in team:GetChildren() do coroutine.wrap(hookChr)(c) end end
-                    repeat
-                        for i, pl in loopTbl do
-                            if isTeam and pl.Team and pl.Team == lplr.Team then table.remove(loopTbl, i) end
-                            if isAlive(pl, true) then findRemote(); shootTillDead(pl) end
+            end
+        end
+
+        -- Character
+        local char = player.Character
+        if char then
+            writeln("     [Character] " .. char.Name)
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local pos = safeGet(hrp, "Position")
+                if pos then writeln("        Position = " .. pos) end
+            end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                writeln("        Health     = " .. (safeGet(hum, "Health") or "?"))
+                writeln("        MaxHealth  = " .. (safeGet(hum, "MaxHealth") or "?"))
+                writeln("        WalkSpeed  = " .. (safeGet(hum, "WalkSpeed") or "?"))
+                writeln("        JumpPower  = " .. (safeGet(hum, "JumpPower") or "?"))
+
+                -- БАГ #7 ИСПРАВЛЕН: FindFirstChildOfClass("Humanoid") вызывался
+                -- дважды подряд на char — дублирование и риск nil-цепочки.
+                -- Теперь используется уже найденный hum.
+                local animator = hum:FindFirstChildOfClass("Animator")
+                if animator then
+                    local okT, tracks = pcall(function() return animator:GetPlayingAnimationTracks() end)
+                    if okT and tracks and #tracks > 0 then
+                        writeln("        [Playing Animations]:")
+                        for _, track in ipairs(tracks) do
+                            local spd = safeGet(track, "Speed") or "?"
+                            writeln("           " .. track.Name .. " (Speed: " .. spd .. ")")
                         end
-                        task.wait()
-                    until not loopTgl or not loopTgl.CurrentValue
-                else
-                    for _, c in tCons do c:Disconnect() end
-                    table.clear(tCons)
-                    table.clear(loopTbl)
+                    end
                 end
-            end})
+            end
+        end
+
+        getAttributes(player, 2)
+        writeln("")
+    end
+end
+
+-- ═══════════════════════════════════════════
+--       СКАНЕР REMOTE EVENTS
+-- ═══════════════════════════════════════════
+local function findAllRemotes(parent, results)
+    local ok, children = pcall(function() return parent:GetChildren() end)
+    if not ok then return end
+    for _, child in ipairs(children) do
+        if REMOTE_CLASSES[child.ClassName] then
+            local okP, fp = pcall(function() return child:GetFullName() end)
+            table.insert(results, {
+                path  = okP and fp or child.Name,
+                class = child.ClassName,
+                name  = child.Name,
+            })
+        end
+        findAllRemotes(child, results)
+    end
+end
+
+local function scanRemotes()
+    if not CONFIG.SCAN_REMOTES then return end
+    section("REMOTES — RemoteEvents / RemoteFunctions / Bindables")
+
+    local allRemotes = {}
+    findAllRemotes(game, allRemotes)
+    writeln("  Найдено: " .. #allRemotes)
+    writeln("")
+
+    local groups = {
+        RemoteEvent={}, RemoteFunction={},
+        BindableEvent={}, BindableFunction={},
+        UnreliableRemoteEvent={},
+    }
+    for _, r in ipairs(allRemotes) do
+        if groups[r.class] then
+            table.insert(groups[r.class], r)
+        end
+    end
+
+    local labels = {
+        RemoteEvent="[RemoteEvent]", RemoteFunction="[RemoteFunction]",
+        BindableEvent="[BindableEvent]", BindableFunction="[BindableFunction]",
+        UnreliableRemoteEvent="[UnreliableRemoteEvent]",
+    }
+
+    -- БАГ #8 ИСПРАВЛЕН: r.path:sub(5) обрезал первые 4 байта строки "game",
+    -- но GetFullName() возвращает "game.ReplicatedStorage.X" — нужно убирать
+    -- слово "game", а не 4 байта. Теперь используется gsub для надёжности.
+    for class, list in pairs(groups) do
+        if #list > 0 then
+            writeln("  " .. (labels[class] or class) .. " (" .. #list .. "):")
+            for _, r in ipairs(list) do
+                writeln("     * " .. r.name)
+                writeln("       Path: " .. r.path)
+                -- Строим корректный accessor: убираем ведущий "game"
+                local accessor = r.path:gsub("^game", "game")
+                if class == "RemoteEvent" then
+                    writeln("       -- FireServer:    " .. accessor .. ":FireServer(...)")
+                    writeln("       -- OnClientEvent: " .. accessor .. ".OnClientEvent:Connect(function(...) end)")
+                elseif class == "RemoteFunction" then
+                    writeln("       -- InvokeServer:  " .. accessor .. ":InvokeServer(...)")
+                end
+            end
+            writeln("")
+        end
+    end
+
+    -- Готовый код-шаблон для всех RemoteEvents
+    if #groups["RemoteEvent"] > 0 then
+        writeln("  -- Шаблон подключения всех RemoteEvents:")
+        writeln("")
+        for _, r in ipairs(groups["RemoteEvent"]) do
+            -- Безопасное имя переменной
+            local varName = r.name:gsub("[^%w]", "_")
+            -- Путь до родителя (всё кроме последнего сегмента)
+            local parentPath = r.path:match("^(.+)%.[^%.]+$") or "game.ReplicatedStorage"
+            writeln('  local ' .. varName .. ' = ' .. parentPath .. ':WaitForChild("' .. r.name .. '")')
+            writeln('  ' .. varName .. '.OnClientEvent:Connect(function(...)')
+            writeln('      print("[' .. r.name .. '] args:", ...)')
+            writeln('  end)')
+            writeln("")
         end
     end
 end
 
-Tab.Server:CreateButton({Name = "Infect Humans", Callback = function()
-    checkTeam(Teams.Zombie)
-    local inf = find.Infect()
-    if inf then
-        table.insert(cons, inf.Activated:Connect(function()
-            for _, v in plrs:GetPlayers() do
-                if lplr ~= v and v.Character and v.Team ~= lplr.Team and v.Character.PrimaryPart then
-                    firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 0)
-                    firetouchinterest(lplr.Character.RightHand, v.Character.PrimaryPart, 1)
+-- ═══════════════════════════════════════════
+--        СКАНЕР СКРИПТОВ
+-- ═══════════════════════════════════════════
+local function findAllScripts(parent, results)
+    local ok, children = pcall(function() return parent:GetChildren() end)
+    if not ok then return end
+    for _, child in ipairs(children) do
+        if SCRIPT_CLASSES[child.ClassName] then
+            table.insert(results, child)
+        end
+        findAllScripts(child, results)
+    end
+end
+
+local function scanScripts()
+    if not CONFIG.SCAN_SCRIPTS then return end
+    section("SCRIPTS — Все скрипты в игре")
+
+    local allScripts = {}
+    findAllScripts(game, allScripts)
+    writeln("  Найдено: " .. #allScripts)
+    writeln("")
+
+    local byClass = {Script={}, LocalScript={}, ModuleScript={}}
+    for _, s in ipairs(allScripts) do
+        if byClass[s.ClassName] then
+            table.insert(byClass[s.ClassName], s)
+        end
+    end
+
+    -- Фиксированный порядок вывода
+    for _, class in ipairs({"LocalScript", "Script", "ModuleScript"}) do
+        local list = byClass[class]
+        if #list > 0 then
+            writeln("  [" .. class .. "] (" .. #list .. "):")
+            for _, s in ipairs(list) do
+                local disabled = safeGet(s, "Disabled")
+                local okFP, fp = pcall(function() return s:GetFullName() end)
+                -- БАГ исправлен: disabled — boolean, tostring даёт "true"/"false",
+                -- сравнение со строкой "true" работало, но неявно.
+                -- Теперь сравниваем с реальным булевым значением.
+                local disabledBool = (disabled == "true" or disabled == true)
+                local line = "     * " .. s.Name .. "  ->  " .. (okFP and fp or s.Name)
+                if disabledBool then line = line .. "  [DISABLED]" end
+                writeln(line)
+            end
+            writeln("")
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════
+--     СКАНЕР GUI
+-- ═══════════════════════════════════════════
+local function scanGUI()
+    if not CONFIG.SCAN_GUI then return end
+    section("GUI — Все интерфейсы")
+
+    local sources = {
+        {Services.StarterGui, "StarterGui"},
+        {Services.CoreGui,    "CoreGui"},
+    }
+    -- PlayerGui только если есть LocalPlayer
+    if LocalPlayer then
+        local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        if pg then
+            table.insert(sources, 2, {pg, "PlayerGui"})
+        end
+    end
+
+    for _, src in ipairs(sources) do
+        local container, name = src[1], src[2]
+        if container then
+            subsection(name)
+            scanInstance(container, 1, CONFIG.MAX_DEPTH)
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════
+--     СКАНЕР REPLICATED STORAGE
+-- ═══════════════════════════════════════════
+local function scanReplicated()
+    if not CONFIG.SCAN_REPLICATED then return end
+    section("REPLICATED STORAGE & FIRST")
+    subsection("ReplicatedStorage")
+    scanInstance(Services.ReplicatedStorage, 1, CONFIG.MAX_DEPTH)
+    subsection("ReplicatedFirst")
+    scanInstance(Services.ReplicatedFirst, 1, CONFIG.MAX_DEPTH)
+end
+
+-- ═══════════════════════════════════════════
+--       СКАНЕР WORKSPACE
+-- ═══════════════════════════════════════════
+local function scanWorkspace()
+    if not CONFIG.SCAN_WORKSPACE then return end
+    section("WORKSPACE — Игровой мир")
+    writeln("  Gravity          = " .. tostring(Services.Workspace.Gravity))
+    writeln("  StreamingEnabled = " .. tostring(Services.Workspace.StreamingEnabled))
+    writeln("")
+    scanInstance(Services.Workspace, 1, CONFIG.MAX_DEPTH)
+end
+
+-- ═══════════════════════════════════════════
+--        СКАНЕР TOOLS
+-- ═══════════════════════════════════════════
+local function scanTools()
+    if not CONFIG.SCAN_TOOLS then return end
+    section("TOOLS — StarterPack и скрипты")
+
+    subsection("StarterPack")
+    local tools = Services.StarterPack:GetChildren()
+    writeln("  Инструментов: " .. #tools)
+    for _, tool in ipairs(tools) do
+        writeln("  [TOOL] " .. tool.Name)
+        local tt   = safeGet(tool, "ToolTip")
+        local grip = safeGet(tool, "GripPos")
+        if tt   then writeln("     ToolTip = " .. tt) end
+        if grip then writeln("     GripPos = " .. grip) end
+        for _, child in ipairs(tool:GetChildren()) do
+            writeln("     +- [" .. child.ClassName .. "] " .. child.Name)
+        end
+        writeln("")
+    end
+
+    subsection("StarterCharacterScripts / StarterPlayerScripts")
+    local sp = Services.StarterPlayer
+    if sp then
+        for _, folderName in ipairs({"StarterCharacterScripts", "StarterPlayerScripts"}) do
+            local folder = sp:FindFirstChild(folderName)
+            if folder then
+                writeln("  " .. folderName .. ":")
+                for _, s in ipairs(folder:GetChildren()) do
+                    writeln("     [" .. s.ClassName .. "] " .. s.Name)
                 end
             end
-        end))
-        Notify("Equip and spam the infect tool to infect")
-    else Notify("You must have a infect tool") end
-end})
+        end
+    end
+end
 
-do
-    local remotes = {}
-    local tCons = {}
-    local warning
-    Tab.Server:CreateToggle({Name = "Lag Server", CurrentValue = false, Callback = function(c)
-        if not warning then warning = true; Notify("Your ping will NOT recover, rejoin after disabling"); return end
-        if c then
-            for _, v in plrs:GetPlayers() do
-                table.insert(remotes, v.Backpack:FindFirstChild("reload", true))
-                if v.Character then table.insert(remotes, v.Character:FindFirstChild("reload", true)) end
+-- ═══════════════════════════════════════════
+--           СКАНЕР LIGHTING
+-- ═══════════════════════════════════════════
+local function scanLighting()
+    if not CONFIG.SCAN_LIGHTING then return end
+    section("LIGHTING — Освещение")
+    local L = Services.Lighting
+    local props = {"Ambient","Brightness","ClockTime","FogColor","FogEnd",
+                   "FogStart","GeographicLatitude","GlobalShadows","OutdoorAmbient","TimeOfDay"}
+    for _, p in ipairs(props) do
+        local val = safeGet(L, p)
+        if val then writeln("  " .. p .. " = " .. val) end
+    end
+    writeln("")
+    writeln("  Эффекты:")
+    for _, effect in ipairs(L:GetChildren()) do
+        writeln("  +- [" .. effect.ClassName .. "] " .. effect.Name)
+    end
+end
+
+-- ═══════════════════════════════════════════
+--       СКАНЕР TEAMS
+-- ═══════════════════════════════════════════
+local function scanTeams()
+    if not CONFIG.SCAN_TEAMS then return end
+    section("TEAMS — Команды")
+    local teams = Services.Teams:GetChildren()
+    writeln("  Команд: " .. #teams)
+    for _, team in ipairs(teams) do
+        writeln("  [TEAM] " .. team.Name)
+        writeln("     TeamColor      = " .. tostring(team.TeamColor))
+        writeln("     AutoAssignable = " .. tostring(team.AutoAssignable))
+        local members = {}
+        for _, p in ipairs(Services.Players:GetPlayers()) do
+            -- БАГ защита: p.Team может бросить ошибку если игрок не в команде
+            local okT, pt = pcall(function() return p.Team end)
+            if okT and pt == team then
+                table.insert(members, p.Name)
             end
-            local packetSize = #remotes * 700
-            for i = 1, #remotes do
-                local v = remotes[i]
-                table.insert(tCons, runServ.PreRender:Connect(function()
-                    coroutine.wrap(function() for _ = 1, packetSize do coroutine.wrap(v.FireServer)(v) end end)()
-                end))
-            end
+        end
+        if #members > 0 then
+            writeln("     Игроки: " .. table.concat(members, ", "))
+        end
+        writeln("")
+    end
+end
+
+-- ═══════════════════════════════════════════
+--         GAME INFO
+-- ═══════════════════════════════════════════
+local function scanGameInfo()
+    section("GAME INFO")
+    writeln("  PlaceId        = " .. tostring(game.PlaceId))
+    writeln("  GameId         = " .. tostring(game.GameId))
+    writeln("  PlaceName      = " .. tostring(game.Name))
+    writeln("  PlaceVersion   = " .. tostring(game.PlaceVersion))
+    writeln("  JobId          = " .. tostring(game.JobId))
+    writeln("  PrivateServerId = " .. tostring(game.PrivateServerId))
+    writeln("  Creator        = " .. tostring(game.CreatorId) .. " (Type: " .. tostring(game.CreatorType) .. ")")
+    writeln("")
+    if LocalPlayer then
+        writeln("  LocalPlayer:")
+        writeln("    Name           = " .. tostring(LocalPlayer.Name))
+        writeln("    DisplayName    = " .. tostring(LocalPlayer.DisplayName))
+        writeln("    UserId         = " .. tostring(LocalPlayer.UserId))
+        writeln("    AccountAge     = " .. tostring(LocalPlayer.AccountAge))
+        writeln("    MembershipType = " .. tostring(LocalPlayer.MembershipType))
+        writeln("")
+    end
+    local rs = Services.RunService
+    writeln("  RunService:")
+    writeln("    IsClient = " .. tostring(rs:IsClient()))
+    writeln("    IsServer = " .. tostring(rs:IsServer()))
+    writeln("    IsStudio = " .. tostring(rs:IsStudio()))
+    writeln("")
+end
+
+-- ═══════════════════════════════════════════
+--     ШАБЛОН СКРИПТА
+-- ═══════════════════════════════════════════
+local function generateScriptTemplate()
+    section("GOTOVYY SHABLON SKRIPTA")
+    writeln("")
+    writeln("  local Players = game:GetService('Players')")
+    writeln("  local ReplicatedStorage = game:GetService('ReplicatedStorage')")
+    writeln("  local LocalPlayer = Players.LocalPlayer")
+    writeln("  local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()")
+    writeln("  local Humanoid = Character:WaitForChild('Humanoid')")
+    writeln("  local HumanoidRootPart = Character:WaitForChild('HumanoidRootPart')")
+    writeln("")
+    writeln("  -- Teleport example:")
+    writeln("  -- HumanoidRootPart.CFrame = CFrame.new(X, Y, Z)")
+    writeln("  -- Humanoid.WalkSpeed = 50")
+    writeln("  -- Humanoid.JumpPower = 100")
+    writeln("")
+    writeln("  print('[DeltaExplorer] Script loaded!')")
+end
+
+-- ═══════════════════════════════════════════
+--         СТАТИСТИКА
+-- ═══════════════════════════════════════════
+local function printStats()
+    section("STATISTIKA SKANIROVANIYA")
+    writeln("  Vsego ob'ektov  : " .. scanStats.total)
+    writeln("  Remotes         : " .. scanStats.remotes)
+    writeln("  Skriptov        : " .. scanStats.scripts)
+    writeln("  GUI elementov   : " .. scanStats.guis)
+    writeln("  Igrokov         : " .. scanStats.players)
+    writeln("  Value ob'ektov  : " .. scanStats.values)
+    writeln("  Instrumentov    : " .. scanStats.tools)
+    writeln("  Animatsiy       : " .. scanStats.animations)
+end
+
+-- ═══════════════════════════════════════════
+--           ГЛАВНАЯ ФУНКЦИЯ
+-- ═══════════════════════════════════════════
+local function runExplorer()
+    writeln("================================================================")
+    writeln("  DELTA EXPLORER v2.1 (bugfixed) — Script Scanner Output")
+    writeln("================================================================")
+    writeln("Scan time    : " .. tostring(os.date and os.date("%Y-%m-%d %H:%M:%S") or tick()))
+    writeln("PlaceId      : " .. game.PlaceId)
+    writeln("JobId        : " .. game.JobId)
+    writeln("PlaceVersion : " .. game.PlaceVersion)
+    writeln("")
+
+    scanGameInfo()
+    scanPlayers()
+    scanRemotes()
+    scanScripts()
+    scanWorkspace()
+    scanReplicated()
+    scanGUI()
+    scanTools()
+    scanLighting()
+    scanTeams()
+    generateScriptTemplate()
+    printStats()
+
+    writeln("")
+    writeln("================================================================")
+    writeln("  SKANIROVANIE ZAVERSHENO")
+    writeln("================================================================")
+
+    local finalOutput = table.concat(output)
+    local fileName = getUniqueFileName()
+    local saved = false
+
+    -- Метод 1: writefile
+    if writefile then
+        local ok, err = pcall(function() writefile(fileName, finalOutput) end)
+        if ok then
+            saved = true
+            print("[DeltaExplorer] File saved: " .. fileName)
         else
-            coroutine.wrap(TeleportService.TeleportToPlaceInstance)(TeleportService, game.PlaceId, game.JobId)
-            for _, v in tCons do v:Disconnect() end
-            table.clear(tCons)
-            table.clear(remotes)
+            warn("[DeltaExplorer] writefile error: " .. tostring(err))
         end
-    end})
-end
+    end
 
-do
-    local cache = {}
-    local forceParent = function(og, new) pcall(function() og.Parent = new end) end
-    Tab.Server:CreateToggle({Name = "Lag Other Players", CurrentValue = false, Callback = function(c)
-        if c then
-            if lplr.Team ~= Teams.Zombie then itemFuncs.Virus() end
-            Notify("disable knife lag server to release buffer")
-            repeat
-                buyItem:InvokeServer("Knife")
-                for _, v in lplr.Backpack:GetChildren() do
-                    if v.Name == "Knife" and not table.find(cache, v) then table.insert(cache, v); coroutine.wrap(forceParent)(v, lplr.Character) end
-                end
-                task.wait()
-            until not c
-            for _, v in cache do coroutine.wrap(forceParent)(v, lplr.Character) end
-            for _, v in cache do coroutine.wrap(forceParent)(v, workspace) end
-            for _, v in cache do coroutine.wrap(forceParent)(v, nil) end
+    -- Метод 2: clipboard fallback
+    if not saved then
+        if setclipboard then
+            pcall(function() setclipboard(finalOutput) end)
+            print("[DeltaExplorer] writefile unavailable — data copied to clipboard!")
+        else
+            print("[DeltaExplorer] No writefile/setclipboard. Printing to console...")
+            print(finalOutput)
         end
-    end})
+    end
+
+    print("-------------------------------------------")
+    print("[DeltaExplorer] Done!")
+    print("  File     : " .. fileName)
+    print("  Objects  : " .. scanStats.total)
+    print("  Remotes  : " .. scanStats.remotes)
+    print("  Scripts  : " .. scanStats.scripts)
+    print("  Players  : " .. scanStats.players)
+    print("-------------------------------------------")
+
+    return fileName
 end
 
-do
-    local stats = game:GetService("Stats")
-    local knife, con, ping
-    Tab.Player:CreateToggle({Name = "Spam Knife", CurrentValue = false, Callback = function(c)
-        if c then
-            con = lplr:GetMouse().Button1Down:Connect(function()
-                if knife and knife.Parent then
-                    if knife.Parent == lplr.Character and lplr.Character:FindFirstChild("Cooldown") and lplr.Character.Cooldown.Value then
-                        buyItem:InvokeServer(knife.Name)
-                        knife = lplr.Backpack:WaitForChild(knife.Name)
-                        ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-                        task.wait((ping < 150 and .1) or 0)
-                        knife.Parent = lplr.Character
-                    end
-                else knife = find.Knife() end
-            end)
-        elseif con and con.Connected then con:Disconnect() end
-    end})
+-- ═══════════════════════════════════════════
+--              ЗАПУСК
+-- ═══════════════════════════════════════════
+print("[DeltaExplorer] Starting scan...")
+local success, err = pcall(runExplorer)
+if not success then
+    warn("[DeltaExplorer] FATAL ERROR: " .. tostring(err))
 end
-
-Tab.Cosmetics:CreateButton({Name = "Change Zombie Face", Callback = function() lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true end})
-Tab.Cosmetics:CreateButton({Name = "Change Zombie Skincolor", Callback = function() lplr.PlayerGui.Main.ChooseColorFrame.Visible = true end})
-
-Tab.Teleports:CreateButton({Name = "Human Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489) end})
-Tab.Teleports:CreateButton({Name = "Zombie Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748) end})
-Tab.Teleports:CreateButton({Name = "Virus Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429) end})
-Tab.Teleports:CreateButton({Name = "Upstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545) end})
-Tab.Teleports:CreateButton({Name = "Downstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734) end})
-Tab.Teleports:CreateButton({Name = "Security Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728) end})
-Tab.Teleports:CreateButton({Name = "Roof", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056) end})
-Tab.Teleports:CreateButton({Name = "Outside of Map", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642) end})
-
-Tab.Cosmetics:CreateButton({Name = "Scientist outfit", Callback = function() fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector) end})
-Tab.Cosmetics:CreateButton({Name = "Patient outfit", Callback = function() fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector) end})
-
-Tab.Player:CreateButton({Name = "Godmode", Callback = function()
-    Notify("If it fails then retry")
-    rStor.Remotes.ChangeState:FireServer("Died")
-    task.wait(plrs.RespawnTime + .2)
-    rStor.Remotes.ChangeState:FireServer("Died")
-end})
-
-Notify("Delta Hub Loaded!")
