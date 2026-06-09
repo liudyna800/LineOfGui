@@ -1,386 +1,196 @@
--- Delta Explorer v2.2 — Daycare Scanner
--- Сканирует всю игру и пишет в файл
+-- Загрузка библиотеки Rayfield
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local out = ""
-local function w(s) out = out .. (s or "") .. "\n" end
-local function sep(t) w("\n=== " .. t .. " ===\n") end
+-- Создание главного окна
+local Window = Rayfield:CreateWindow({
+   Name = "Facility of Redemption | Эксплоит Хаб",
+   LoadingTitle = "Загрузка уязвимостей Delta...",
+   LoadingSubtitle = "by AI Collaborator",
+   Theme = "Default", -- Можно сменить на DarkTheme, Ocean и т.д.
+   DisableRayfieldPrompts = false
+})
 
-local function safeGetService(n)
-    local ok, s = pcall(function() return game:GetService(n) end)
-    return ok and s or nil
-end
+-- Переменные для работы функций
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
-local function val2str(v)
-    if v == nil then return "nil" end
-    local t = typeof(v)
-    if t == "Instance" then
-        local ok, p = pcall(function() return v:GetFullName() end)
-        return "[" .. v.ClassName .. "] " .. (ok and p or "?")
-    elseif t == "CFrame" then return ("CFrame(%.2f,%.2f,%.2f)"):format(v.X,v.Y,v.Z)
-    elseif t == "Vector3" then return ("V3(%.2f,%.2f,%.2f)"):format(v.X,v.Y,v.Z)
-    elseif t == "Color3" then return ("Color3(%.2f,%.2f,%.2f)"):format(v.R,v.G,v.B)
-    elseif t == "UDim2" then return ("UDim2(%.2f,%d,%.2f,%d)"):format(v.X.Scale,v.X.Offset,v.Y.Scale,v.Y.Offset)
-    else return tostring(v) end
-end
+local killAuraEnabled = false
+local autoLootEnabled = false
 
-local function safeGet(o, p)
-    local ok, v = pcall(function() return o[p] end)
-    return ok and v ~= nil and val2str(v) or nil
-end
+-- =============================================================================
+-- ВКЛАДКА: КИЛЛ-АУРА И БОЙ
+-- =============================================================================
+local CombatTab = Window:CreateTab("⚔️ Бой / Килл-Аура", nil)
 
--- Рекурсивный обход
-local function scan(obj, depth, maxd)
-    if maxd and maxd > 0 and depth > maxd then return end
-    local ok, children = pcall(function() return obj:GetChildren() end)
-    if not ok then return end
-    for _, c in ipairs(children) do
-        local okFP, fp = pcall(function() return c:GetFullName() end)
-        local path = okFP and fp or c.Name
-        local okCC, cc = pcall(function() return #c:GetChildren() end)
-        local childCount = okCC and cc or 0
+CombatTab:CreateSection("Описание уязвимости")
+CombatTab:CreateParagraph({
+    Title = "Что это такое?", 
+    Content = "Использует дыру в защите события 'OnWeaponDealtDamage'. Сервер не проверяет, держишь ли ты оружие в руках и находишься ли рядом с целью. Позволяет бить врагов на дистанции."
+})
 
-        w(string.rep("  ", depth) .. "[" .. c.ClassName .. "] " .. c.Name .. " | " .. path .. " | children:" .. childCount)
+CombatTab:CreateSection("Настройки функции")
+CombatTab:CreateToggle({
+   Name = "Активировать Килл-Ауру",
+   CurrentValue = false,
+   Flag = "KillAuraFlag",
+   Callback = function(Value)
+      killAuraEnabled = Value
+      if killAuraEnabled then
+          task.spawn(function()
+              while killAuraEnabled do
+                  local damageRemote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("OnWeaponDealtDamage")
+                  if damageRemote then
+                      for _, p in ipairs(Players:GetPlayers()) do
+                          if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+                              -- Триггерим нанесение урона напрямую на сервер
+                              damageRemote:FireServer(p.Character.Humanoid, 50) 
+                          end
+                      end
+                  end
+                  task.wait(0.3) -- Безопасная задержка, чтобы не крашнуло по лимиту пакетов
+              end
+          end)
+      end
+   end,
+})
 
-        -- Атрибуты
-        local okA, attrs = pcall(function() return c:GetAttributes() end)
-        if okA and attrs then
-            for k, v in pairs(attrs) do
-                w(string.rep("  ", depth) .. "  ATTR: " .. tostring(k) .. " = " .. tostring(v))
-            end
-        end
+-- =============================================================================
+-- ВКЛАДКА: ДЛЯ ЛЮДЕЙ (HUMANS)
+-- =============================================================================
+local HumanTab = Window:CreateTab("🧑 Фракция: Люди", nil)
 
-        -- Свойства по классу
-        local cls = c.ClassName
-        local props = {
-            Part={"Position","Size","Anchored","CanCollide","Material","BrickColor","Transparency"},
-            MeshPart={"Position","Size","Anchored","MeshId","TextureID"},
-            UnionOperation={"Position","Size","Anchored"},
-            Model={"PrimaryPart","WorldPivot"},
-            Tool={"ToolTip","RequiresHandle","GripPos","GripForward","GripUp"},
-            Animation={"AnimationId"},
-            Humanoid={"MaxHealth","Health","WalkSpeed","JumpPower","DisplayName","RigType"},
-            NumberValue={"Value"},StringValue={"Value"},BoolValue={"Value"},
-            IntValue={"Value"},ObjectValue={"Value"},
-            NumberConstrainedValue={"Value","MinValue","MaxValue"},
-            Sound={"SoundId","Volume","Looped","Playing","TimePosition"},
-            RemoteEvent={},RemoteFunction={},BindableEvent={},BindableFunction={},
-            UnreliableRemoteEvent={},
-            Script={"Disabled","RunContext"},LocalScript={"Disabled"},ModuleScript={},
-            ScreenGui={"Enabled","ResetOnSpawn","DisplayOrder","ZIndexBehavior"},
-            Frame={"Size","Position","Visible","BackgroundColor3","BackgroundTransparency"},
-            TextLabel={"Text","TextSize","TextColor3","Visible","Font"},
-            TextButton={"Text","TextSize","TextColor3","Visible","Font"},
-            TextBox={"Text","PlaceholderText","Visible"},
-            ImageLabel={"Image","ImageColor3","Visible"},
-            ImageButton={"Image","ImageColor3","Visible"},
-            ScrollingFrame={"CanvasSize","ScrollingDirection","Visible"},
-            ProximityPrompt={"ActionText","ObjectText","KeyboardKeyCode","HoldDuration","MaxActivationDistance"},
-            Seat={"Disabled"},
-            VehicleSeat={"MaxSpeed","Throttle","Steer","Disabled"},
-            SpawnLocation={"TeamColor","AllowTeamChangeOnTouch","Enabled"},
-            Team={"TeamColor","AutoAssignable"},
-            Fire={"Color","SecondaryColor","Heat","Size"},
-            Smoke={"Color","Density","RiseVelocity","Opacity"},
-            Sparkles={"SparkleColor"},
-            Decal={"Texture","Face","Transparency"},
-            SpecialMesh={"MeshId","TextureId","MeshType","Scale"},
-            Motor6D={"C0","C1","Part0","Part1"},
-            Weld={"C0","C1","Part0","Part1"},
-            BillboardGui={"Size","StudsOffset","Enabled","AlwaysOnTop"},
-            SurfaceGui={"Enabled","Face"},
-            SelectionBox={"Color3","LineThickness"},
-            BodyVelocity={"Velocity","MaxForce"},
-            BodyPosition={"Position","MaxForce"},
-            BodyGyro={"CFrame","MaxTorque"},
-            Folder={},Configuration={},
-            Animator={},
-        }
-        local pp = props[cls]
-        if pp then
-            for _, pr in ipairs(pp) do
-                local v = safeGet(c, pr)
-                if v then w(string.rep("  ",depth).."  "..pr.." = "..v) end
-            end
-        end
+HumanTab:CreateSection("Когда использовать?")
+HumanTab:CreateParagraph({
+    Title = "Инструкция", 
+    Content = "Используй эти функции, если ты играешь за выживших (Людей). Помогает быстро собрать лучшее оружие на карте, хилки и сбежать от монстров через закрытые двери."
+})
 
-        if childCount > 0 then
-            scan(c, depth + 1, maxd)
-        end
-    end
-end
+HumanTab:CreateSection("Управление")
+HumanTab:CreateToggle({
+   Name = "Авто-сбор предметов (Мачете, Катана, Стимуляторы)",
+   CurrentValue = false,
+   Flag = "AutoLootFlag",
+   Callback = function(Value)
+       autoLootEnabled = Value
+       if autoLootEnabled then
+           task.spawn(function()
+               while autoLootEnabled do
+                   local pickItems = Workspace:FindFirstChild("PickItem")
+                   local char = LocalPlayer.Character
+                   local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                   
+                   if pickItems and hrp then
+                       for _, item in ipairs(pickItems:GetChildren()) do
+                           local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                           local part = item:FindFirstChildWhichIsA("BasePart", true)
+                           
+                           if prompt and part then
+                               -- Мгновенно прожимаем сбор со всей карты
+                               fireproximityprompt(prompt)
+                           end
+                       end
+                   end
+                   task.wait(2) -- Проверка карты на новые предметы каждые 2 секунды
+               end
+           end)
+       end
+   end,
+})
 
--- ========== GAME INFO ==========
-sep("GAME INFO")
-w("PlaceId        = " .. tostring(game.PlaceId))
-w("GameId         = " .. tostring(game.GameId))
-w("PlaceName      = " .. tostring(game.Name))
-w("PlaceVersion   = " .. tostring(game.PlaceVersion))
-w("JobId          = " .. tostring(game.JobId))
-w("PrivateServerId= " .. tostring(game.PrivateServerId))
-w("CreatorId      = " .. tostring(game.CreatorId))
-w("CreatorType    = " .. tostring(game.CreatorType))
-local rs2 = game:GetService("RunService")
-w("IsClient       = " .. tostring(rs2:IsClient()))
-w("IsStudio       = " .. tostring(rs2:IsStudio()))
+HumanTab:CreateButton({
+   Name = "Взломать и открыть все двери/шкафы на карте",
+   Callback = function()
+       local count = 0
+       if Workspace:FindFirstChild("Map") then
+           for _, obj in ipairs(Workspace.Map:GetDescendants()) do
+               if obj:IsA("ProximityPrompt") then
+                   obj.HoldDuration = 0 -- Убираем задержку удержания кнопки
+                   fireproximityprompt(obj)
+                   count = count + 1
+               end
+           end
+           Rayfield:Notify({Title = "Успешно!", Content = "Взломано объектов на карте: " .. tostring(count), Duration = 3})
+       else
+           Rayfield:Notify({Title = "Ошибка", Content = "Папка папки Map не найдена в Workspace", Duration = 3})
+       end
+   end,
+})
 
--- ========== LOCAL PLAYER ==========
-sep("LOCAL PLAYER")
-local lp = game:GetService("Players").LocalPlayer
-if lp then
-    w("Name           = " .. tostring(lp.Name))
-    w("DisplayName    = " .. tostring(lp.DisplayName))
-    w("UserId         = " .. tostring(lp.UserId))
-    w("AccountAge     = " .. tostring(lp.AccountAge))
-    w("MembershipType = " .. tostring(lp.MembershipType))
-    w("TeamColor      = " .. tostring(lp.TeamColor))
-    local okT, t = pcall(function() return lp.Team end)
-    if okT and t then w("Team           = " .. tostring(t.Name)) end
-end
+-- =============================================================================
+-- ВКЛАДКА: ДЛЯ МОНСТРОВ (GOOBEAST)
+-- =============================================================================
+local BeastTab = Window:CreateTab("🦠 Фракция: GooBeast", nil)
 
--- ========== ALL PLAYERS ==========
-sep("ALL PLAYERS")
-for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
-    w("[PLAYER] " .. p.Name .. " | UserId:" .. p.UserId .. " | DisplayName:" .. p.DisplayName .. " | AccountAge:" .. p.AccountAge)
-    -- leaderstats
-    local ls = p:FindFirstChild("leaderstats")
-    if ls then
-        w("  [leaderstats]")
-        for _, s in ipairs(ls:GetChildren()) do
-            local v = safeGet(s, "Value")
-            w("    " .. s.Name .. " [" .. s.ClassName .. "] = " .. (v or "?"))
-        end
-    end
-    -- все children игрока (stats, значения и т.д.)
-    for _, c in ipairs(p:GetChildren()) do
-        if c.Name ~= "leaderstats" then
-            w("  [" .. c.ClassName .. "] " .. c.Name)
-            local v = safeGet(c, "Value")
-            if v then w("    Value = " .. v) end
-            for _, cc in ipairs(c:GetChildren()) do
-                local vv = safeGet(cc, "Value")
-                w("    [" .. cc.ClassName .. "] " .. cc.Name .. (vv and (" = "..vv) or ""))
-            end
-        end
-    end
-    -- Character
-    local char = p.Character
-    if char then
-        w("  [Character] " .. char.Name)
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local pos = safeGet(hrp, "Position")
-            if pos then w("    HRP.Position = " .. pos) end
-        end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            w("    Health    = " .. (safeGet(hum,"Health") or "?"))
-            w("    MaxHealth = " .. (safeGet(hum,"MaxHealth") or "?"))
-            w("    WalkSpeed = " .. (safeGet(hum,"WalkSpeed") or "?"))
-            w("    JumpPower = " .. (safeGet(hum,"JumpPower") or "?"))
-            w("    DisplayName = " .. (safeGet(hum,"DisplayName") or "?"))
-            local anim = hum:FindFirstChildOfClass("Animator")
-            if anim then
-                local okTr, tracks = pcall(function() return anim:GetPlayingAnimationTracks() end)
-                if okTr and tracks and #tracks > 0 then
-                    w("    [Playing Animations]")
-                    for _, tr in ipairs(tracks) do
-                        w("      " .. tr.Name .. " AnimId:" .. tostring(tr.Animation and tr.Animation.AnimationId or "?") .. " Speed:" .. tostring(tr.Speed))
-                    end
-                end
-            end
-        end
-        -- Все части персонажа
-        for _, part in ipairs(char:GetChildren()) do
-            w("    [" .. part.ClassName .. "] " .. part.Name)
-        end
-    end
-    -- Backpack
-    local bp = p:FindFirstChildOfClass("Backpack")
-    if bp then
-        local tools = bp:GetChildren()
-        w("  [Backpack] tools:" .. #tools)
-        for _, t2 in ipairs(tools) do
-            w("    [" .. t2.ClassName .. "] " .. t2.Name .. " | ToolTip:" .. (safeGet(t2,"ToolTip") or ""))
-        end
-    end
-    -- PlayerGui (только наш)
-    if p == lp then
-        local pg = p:FindFirstChildOfClass("PlayerGui")
-        if pg then
-            w("  [PlayerGui]")
-            scan(pg, 2, 0)
-        end
-    end
-    w("")
-end
+BeastTab:CreateSection("Когда использовать?")
+BeastTab:CreateParagraph({
+    Title = "Инструкция", 
+    Content = "Используй во время игры за зараженных. Позволяет моментально выслеживать выживших сквозь любые препятствия стен лаборатории и ломать их защиту."
+})
 
--- ========== REMOTES (полный поиск) ==========
-sep("ALL REMOTES")
-local remoteClasses = {RemoteEvent=true,RemoteFunction=true,BindableEvent=true,BindableFunction=true,UnreliableRemoteEvent=true}
-local function findRemotes(parent, list)
-    local ok, ch = pcall(function() return parent:GetChildren() end)
-    if not ok then return end
-    for _, c in ipairs(ch) do
-        if remoteClasses[c.ClassName] then
-            local okFP, fp = pcall(function() return c:GetFullName() end)
-            table.insert(list, {name=c.Name, class=c.ClassName, path=okFP and fp or c.Name})
-        end
-        findRemotes(c, list)
-    end
-end
-local allRemotes = {}
-findRemotes(game, allRemotes)
-w("Total remotes found: " .. #allRemotes)
-w("")
-for _, r in ipairs(allRemotes) do
-    w("[" .. r.class .. "] " .. r.name)
-    w("  Path: " .. r.path)
-    if r.class == "RemoteEvent" then
-        w("  FireServer:    " .. r.path .. ":FireServer(...)")
-        w("  OnClientEvent: " .. r.path .. ".OnClientEvent:Connect(function(...) print(...) end)")
-    elseif r.class == "RemoteFunction" then
-        w("  InvokeServer:  " .. r.path .. ":InvokeServer(...)")
-    elseif r.class == "BindableEvent" then
-        w("  Fire:          " .. r.path .. ":Fire(...)")
-        w("  Event:         " .. r.path .. ".Event:Connect(function(...) print(...) end)")
-    end
-    w("")
-end
+BeastTab:CreateSection("Управление")
+BeastTab:CreateButton({
+   Name = "Активировать Wallhack / ESP на всех людей",
+   Callback = function()
+       for _, p in ipairs(Players:GetPlayers()) do
+           if p ~= LocalPlayer and p.Character then
+               -- Удаляем старый ESP если был
+               if p.Character:FindFirstChild("BeastESP") then p.Character.BeastESP:Destroy() end
+               
+               -- Создаем красивую подсветку Rayfield-стиля
+               local highlight = Instance.new("Highlight")
+               highlight.Name = "BeastESP"
+               highlight.FillColor = Color3.fromRGB(0, 255, 128)
+               highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+               highlight.FillTransparency = 0.4
+               highlight.Parent = p.Character
+           end
+       end
+       Rayfield:Notify({Title = "ESP включен", Content = "Все игроки теперь подсвечиваются сквозь стены", Duration = 3})
+   end,
+})
 
--- ========== REPLICATED STORAGE ==========
-sep("REPLICATED STORAGE")
-scan(game:GetService("ReplicatedStorage"), 0, 0)
+-- =============================================================================
+-- ВКЛАДКА: СМЕНА КОМАНДЫ (TEAM EXPLOITS)
+-- =============================================================================
+local TeamTab = Window:CreateTab("🔄 Смена Фракции", nil)
 
--- ========== REPLICATED FIRST ==========
-sep("REPLICATED FIRST")
-scan(game:GetService("ReplicatedFirst"), 0, 0)
+TeamTab:CreateSection("Что это такое?")
+TeamTab:CreateParagraph({
+    Title = "Обход выбора фракции", 
+    Content = "Сервер принимает запросы на смену команды в любой момент времени через незащищенную папку Team в ReplicatedStorage."
+})
 
--- ========== WORKSPACE ==========
-sep("WORKSPACE")
-local ws = game:GetService("Workspace")
-w("Gravity          = " .. tostring(ws.Gravity))
-w("StreamingEnabled = " .. tostring(ws.StreamingEnabled))
-w("FallenPartsDestroyHeight = " .. tostring(ws.FallenPartsDestroyHeight))
-w("")
-scan(ws, 0, 0)
+TeamTab:CreateSection("Выбор стороны")
+TeamTab:CreateButton({
+   Name = "Стать Человеком (Human)",
+   Callback = function()
+       local remote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("Team") and ReplicatedStorage.RemoteEvents.Team:FindFirstChild("Human")
+       if remote then 
+           remote:FireServer() 
+       else
+           Rayfield:Notify({Title = "Ошибка", Content = "Ремоут смены команды не найден", Duration = 3})
+       end
+   end,
+})
 
--- ========== STARTER GUI ==========
-sep("STARTER GUI")
-scan(game:GetService("StarterGui"), 0, 0)
+TeamTab:CreateButton({
+   Name = "Стать Монстром (GooBeast)",
+   Callback = function()
+       local remote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("Team") and ReplicatedStorage.RemoteEvents.Team:FindFirstChild("GooBeast")
+       if remote then 
+           remote:FireServer() 
+       else
+           Rayfield:Notify({Title = "Ошибка", Content = "Ремоут смены команды не найден", Duration = 3})
+       end
+   end,
+})
 
--- ========== STARTER PACK ==========
-sep("STARTER PACK")
-scan(game:GetService("StarterPack"), 0, 0)
-
--- ========== STARTER PLAYER ==========
-sep("STARTER PLAYER")
-scan(game:GetService("StarterPlayer"), 0, 0)
-
--- ========== LIGHTING ==========
-sep("LIGHTING")
-local L = game:GetService("Lighting")
-for _, p in ipairs({"Ambient","Brightness","ClockTime","FogColor","FogEnd","FogStart",
-    "GeographicLatitude","GlobalShadows","OutdoorAmbient","TimeOfDay","EnvironmentDiffuseScale","EnvironmentSpecularScale"}) do
-    local v = safeGet(L, p)
-    if v then w(p .. " = " .. v) end
-end
-w("")
-scan(L, 0, 0)
-
--- ========== TEAMS ==========
-sep("TEAMS")
-local Teams = safeGetService("Teams")
-if Teams then
-    for _, t in ipairs(Teams:GetChildren()) do
-        w("[Team] " .. t.Name .. " | TeamColor:" .. tostring(t.TeamColor) .. " | AutoAssignable:" .. tostring(t.AutoAssignable))
-        local members = {}
-        for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
-            local ok2, pt = pcall(function() return p.Team end)
-            if ok2 and pt == t then table.insert(members, p.Name) end
-        end
-        if #members > 0 then w("  Players: " .. table.concat(members, ", ")) end
-    end
-end
-
--- ========== SOUND SERVICE ==========
-sep("SOUND SERVICE")
-local ss = safeGetService("SoundService")
-if ss then scan(ss, 0, 0) end
-
--- ========== SCRIPTS (все) ==========
-sep("ALL SCRIPTS")
-local scriptClasses = {Script=true, LocalScript=true, ModuleScript=true}
-local function findScripts(parent, list)
-    local ok, ch = pcall(function() return parent:GetChildren() end)
-    if not ok then return end
-    for _, c in ipairs(ch) do
-        if scriptClasses[c.ClassName] then
-            local okFP, fp = pcall(function() return c:GetFullName() end)
-            local dis = safeGet(c, "Disabled")
-            table.insert(list, {name=c.Name, class=c.ClassName, path=okFP and fp or c.Name, disabled=dis})
-        end
-        findScripts(c, list)
-    end
-end
-local allScripts = {}
-findScripts(game, allScripts)
-w("Total scripts: " .. #allScripts)
-w("")
-for _, s in ipairs(allScripts) do
-    w("[" .. s.class .. "] " .. s.name .. " | " .. s.path .. (s.disabled == "true" and " [DISABLED]" or ""))
-end
-
--- ========== CORE GUI ==========
-sep("CORE GUI")
-local cg = safeGetService("CoreGui")
-if cg then scan(cg, 0, 0) end
-
--- ========== ШАБЛОН СКРИПТА ==========
-sep("SCRIPT TEMPLATE")
-w("-- Paste into Delta Executor")
-w("local Players = game:GetService('Players')")
-w("local ReplicatedStorage = game:GetService('ReplicatedStorage')")
-w("local LP = Players.LocalPlayer")
-w("local Char = LP.Character or LP.CharacterAdded:Wait()")
-w("local Hum = Char:WaitForChild('Humanoid')")
-w("local HRP = Char:WaitForChild('HumanoidRootPart')")
-w("")
-w("-- Teleport: HRP.CFrame = CFrame.new(X, Y, Z)")
-w("-- WalkSpeed: Hum.WalkSpeed = 50")
-w("-- RemoteEvent: ReplicatedStorage:WaitForChild('NAME'):FireServer(args)")
-
--- ========== STATS ==========
-sep("SCAN COMPLETE")
-w("File size (chars): " .. #out)
-w("Remotes found:     " .. #allRemotes)
-w("Scripts found:     " .. #allScripts)
-
--- ========== СОХРАНЕНИЕ ==========
-local placeId = tostring(game.PlaceId)
-local jobRaw  = tostring(game.JobId)
-local jobId   = (#jobRaw >= 8) and jobRaw:sub(1,8) or (jobRaw ~= "" and jobRaw or "studio")
-local tickStr = tostring(math.floor(tick())):sub(-6)
-local fileName = ("DeltaExplorer_%s_%s_%s.txt"):format(placeId, jobId, tickStr)
-
-print("[DeltaExplorer] Output size: " .. #out .. " chars")
-print("[DeltaExplorer] Saving to: " .. fileName)
-
-local saved = false
-if writefile then
-    local ok, err = pcall(function() writefile(fileName, out) end)
-    if ok then
-        saved = true
-        print("[DeltaExplorer] SAVED: " .. fileName)
-    else
-        warn("[DeltaExplorer] writefile failed: " .. tostring(err))
-    end
-end
-if not saved then
-    if setclipboard then
-        pcall(function() setclipboard(out) end)
-        print("[DeltaExplorer] Copied to clipboard! (" .. #out .. " chars)")
-    else
-        print("[DeltaExplorer] No writefile/clipboard, printing...")
-        print(out)
-    end
-end
+-- Уведомление об успешной инициализации всего интерфейса
+Rayfield:Notify({
+   Name = "Скрипт Готов!",
+   Content = "Все уязвимости Facility of Redemption успешно подгружены в Rayfield.",
+   Duration = 5,
+   Image = 4483362458,
+})
