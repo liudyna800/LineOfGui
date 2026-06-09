@@ -3,53 +3,98 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 -- Создание главного окна
 local Window = Rayfield:CreateWindow({
-   Name = "Facility of Redemption | Эксплоит Хаб",
-   LoadingTitle = "Загрузка уязвимостей Delta...",
-   LoadingSubtitle = "by AI Collaborator",
-   Theme = "Default", -- Можно сменить на DarkTheme, Ocean и т.д.
+   Name = "Facility of Redemption | Легит Автоматизация",
+   LoadingTitle = "Подготовка интерфейса...",
+   LoadingSubtitle = "Безопасные механики",
+   Theme = "Default",
    DisableRayfieldPrompts = false
 })
 
--- Переменные для работы функций
+-- Сервисы и переменные
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local killAuraEnabled = false
-local autoLootEnabled = false
+local hitboxesEnabled = false
+local autoClickerEnabled = false
+local customHitboxSize = 4
 
 -- =============================================================================
--- ВКЛАДКА: КИЛЛ-АУРА И БОЙ
+-- ВКЛАДКА: БОЕВЫЕ МЕХАНИКИ (COMBAT)
 -- =============================================================================
-local CombatTab = Window:CreateTab("⚔️ Бой / Килл-Аура", nil)
+local CombatTab = Window:CreateTab("⚔️ Боевые Функции", nil)
 
-CombatTab:CreateSection("Описание уязвимости")
+CombatTab:CreateSection("Описание механизмов")
 CombatTab:CreateParagraph({
-    Title = "Что это такое?", 
-    Content = "Использует дыру в защите события 'OnWeaponDealtDamage'. Сервер не проверяет, держишь ли ты оружие в руках и находишься ли рядом с целью. Позволяет бить врагов на дистанции."
+    Title = "Как это работает?", 
+    Content = "Вместо отправки опасных сетевых пакетов, которые вызывают кик, данный раздел использует легитимное расширение зон попадания (Хитбоксов) и симуляцию нажатий. Это позволяет попадать по врагам без риска блокировки со стороны сервера."
 })
 
-CombatTab:CreateSection("Настройки функции")
-CombatTab:CreateToggle({
-   Name = "Активировать Килл-Ауру",
-   CurrentValue = false,
-   Flag = "KillAuraFlag",
+CombatTab:CreateSection("Модификация окружения")
+CombatTab:CreateSlider({
+   Name = "Размер хитбокса противников",
+   Min = 2,
+   Max = 15,
+   Default = 4,
+   Color = Color3.fromRGB(255, 128, 0),
+   Increment = 1,
+   ValueName = "studs",
    Callback = function(Value)
-      killAuraEnabled = Value
-      if killAuraEnabled then
+      customHitboxSize = Value
+   end,
+})
+
+CombatTab:CreateToggle({
+   Name = "Расширить хитбоксы (Легит Аура)",
+   CurrentValue = false,
+   Flag = "HitboxToggle",
+   Callback = function(Value)
+      hitboxesEnabled = Value
+      if hitboxesEnabled then
           task.spawn(function()
-              while killAuraEnabled do
-                  local damageRemote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("OnWeaponDealtDamage")
-                  if damageRemote then
-                      for _, p in ipairs(Players:GetPlayers()) do
-                          if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
-                              -- Триггерим нанесение урона напрямую на сервер
-                              damageRemote:FireServer(p.Character.Humanoid, 50) 
-                          end
+              while hitboxesEnabled do
+                  for _, p in ipairs(Players:GetPlayers()) do
+                      if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                          local hrp = p.Character.HumanoidRootPart
+                          hrp.Size = Vector3.new(customHitboxSize, customHitboxSize, customHitboxSize)
+                          hrp.Transparency = 0.7
+                          hrp.Color = Color3.fromRGB(255, 0, 0)
+                          hrp.Material = Enum.Material.Neon
+                          hrp.CanCollide = false
                       end
                   end
-                  task.wait(0.3) -- Безопасная задержка, чтобы не крашнуло по лимиту пакетов
+                  task.wait(1)
+              end
+          end)
+      else
+          -- Сброс хитбоксов к стандартным значениям
+          for _, p in ipairs(Players:GetPlayers()) do
+              if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                  local hrp = p.Character.HumanoidRootPart
+                  hrp.Size = Vector3.new(2, 2, 1)
+                  hrp.Transparency = 0
+                  hrp.CanCollide = true
+              end
+          end
+      end
+   end,
+})
+
+CombatTab:CreateToggle({
+   Name = "Автоматический кликер (Для оружия)",
+   CurrentValue = false,
+   Flag = "AutoClickerToggle",
+   Callback = function(Value)
+      autoClickerEnabled = Value
+      if autoClickerEnabled then
+          task.spawn(function()
+              while autoClickerEnabled do
+                  local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                  if tool then
+                      tool:Activate()
+                  end
+                  task.wait(0.1) -- Безопасный интервал нажатия
               end
           end)
       end
@@ -57,140 +102,84 @@ CombatTab:CreateToggle({
 })
 
 -- =============================================================================
--- ВКЛАДКА: ДЛЯ ЛЮДЕЙ (HUMANS)
+-- ВКЛАДКА: ДВИЖЕНИЕ И ФИЗИКА (MOVEMENT)
 -- =============================================================================
-local HumanTab = Window:CreateTab("🧑 Фракция: Люди", nil)
+local MoveTab = Window:CreateTab("⚡ Подвижность", nil)
 
-HumanTab:CreateSection("Когда использовать?")
-HumanTab:CreateParagraph({
-    Title = "Инструкция", 
-    Content = "Используй эти функции, если ты играешь за выживших (Людей). Помогает быстро собрать лучшее оружие на карте, хилки и сбежать от монстров через закрытые двери."
+MoveTab:CreateSection("Управление физикой персонажа")
+
+local speedSlider = 16
+MoveTab:CreateSlider({
+   Name = "Скорость бега (WalkSpeed)",
+   Min = 16,
+   Max = 45,
+   Default = 16,
+   Color = Color3.fromRGB(0, 255, 128),
+   Increment = 1,
+   ValueName = "скорость",
+   Callback = function(Value)
+      speedSlider = Value
+      local char = LocalPlayer.Character
+      local hum = char and char:FindFirstChildOfClass("Humanoid")
+      if hum then
+          hum.WalkSpeed = speedSlider
+      end
+   end,
 })
 
-HumanTab:CreateSection("Управление")
-HumanTab:CreateToggle({
-   Name = "Авто-сбор предметов (Мачете, Катана, Стимуляторы)",
+-- Постоянное поддержание скорости при респавне
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.WalkSpeed ~= speedSlider and speedSlider > 16 then
+        hum.WalkSpeed = speedSlider
+    end
+end)
+
+-- =============================================================================
+-- ВКЛАДКА: ВИЗУАЛИЗАЦИЯ (VISUALS / ESP)
+-- =============================================================================
+local VisualsTab = Window:CreateTab("👁️ Визуальные эффекты", nil)
+
+VisualsTab:CreateSection("Подсветка объектов")
+
+local espEnabled = false
+VisualsTab:CreateToggle({
+   Name = "Подсветка игроков (ESP)",
    CurrentValue = false,
-   Flag = "AutoLootFlag",
+   Flag = "EspToggle",
    Callback = function(Value)
-       autoLootEnabled = Value
-       if autoLootEnabled then
+       espEnabled = Value
+       if espEnabled then
            task.spawn(function()
-               while autoLootEnabled do
-                   local pickItems = Workspace:FindFirstChild("PickItem")
-                   local char = LocalPlayer.Character
-                   local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                   
-                   if pickItems and hrp then
-                       for _, item in ipairs(pickItems:GetChildren()) do
-                           local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                           local part = item:FindFirstChildWhichIsA("BasePart", true)
-                           
-                           if prompt and part then
-                               -- Мгновенно прожимаем сбор со всей карты
-                               fireproximityprompt(prompt)
+               while espEnabled do
+                   for _, p in ipairs(Players:GetPlayers()) do
+                       if p ~= LocalPlayer and p.Character then
+                           if not p.Character:FindFirstChild("HighlightESP") then
+                               local highlight = Instance.new("Highlight")
+                               highlight.Name = "HighlightESP"
+                               highlight.FillColor = Color3.fromRGB(0, 170, 255)
+                               highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                               highlight.FillTransparency = 0.5
+                               highlight.Parent = p.Character
                            end
                        end
                    end
-                   task.wait(2) -- Проверка карты на новые предметы каждые 2 секунды
+                   task.wait(2)
                end
            end)
-       end
-   end,
-})
-
-HumanTab:CreateButton({
-   Name = "Взломать и открыть все двери/шкафы на карте",
-   Callback = function()
-       local count = 0
-       if Workspace:FindFirstChild("Map") then
-           for _, obj in ipairs(Workspace.Map:GetDescendants()) do
-               if obj:IsA("ProximityPrompt") then
-                   obj.HoldDuration = 0 -- Убираем задержку удержания кнопки
-                   fireproximityprompt(obj)
-                   count = count + 1
+       else
+           for _, p in ipairs(Players:GetPlayers()) do
+               if p.Character and p.Character:FindFirstChild("HighlightESP") then
+                   p.Character.HighlightESP:Destroy()
                end
            end
-           Rayfield:Notify({Title = "Успешно!", Content = "Взломано объектов на карте: " .. tostring(count), Duration = 3})
-       else
-           Rayfield:Notify({Title = "Ошибка", Content = "Папка папки Map не найдена в Workspace", Duration = 3})
        end
    end,
 })
 
--- =============================================================================
--- ВКЛАДКА: ДЛЯ МОНСТРОВ (GOOBEAST)
--- =============================================================================
-local BeastTab = Window:CreateTab("🦠 Фракция: GooBeast", nil)
-
-BeastTab:CreateSection("Когда использовать?")
-BeastTab:CreateParagraph({
-    Title = "Инструкция", 
-    Content = "Используй во время игры за зараженных. Позволяет моментально выслеживать выживших сквозь любые препятствия стен лаборатории и ломать их защиту."
-})
-
-BeastTab:CreateSection("Управление")
-BeastTab:CreateButton({
-   Name = "Активировать Wallhack / ESP на всех людей",
-   Callback = function()
-       for _, p in ipairs(Players:GetPlayers()) do
-           if p ~= LocalPlayer and p.Character then
-               -- Удаляем старый ESP если был
-               if p.Character:FindFirstChild("BeastESP") then p.Character.BeastESP:Destroy() end
-               
-               -- Создаем красивую подсветку Rayfield-стиля
-               local highlight = Instance.new("Highlight")
-               highlight.Name = "BeastESP"
-               highlight.FillColor = Color3.fromRGB(0, 255, 128)
-               highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-               highlight.FillTransparency = 0.4
-               highlight.Parent = p.Character
-           end
-       end
-       Rayfield:Notify({Title = "ESP включен", Content = "Все игроки теперь подсвечиваются сквозь стены", Duration = 3})
-   end,
-})
-
--- =============================================================================
--- ВКЛАДКА: СМЕНА КОМАНДЫ (TEAM EXPLOITS)
--- =============================================================================
-local TeamTab = Window:CreateTab("🔄 Смена Фракции", nil)
-
-TeamTab:CreateSection("Что это такое?")
-TeamTab:CreateParagraph({
-    Title = "Обход выбора фракции", 
-    Content = "Сервер принимает запросы на смену команды в любой момент времени через незащищенную папку Team в ReplicatedStorage."
-})
-
-TeamTab:CreateSection("Выбор стороны")
-TeamTab:CreateButton({
-   Name = "Стать Человеком (Human)",
-   Callback = function()
-       local remote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("Team") and ReplicatedStorage.RemoteEvents.Team:FindFirstChild("Human")
-       if remote then 
-           remote:FireServer() 
-       else
-           Rayfield:Notify({Title = "Ошибка", Content = "Ремоут смены команды не найден", Duration = 3})
-       end
-   end,
-})
-
-TeamTab:CreateButton({
-   Name = "Стать Монстром (GooBeast)",
-   Callback = function()
-       local remote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("Team") and ReplicatedStorage.RemoteEvents.Team:FindFirstChild("GooBeast")
-       if remote then 
-           remote:FireServer() 
-       else
-           Rayfield:Notify({Title = "Ошибка", Content = "Ремоут смены команды не найден", Duration = 3})
-       end
-   end,
-})
-
--- Уведомление об успешной инициализации всего интерфейса
 Rayfield:Notify({
-   Name = "Скрипт Готов!",
-   Content = "Все уязвимости Facility of Redemption успешно подгружены в Rayfield.",
-   Duration = 5,
-   Image = 4483362458,
+   Name = "Интерфейс обновлен",
+   Content = "Загружены безопасные методы автоматизации.",
+   Duration = 5
 })
