@@ -1750,7 +1750,8 @@ local function makeSystemPrompt(settings)
                 "\n[DO:cheer]  — gg, nice, молодец, победа, восторг, ura" ..
                 "\n[DO:point]  — указываешь на что-то, не понял, грустно, rip" ..
                 "\n[DO:sit]    — устал, скучно, расслабляешься, сидишь" ..
-                "\n[DO:dance]  — просят потанцевать, праздник, веселье" ..
+                "\n[DO:dance]  — просят ПОТАНЦЕВАТЬ (dance, станцуй). НЕ путай с spin!" ..
+                "\n[DO:spin]   — просят ПОКРУТИТЬСЯ (крутись, spin, покрутись, twirl). НЕ используй dance!" ..
                 "\n[DO:shrug]  — idk, хз, не знаю, пожимаешь плечами" ..
                 "\n[DO:agree]  — да, yes, согласен, конечно, точно" ..
                 "\n[DO:disagree] — нет, no, не согласен, неа" ..
@@ -1759,7 +1760,6 @@ local function makeSystemPrompt(settings)
                 "\n[DO:confused] — что?, huh, не понял, wtf" ..
                 "\n[DO:sad]    — грустно, жаль, rip, сочувствую" ..
                 "\n[DO:jump]   — прыгнуть (jump2/3/5/10 = сколько раз)" ..
-                "\n[DO:spin]   — крутиться (spin5/10 = секунды)" ..
                 "\n[DO:goto]   — подойти к игроку, come here" ..
                 "\n[DO:follow] — следовать за игроком постоянно" ..
                 "\n[DO:stop]   — остановиться, стоп, прекрати" ..
@@ -1771,7 +1771,7 @@ local function makeSystemPrompt(settings)
                 "\nПРИМЕРЫ:" ..
                 "\nкруто!→[DO:cheer]  хаха→[DO:laugh]  да→[DO:agree]  нет→[DO:disagree]" ..
                 "\nхз→[DO:shrug]  прости→[DO:sorry]  что?→[DO:confused]  грустно→[DO:sad]" ..
-                "\nпривет→[DO:wave]  стесняюсь→[DO:shy]  устал→[DO:sit]  потанцуй→[DO:dance]")
+                "\nпривет→[DO:wave]  стесняюсь→[DO:shy]  устал→[DO:sit]  потанцуй→[DO:dance]  покрутись→[DO:spin]")
         end
     end
 
