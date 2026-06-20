@@ -1738,9 +1738,9 @@ local function makeSystemPrompt(settings)
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
                 "DO-TAGS (place at START of reply, 1 per message):\n" ..
                 "[DO:wave]=hi/bye  [DO:laugh]=haha/lol  [DO:agree]=yes  [DO:disagree]=no\n" ..
-                "[DO:shrug]=idk  [DO:dance]=dance  [DO:jump]=jump  [DO:goto]=come here\n" ..
+                "[DO:shrug]=idk  [DO:dance]=dance  [DO:spin]=spin/крутись  [DO:jump]=jump  [DO:goto]=come here\n" ..
                 "[DO:follow]=follow me  [DO:stop]=stop  [DO:cheer]=nice/gg  [DO:sad]=rip\n" ..
-                "Example: [DO:laugh]haha that's funny")
+                "spin=крутиться НЕ танцевать! Example: [DO:laugh]haha  покрутись→[DO:spin]")
         else
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
                 "You control a Roblox character. Add ONE [DO:tag] at the START of your reply.\n" ..
@@ -2944,6 +2944,14 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
             end
         end
 
+        -- Фикс спина: ИИ путает dance/spin — если юзер просил крутиться а ИИ написал dance, заменяем
+        if actionName == "dance" and originalUserMsg then
+            local m = originalUserMsg:lower()
+            if m:find("крут") or m:find("spin") or m:find("кружи") or m:find("поверн") or m:find("twirl") then
+                actionName = "spin"
+            end
+        end
+
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function()
@@ -3619,7 +3627,9 @@ local function handleQueuedChat(item)
 
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
+    print("[SPIN_DBG] raw:", text:sub(1,100))
     local actionName, cleanText = parseActionTag(text)
+    print("[SPIN_DBG] action:", tostring(actionName))
     -- Не выполняем actions от isWorld событий если AutoReply выключен
     if not item.isWorld or settings.AutoReply then
         cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
