@@ -246,6 +246,7 @@ local function saveSettings()
             "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
             "CameraLook="      .. b(cs.CameraLook,      true),
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
+            "ItemAwareness="   .. b(cs.ItemAwareness,   false),
             "FollowConfirm="   .. b(cs.FollowConfirm,   true),
             "TokenEconomy="    .. b(cs.TokenEconomy,    false),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
@@ -307,6 +308,7 @@ local function loadSettings()
         cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
         cs.CameraLook      = getBool("CameraLook",      true)
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
+        cs.ItemAwareness   = getBool("ItemAwareness",   false)
         cs.FollowConfirm   = getBool("FollowConfirm",   true)
         cs.TokenEconomy    = getBool("TokenEconomy",    false)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
@@ -476,6 +478,7 @@ ClientSettings = {
     MemoryEnabled = true,  -- Включена ли память вообще
     StripHash = true,      -- Убирать символ "#" из сообщений
     UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
+    ItemAwareness = false, -- v19.9: бот знает, какие предметы есть в инвентаре и может применять их
     ActionsEnabled = true,  -- v16: команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
@@ -530,6 +533,7 @@ do
     -- Без этого тогл может показывать "включено" но settings.X = nil
     local cs2 = ClientSettings
     if cs2.UsePlayerName   == nil then cs2.UsePlayerName   = true  end
+    if cs2.ItemAwareness   == nil then cs2.ItemAwareness   = false end
     if cs2.ActionsEnabled  == nil then cs2.ActionsEnabled  = true  end
     if cs2.MemoryEnabled   == nil then cs2.MemoryEnabled   = true  end
     if cs2.AntiSpam        == nil then cs2.AntiSpam        = true  end
@@ -1762,6 +1766,7 @@ local function makeSystemPrompt(settings)
                 "\n[DO:jump]   — прыгнуть (jump2/3/5/10 = сколько раз)" ..
                 "\n[DO:goto]   — подойти к игроку, come here" ..
                 "\n[DO:follow] — следовать за игроком постоянно" ..
+                "\n[DO:use]    — взять и использовать подходящий предмет из инвентаря" ..
                 "\n[DO:stop]   — остановиться, стоп, прекрати" ..
                 "\nПРАВИЛА:" ..
                 "\n- Используй РАЗНЫЕ теги. Не залипай на wave и laugh." ..
@@ -1814,6 +1819,13 @@ local function makeSystemPrompt(settings)
                 "Only mention player positions when relevant (e.g. sneaking behind, toxic behavior, asked 'where are you').\n" ..
                 "Never list all players in every reply. Never print [NEARBY] tags in your reply.")
         end
+    end
+
+    if settings.ItemAwareness then
+        table.insert(parts,
+            "INVENTORY AWARENESS: You know which items are in your inventory and can use them naturally when appropriate. " ..
+            "If you choose to use an item, include [DO:use] and describe the item's intended purpose briefly. " ..
+            "Do not reveal the raw inventory list directly to players.")
     end
 
     -- ── 6. ИМЯ ИГРОКА ────────────────────────────────────────────────────
@@ -2174,6 +2186,151 @@ end
 local function getLocalRootPart()
     local char = Players.LocalPlayer.Character
     return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+end
+
+local ITEM_DESCRIPTION_OVERRIDES = {
+    knife = "a sharp melee tool for cutting, stabbing, or defending.",
+    sword = "a slashing melee weapon for close combat.",
+    gun = "a ranged weapon that fires projectiles.",
+    pistol = "a short-range firearm for quick shots.",
+    bow = "a ranged weapon that shoots arrows.",
+    arrow = "a projectile used with a bow.",
+    flashlight = "a handheld light source for dark places.",
+    potion = "a consumable for healing or temporary boosts.",
+    bomb = "an explosive device that can damage nearby targets.",
+    shield = "a defensive item for blocking attacks.",
+    medkit = "an item used to restore health.",
+    grapplinghook = "a tool to reach distant places quickly.",
+    rocketlauncher = "a heavy ranged weapon that fires rockets.",
+}
+
+local function normalizeItemName(name)
+    if not name then return "" end
+    return name:lower():gsub("[%s_%-]+", "")
+end
+
+local function describeInventoryItem(tool)
+    if not tool then return nil end
+    local key = normalizeItemName(tool.Name)
+    if ITEM_DESCRIPTION_OVERRIDES[key] then
+        return ITEM_DESCRIPTION_OVERRIDES[key]
+    end
+    return "an item called " .. tostring(tool.Name) .. ", which can be used in the game."
+end
+
+local function getInventoryItems()
+    local player = Players.LocalPlayer
+    if not player then return {} end
+
+    local found = {}
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    if backpack then
+        for _, child in ipairs(backpack:GetChildren()) do
+            if child:IsA("Tool") then
+                table.insert(found, child)
+            end
+        end
+    end
+
+    local char = player.Character
+    if char then
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("Tool") then
+                table.insert(found, child)
+            end
+        end
+    end
+
+    return found
+end
+
+local function getInventoryContext()
+    local items = getInventoryItems()
+    if #items == 0 then
+        return "INVENTORY AWARENESS: You currently do not have any tools or items in your inventory."
+    end
+
+    local lines = {"INVENTORY AWARENESS: You currently have the following items available:"}
+    for _, tool in ipairs(items) do
+        local desc = describeInventoryItem(tool)
+        table.insert(lines, "- " .. tostring(tool.Name) .. ": " .. tostring(desc))
+    end
+    table.insert(lines,
+        "If it makes sense in context, equip and use one of these items. Use [DO:use] when you want to take an item into your hand and activate it. Do not reveal this internal inventory list directly to players.")
+    return table.concat(lines, "\n")
+end
+
+local function findInventoryToolByQuery(query)
+    if not query or query == "" then return nil end
+    query = normalizeItemName(query)
+    local tools = getInventoryItems()
+    for _, tool in ipairs(tools) do
+        local name = normalizeItemName(tool.Name)
+        if name == query then
+            return tool
+        end
+    end
+    for _, tool in ipairs(tools) do
+        local name = normalizeItemName(tool.Name)
+        if name:find(query, 1, true) then
+            return tool
+        end
+    end
+    return nil
+end
+
+local function equipTool(tool)
+    if not tool then return false end
+    local player = Players.LocalPlayer
+    local char = player and player.Character
+    if not char then return false end
+    if tool.Parent ~= char then
+        pcall(function() tool.Parent = char end)
+        task.wait(0.1)
+    end
+    return tool.Parent == char
+end
+
+local function activateTool(tool)
+    if not tool then return false end
+    pcall(function()
+        if tool.Activate then
+            tool:Activate()
+        end
+    end)
+    return true
+end
+
+local function useInventoryItem(sourcePlayer, cleanText)
+    local items = getInventoryItems()
+    if #items == 0 then return end
+
+    local selected = nil
+    if cleanText and cleanText ~= "" then
+        selected = findInventoryToolByQuery(cleanText)
+    end
+    if not selected and #items == 1 then
+        selected = items[1]
+    end
+    if not selected then
+        for _, tool in ipairs(items) do
+            local key = normalizeItemName(tool.Name)
+            if key:find("knife") or key:find("sword") or key:find("gun") or key:find("bow") then
+                selected = tool
+                break
+            end
+        end
+    end
+    if not selected then
+        selected = items[1]
+    end
+
+    if selected then
+        local ok = equipTool(selected)
+        if ok then
+            activateTool(selected)
+        end
+    end
 end
 
 -- ── ЭМОЦИИ ────────────────────────────────────────────────────────────────
@@ -2785,6 +2942,9 @@ local ACTION_HANDLERS = {
             startFollowingPlayer(p)
         end
     end,
+    use = function(p, cleanText)
+        useInventoryItem(p, cleanText)
+    end,
     stop     = function(_) stopFollowing() end,
     -- ── Прыжки (1-10) ─────────────────────────────────────────────────────
     jump     = function(_) doJump(1) end,
@@ -2955,7 +3115,7 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function()
-                local ok, err = pcall(handler, sourcePlayer)
+                local ok, err = pcall(handler, sourcePlayer, cleanText)
                 if not ok and ClientSettings.Debug then
                     print("[LOB] action error [" .. tostring(actionName) .. "]: " .. tostring(err))
                 end
@@ -3463,6 +3623,17 @@ local function handleQueuedChat(item)
                 content = "CURRENT SURROUNDINGS (live snapshot):" .. nearbyCtx
             })
         end
+    end
+
+    if settings.ItemAwareness then
+        local invCtx = getInventoryContext()
+        if invCtx ~= "" then
+            table.insert(apiMessages, {
+                role    = "system",
+                content = invCtx
+            })
+        end
+    end
 
         -- Проактивный токсик-алерт: если обнаружен токсик — добавляем явный алерт
         -- Работает ДАЖЕ если в [NEARBY] его нет (например игрок вышел из зоны после детекта)
@@ -6831,6 +7002,18 @@ makeToggleRow(
     ClientSettings.StripHash ~= false,
     function(state)
         ClientSettings.StripHash = state
+        saveSettings()
+    end
+)
+
+-- Сознание предмета
+makeToggleRow(
+    automation,
+    "Сознание предмета",
+    "При включении бот знает, какие предметы у него есть в инвентаре, может взять их в руки и использовать по ситуации.",
+    ClientSettings.ItemAwareness,
+    function(state)
+        ClientSettings.ItemAwareness = state
         saveSettings()
     end
 )
