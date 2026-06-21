@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v19.9  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
+-- ║         LINEOFBOTS v20.0.0  —  ОГЛАВЛЕНИЕ / FILE MAP                ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -2899,6 +2899,7 @@ local ACTION_HANDLERS = {
 -- Inventory awareness (v20.0.0)
 local _inventoryItems = {}
 local function scanInventory()
+    if not player or not player.Parent then return {} end
     local items = {}
     pcall(function()
         local bp = player:FindFirstChild("Backpack")
@@ -2919,6 +2920,7 @@ local function scanInventory()
 end
 
 local function getInventoryDescription()
+    if not player or not player.Parent then return "" end
     local ok, items = pcall(scanInventory)
     if not ok or not items then return "" end
     if #items == 0 then return "" end
@@ -2926,7 +2928,7 @@ local function getInventoryDescription()
 end
 
 local function useItemByName(itemName, targetPlayer)
-    if not itemName or itemName == "" then return false end
+    if not itemName or itemName == "" or not player or not player.Parent then return false end
     local needle = tostring(itemName):lower()
     -- try find tool in character then backpack
     local function findToolIn(list)
@@ -3032,14 +3034,14 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
             end
         end
 
-            -- Support use/equip actions encoded in tag as use_itemname or equip_itemname
-            if actionName and (actionName:match("^use_") or actionName:match("^equip_")) then
-                local item = actionName:match("^use_(.+)") or actionName:match("^equip_(.+)")
-                if item and item ~= "" then
-                    task.spawn(function() pcall(function() useItemByName(item, sourcePlayer) end) end)
-                    return cleanText or ""
-                end
+        -- Support use/equip actions encoded in tag as use_itemname or equip_itemname
+        if actionName and (actionName:match("^use_") or actionName:match("^equip_")) then
+            local item = actionName:match("^use_(.+)") or actionName:match("^equip_(.+)")
+            if item and item ~= "" then
+                task.spawn(function() pcall(function() useItemByName(item, sourcePlayer) end) end)
+                return cleanText or ""
             end
+        end
 
         local handler = ACTION_HANDLERS[actionName]
         if handler then
