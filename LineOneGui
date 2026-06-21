@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v20.0.0  —  ОГЛАВЛЕНИЕ / FILE MAP                ║
+-- ║         LINEOFBOTS v19.9  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -214,7 +214,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v20.0.0 LOADED")
+print("LOB VERSION: v19.9.9 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -244,7 +244,6 @@ local function saveSettings()
             "ReactToMention="  .. b(cs.ReactToMention,  true),
             "PlayerAwareness=" .. b(cs.PlayerAwareness, true),
             "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
-            "ItemConsciousness=" .. b(cs.ItemConsciousness, false),
             "CameraLook="      .. b(cs.CameraLook,      true),
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
             "FollowConfirm="   .. b(cs.FollowConfirm,   true),
@@ -306,7 +305,6 @@ local function loadSettings()
         cs.ReactToMention  = getBool("ReactToMention",  true)
         cs.PlayerAwareness = getBool("PlayerAwareness", true)
         cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
-        cs.ItemConsciousness = getBool("ItemConsciousness", false)
         cs.CameraLook      = getBool("CameraLook",      true)
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
         cs.FollowConfirm   = getBool("FollowConfirm",   true)
@@ -483,7 +481,6 @@ ClientSettings = {
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     PlayerAwareness = true, -- v17: ИИ видит кто рядом, с какой стороны, как себя ведёт
     CameraLook = true,      -- v17: бот плавно смотрит на говорящего игрока
-    ItemConsciousness = false, -- v20.0.0: ИИ осознаёт предметы в инвентаре и может их использовать
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -500,7 +497,6 @@ ClientSettings = {
 }
 
 -- Загружаем сохранённый API ключ и настройки при старте
-local loadOk, loadErr = pcall(function()
 do
     local saved = loadApiKey()
     if saved and saved:sub(1,4) == "gsk_" and #saved > 8 then
@@ -541,7 +537,6 @@ do
     if cs2.WorldReactions  == nil then cs2.WorldReactions  = true  end
     if cs2.PlayerAwareness == nil then cs2.PlayerAwareness = true  end
     if cs2.PlaceAwareness  == nil then cs2.PlaceAwareness  = true  end
-    if cs2.ItemConsciousness == nil then cs2.ItemConsciousness = false end
     if cs2.CameraLook      == nil then cs2.CameraLook      = true  end
     if cs2.StripHash       == nil then cs2.StripHash       = true  end
     if cs2.FollowingEnabled== nil then cs2.FollowingEnabled= true  end
@@ -557,11 +552,6 @@ do
         ClientSettings.ApiKeys.gemini = savedGemini
     end
 
-end
-end)
-
-if not loadOk then
-    print("[LineOfBots] Warning: error loading settings: " .. tostring(loadErr))
 end
 
 local ClientSecrets = {
@@ -1826,16 +1816,6 @@ local function makeSystemPrompt(settings)
         end
     end
 
-    -- INVENTORY / Item consciousness (v20.0.0)
-    if settings.ItemConsciousness then
-        local inv = getInventoryDescription()
-        if inv and inv ~= "" then
-            table.insert(parts, "INVENTORY: " .. inv .. ". You may use tags like [DO:use_<item>] or [DO:equip_<item>] to instruct the character to equip or use an item. Each item can be used differently depending on its nature.")
-        else
-            table.insert(parts, "INVENTORY: you currently have no usable items.")
-        end
-    end
-
     -- ── 6. ИМЯ ИГРОКА ────────────────────────────────────────────────────
     if settings.UsePlayerName then
         table.insert(parts,
@@ -2903,75 +2883,6 @@ local ACTION_HANDLERS = {
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
 
--- Inventory awareness (v20.0.0)
-local _inventoryItems = {}
-local function scanInventory()
-    if not player or not player.Parent then return {} end
-    local items = {}
-    pcall(function()
-        local bp = player:FindFirstChild("Backpack")
-        if bp then
-            for _, c in ipairs(bp:GetChildren()) do
-                if c and c:IsA and c:IsA("Tool") then table.insert(items, tostring(c.Name)) end
-            end
-        end
-        local char = player.Character
-        if char then
-            for _, c in ipairs(char:GetChildren()) do
-                if c and c:IsA and c:IsA("Tool") then table.insert(items, tostring(c.Name)) end
-            end
-        end
-    end)
-    _inventoryItems = items
-    return items
-end
-
-local function getInventoryDescription()
-    if not player or not player.Parent then return "" end
-    local ok, items = pcall(scanInventory)
-    if not ok or not items then return "" end
-    if #items == 0 then return "" end
-    return "You have the following items: " .. table.concat(items, ", ")
-end
-
-local function useItemByName(itemName, targetPlayer)
-    if not itemName or itemName == "" or not player or not player.Parent then return false end
-    local needle = tostring(itemName):lower()
-    -- try find tool in character then backpack
-    local function findToolIn(list)
-        for _, t in ipairs(list or {}) do
-            if t and t.Name and tostring(t.Name):lower():find(needle, 1, true) then return t end
-        end
-        return nil
-    end
-    local tool = nil
-    local char = player.Character
-    if char then tool = findToolIn(char:GetChildren()) end
-    if not tool then
-        local bp = player:FindFirstChild("Backpack")
-        if bp then tool = findToolIn(bp:GetChildren()) end
-    end
-    if tool then
-        pcall(function()
-            if tool.Parent ~= player.Character then
-                tool.Parent = player.Character
-            end
-            if tool.Activate then pcall(function() tool:Activate() end) end
-        end)
-        return true
-    end
-    -- fallback: emulate using item by following player briefly + emote
-    if targetPlayer and targetPlayer.Character then
-        startFollowingPlayer(targetPlayer)
-        playEmote("cheer", 3)
-        task.delay(3, function() stopFollowing() end)
-        return true
-    end
-    playEmote("cheer", 3)
-    return true
-end
-
-
 -- Парсим [DO:action] из текста ИИ
 -- Возвращает: actionName | nil,  cleanText (без тега и без лишних пробелов вокруг него)
 -- Парсим [DO:action] из ответа ИИ
@@ -3038,15 +2949,6 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
             local m = originalUserMsg:lower()
             if m:find("крут") or m:find("spin") or m:find("кружи") or m:find("поверн") or m:find("twirl") then
                 actionName = "spin"
-            end
-        end
-
-        -- Support use/equip actions encoded in tag as use_itemname or equip_itemname
-        if actionName and (actionName:match("^use_") or actionName:match("^equip_")) then
-            local item = actionName:match("^use_(.+)") or actionName:match("^equip_(.+)")
-            if item and item ~= "" then
-                task.spawn(function() pcall(function() useItemByName(item, sourcePlayer) end) end)
-                return cleanText or ""
             end
         end
 
@@ -4511,8 +4413,7 @@ local Themes = {
         AuroraSpeed         = 0.30,
     },
 }
--- THEME - глобальная переменная для использования во всем скрипте
-THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
+local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
 
 local TWEEN_FAST = TweenInfo.new(0.14, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 local TWEEN_MED  = TweenInfo.new(0.26, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
@@ -7037,18 +6938,6 @@ makeToggleRow(
         saveSettings()
     end
 )
-
-    -- v20.0.0: Сознание предмета
-    makeToggleRow(
-        automation,
-        "🧭 Сознание предмета",
-        "ИИ осознаёт предметы в инвентаре и может брать/использовать их.",
-        ClientSettings.ItemConsciousness ~= false,
-        function(state)
-            ClientSettings.ItemConsciousness = state
-            saveSettings()
-        end
-    )
 
 -- v17: Поворот к игроку
 makeToggleRow(
@@ -11120,11 +11009,4 @@ do
         tostring(uis2.KeyboardEnabled)
     ))
 end
-
-local initOk, initErr = pcall(function()
-    createInterface()
-end)
-if not initOk then
-    print("[LineOfBots] ERROR during createInterface(): " .. tostring(initErr))
-    warn("[LineOfBots] Script initialization failed, but will continue. Check console for details.")
-end
+createInterface()
