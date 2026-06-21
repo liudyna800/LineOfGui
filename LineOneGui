@@ -500,6 +500,7 @@ ClientSettings = {
 }
 
 -- Загружаем сохранённый API ключ и настройки при старте
+local loadOk, loadErr = pcall(function()
 do
     local saved = loadApiKey()
     if saved and saved:sub(1,4) == "gsk_" and #saved > 8 then
@@ -540,6 +541,7 @@ do
     if cs2.WorldReactions  == nil then cs2.WorldReactions  = true  end
     if cs2.PlayerAwareness == nil then cs2.PlayerAwareness = true  end
     if cs2.PlaceAwareness  == nil then cs2.PlaceAwareness  = true  end
+    if cs2.ItemConsciousness == nil then cs2.ItemConsciousness = false end
     if cs2.CameraLook      == nil then cs2.CameraLook      = true  end
     if cs2.StripHash       == nil then cs2.StripHash       = true  end
     if cs2.FollowingEnabled== nil then cs2.FollowingEnabled= true  end
@@ -555,6 +557,11 @@ do
         ClientSettings.ApiKeys.gemini = savedGemini
     end
 
+end
+end)
+
+if not loadOk then
+    print("[LineOfBots] Warning: error loading settings: " .. tostring(loadErr))
 end
 
 local ClientSecrets = {
@@ -4504,7 +4511,8 @@ local Themes = {
         AuroraSpeed         = 0.30,
     },
 }
-local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
+-- THEME - глобальная переменная для использования во всем скрипте
+THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
 
 local TWEEN_FAST = TweenInfo.new(0.14, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 local TWEEN_MED  = TweenInfo.new(0.26, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
@@ -11112,4 +11120,11 @@ do
         tostring(uis2.KeyboardEnabled)
     ))
 end
-createInterface()
+
+local initOk, initErr = pcall(function()
+    createInterface()
+end)
+if not initOk then
+    print("[LineOfBots] ERROR during createInterface(): " .. tostring(initErr))
+    warn("[LineOfBots] Script initialization failed, but will continue. Check console for details.")
+end
