@@ -3533,7 +3533,7 @@ local function handleQueuedChat(item)
     }
     -- [v19.9.6] ФИКС: Qwen3 не принимает temperature при reasoning_effort=none
     -- БАГИ ДО: Groq возвращал 400 ошибку, модель молчала
-    if model == "qwen/qwen3.6-27b" then
+    if model:find("^qwen/") then
         payload.reasoning_effort = "none"
         payload.temperature = nil  -- Qwen3 с reasoning_effort не принимает temperature
     end
@@ -3544,7 +3544,7 @@ local function handleQueuedChat(item)
     -- [v19.9.7] ФИКС: Kimi K2 / moonshotai добавлены в skipTools
     -- БАГИ ДО: при WebSearch=true Kimi пытался вызвать tool в неправильном формате → ошибка
     local skipTools = model:find("^gemini") or model:find("compound%-beta")
-        or model == "qwen/qwen3.6-27b"
+        or model:find("^qwen/")
         or model:find("kimi") or model:find("moonshotai")
     if settings.WebSearch and not skipTools then
         payload.tools = {
@@ -10636,7 +10636,7 @@ local function ctDoSend()
             max_tokens  = directMaxTokens,
             messages    = apiMsgs,
         }
-        if payload.model == "qwen/qwen3.6-27b" then
+        if payload.model:find("^qwen/") then
             payload.reasoning_effort = "none"
             payload.temperature = nil
         end
