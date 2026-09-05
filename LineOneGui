@@ -7639,18 +7639,27 @@ do
             apiCheckBtn.Text = "Проверить ключ"
             apiCheckBtn.BackgroundTransparency = 0.15
             if not testKey or testKey == "" then setApiStatus(false, "ключ не указан", "Введи API ключ выше."); return end
-            local res2, s2, statusMsg, rawBody, headers = postJson(
-                "https://api.groq.com/openai/v1/chat/completions",
-                { ["Authorization"] = "Bearer " .. testKey, ["Content-Type"] = "application/json" },
-                { model="llama-3.1-8b-instant", max_tokens=1, messages={{role="user",content="hi"}} }
-            )
-            if s2 == 401 then setApiStatus(false, "неверный ключ", nil); return end
-            if s2 == 429 then setApiStatus(true, "ключ верный", "Rate limit — попробуй позже."); return end
-            if not res2 then
-                setApiStatus(false, "ошибка " .. tostring(s2 or statusMsg or "сети"), nil)
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then setApiStatus(false, "ошибка executor", nil); return end
+            local ok2, res2 = pcall(req, {
+                Url = "https://api.groq.com/openai/v1/models",
+                Method = "GET",
+                Headers = { ["Authorization"] = "Bearer " .. testKey },
+            })
+            if not ok2 or type(res2) ~= "table" then
+                setApiStatus(false, "ошибка сети", nil)
                 return
             end
-            parseRateLimitHeaders(headers or {})
+            local s2 = tonumber(res2.StatusCode or res2.statusCode or res2.Status or res2.status) or 0
+            if s2 == 401 then setApiStatus(false, "неверный ключ", nil); return end
+            if s2 == 429 then setApiStatus(true, "ключ верный", "Rate limit — попробуй позже."); return end
+            if s2 ~= 200 then
+                local detail = tostring(res2.Body or res2.body or res2.StatusMessage or res2.statusMessage or "ошибка API")
+                detail = detail:gsub("%s+", " "):sub(1, 100)
+                setApiStatus(false, "ошибка " .. tostring(s2 or "") .. ": " .. detail, nil)
+                return
+            end
+            parseRateLimitHeaders(res2.Headers or res2.headers or {})
             setApiStatus(true, "работает", nil)
         end)
     end
