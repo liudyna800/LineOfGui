@@ -232,9 +232,8 @@ local function normalizeApiKey(value)
         :gsub("\226\128\140", "")
         :gsub("\226\128\141", "")
         :gsub("%s+", "")
-        :gsub("[\"'`]", "")
-    local groqKey = key:match("(gsk_[A-Za-z0-9_-]+)")
-    return groqKey or key
+    key = key:gsub("^[\"'`]+", ""):gsub("[\"'`]+$", "")
+    return key
 end
 local function saveSettings()
     pcall(function()
@@ -1433,12 +1432,7 @@ function GeminiProvider:chatCompletions(payload)
         table.insert(contents, { role = "user", parts = {{ text = "(continue)" }} })
     end
 
-    -- Gemini 3.x (preview) модели используют reasoning/thinking
-    -- thinkingConfig нужен чтобы контролировать глубину reasoning
-    -- "low" = минимум (быстро), без него модель может думать очень долго
-    -- thinking доступен в 2.5+ и 3.x preview моделях
-    -- Только gemini-3.x поддерживает thinkingConfig
-    -- gemini-2.5-flash НЕ поддерживает thinkingConfig — передавать нельзя
+    -- Gemini 3.x uses thinkingLevel; thinkingBudget is the older 2.5 format.
     local isGemini3x = model:find("^gemini%-3") ~= nil
     -- temperature: для gemini-3.x Google рекомендует 1.0, для остальных — из настроек
     -- [v19.9.1] ФИКС: Gemini минимальная temperature = 0.5
@@ -1449,8 +1443,7 @@ function GeminiProvider:chatCompletions(payload)
         temperature     = geminiTemp,
     }
     if isGemini3x then
-        -- thinkingBudget = 0 = мгновенный ответ без reasoning (для чата быстрее)
-        genConfig.thinkingConfig = { thinkingBudget = 0 }
+        genConfig.thinkingConfig = { thinkingLevel = "MINIMAL" }
     end
 
     local body = {
@@ -7533,7 +7526,7 @@ do
     apiBox2.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2) or ""
     apiBox2.Parent = apiInputFrame2
     apiBox2.FocusLost:Connect(function()
-        local clean = tostring(apiBox2.Text or ""):gsub("%s+","")
+        local clean = normalizeApiKey(apiBox2.Text)
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq2 = clean
         saveApiKey2(clean)
@@ -7564,7 +7557,7 @@ do
     apiBox3.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq3) or ""
     apiBox3.Parent = apiInputFrame3
     apiBox3.FocusLost:Connect(function()
-        local clean = tostring(apiBox3.Text or ""):gsub("%s+","")
+        local clean = normalizeApiKey(apiBox3.Text)
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq3 = clean
         saveApiKey3(clean)
@@ -10691,7 +10684,7 @@ local function ctDoSend()
                     then
                     friendlyErr = "🔑 API ключ неверный или не указан. Проверь вкладку Настройки."
                 elseif errLower:find("400") or errLower:find("bad request") then
-                    friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
+                    friendlyErr = "⚠️ Gemini отклонил запрос: " .. tostring(err):sub(1, 220)
                 elseif errLower:find("timeout") or errLower:find("timed") then
                     friendlyErr = "⏱️ Таймаут даже после retry. Попробуй позже."
                 else
