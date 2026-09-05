@@ -2931,16 +2931,18 @@ local function parseActionTag(text)
     local action = nil
     local actionArg = nil
     local cleanText = text
+    local lowerText = text:lower()
 
-    local specialStart, specialEnd, specialArg = text:find("%[%s*[Dd][Oo]:%s*searchanim%s+([^%]]+)%s*%]")
+    local specialStart, specialEnd = lowerText:find("%[%s*%s*do:%s*searchanim%s+([^%]]+)%s*%]")
     local specialAction = specialStart and "searchanim" or nil
     if not specialStart then
-        specialStart, specialEnd, specialArg = text:find("%[%s*[Dd][Oo]:%s*playanim%s+([^%]]+)%s*%]")
+        specialStart, specialEnd = lowerText:find("%[%s*%s*do:%s*playanim%s+([^%]]+)%s*%]")
         specialAction = specialStart and "playanim" or nil
     end
     if specialStart then
+        local _, _, rawArg = text:sub(specialStart, specialEnd):find("%s+([^%]]+)%s*%]")
         action = specialAction:lower()
-        actionArg = specialArg:match("^%s*(.-)%s*$")
+        actionArg = rawArg and rawArg:match("^%s*(.-)%s*$") or ""
         cleanText = text:sub(1, specialStart - 1) .. text:sub(specialEnd + 1)
     end
 
@@ -3684,6 +3686,10 @@ local function handleQueuedChat(item)
             if okSearch and type(results) == "table" then
                 local okFormat, formatted = pcall(EmoteAPI.FormatResults, results)
                 if okFormat and type(formatted) == "string" then
+                    table.insert(apiMessages, {
+                        role = "assistant",
+                        content = text,
+                    })
                     table.insert(apiMessages, {
                         role = "system",
                         content = "ANIMATION SEARCH RESULTS for query: " .. actionArg
@@ -7031,40 +7037,6 @@ makeToggleRow(
     end
 )
 
-makeToggleRow(
-    automation,
-    "Кастомные анимации",
-    "Разрешить EmoteAPI искать анимации в дополнительной JSON-базе.",
-    ClientSettings.UseCustomAnimSearch == true,
-    function(state)
-        ClientSettings.UseCustomAnimSearch = state
-        if EmoteAPI then
-            pcall(EmoteAPI.SetCustomEnabled, state)
-            if state and ClientSettings.CustomAnimDatabaseUrl ~= "" then
-                pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
-            end
-        end
-        saveSettings()
-    end
-)
-
-local customAnimUrlBox = makeTextBox(automation, "URL JSON-базы анимаций (необязательно)")
-customAnimUrlBox.Size = UDim2.new(1, -8, 0, 30)
-customAnimUrlBox.Text = ClientSettings.CustomAnimDatabaseUrl or ""
-customAnimUrlBox.FocusLost:Connect(function()
-    ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
-    if ClientSettings.UseCustomAnimSearch and EmoteAPI and ClientSettings.CustomAnimDatabaseUrl ~= "" then
-        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
-    end
-    saveSettings()
-end)
-if ClientSettings.UseCustomAnimSearch and EmoteAPI then
-    pcall(EmoteAPI.SetCustomEnabled, true)
-    if ClientSettings.CustomAnimDatabaseUrl ~= "" then
-        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
-    end
-end
-
 -- v18.2: Веб-поиск
 makeToggleRow(
     automation,
@@ -8039,6 +8011,41 @@ do
 end
 
 -- Test button removed
+
+makeAdvancedHeader("Анимации")
+makeToggleRow(
+    advancedScroll,
+    "Кастомные анимации",
+    "Разрешить EmoteAPI искать анимации в дополнительной JSON-базе.",
+    ClientSettings.UseCustomAnimSearch == true,
+    function(state)
+        ClientSettings.UseCustomAnimSearch = state
+        if EmoteAPI then
+            pcall(EmoteAPI.SetCustomEnabled, state)
+            if state and ClientSettings.CustomAnimDatabaseUrl ~= "" then
+                pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+            end
+        end
+        saveSettings()
+    end
+)
+
+local customAnimUrlBox = makeTextBox(advancedScroll, "URL JSON-базы анимаций (необязательно)")
+customAnimUrlBox.Size = UDim2.new(1, -8, 0, 30)
+customAnimUrlBox.Text = ClientSettings.CustomAnimDatabaseUrl or ""
+customAnimUrlBox.FocusLost:Connect(function()
+    ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+    if ClientSettings.UseCustomAnimSearch and EmoteAPI and ClientSettings.CustomAnimDatabaseUrl ~= "" then
+        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+    end
+    saveSettings()
+end)
+if ClientSettings.UseCustomAnimSearch and EmoteAPI then
+    pcall(EmoteAPI.SetCustomEnabled, true)
+    if ClientSettings.CustomAnimDatabaseUrl ~= "" then
+        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+    end
+end
 
 
 
