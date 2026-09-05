@@ -458,7 +458,7 @@ ClientSettings = {
         WindowHeight = 500,
     },
     Models = {
-        groq = "llama-3.1-8b-instant",
+        groq = "openai/gpt-oss-20b",
     },
     Temperature = 0.7,
     MaxTokens = 1024,
@@ -749,7 +749,7 @@ Identity rules:
     },
     ["Chill-Human"] = {
         label = "Chill-Human",
-        model = "llama-3.1-8b-instant",
+        model = "openai/gpt-oss-20b",
         system = [[Act friendly and approachable in every response.
 Behavior rules:
 - Talk like a normal, chill player in game chat.
@@ -1880,7 +1880,7 @@ local function getModel(settings)
         -- т.к. ProviderRouter роутит по имени модели
         return pm
     end
-    return "llama-3.1-8b-instant"
+    return "openai/gpt-oss-20b"
 end
 
 local function isBlacklisted(settings, userId)
@@ -6970,8 +6970,6 @@ makeToggleRow(
 -- Preview Models — могут быть отключены без предупреждения
 local groqModels = {
     -- ── PRODUCTION (стабильные) ───────────────────────────────────────────
-    "llama-3.1-8b-instant",                        -- Llama 3.1 8B        | 560 t/s  | быстрый
-    "llama-3.3-70b-versatile",                     -- Llama 3.3 70B       | 280 t/s  | умный
     "openai/gpt-oss-20b",                          -- GPT OSS 20B         | 1000 t/s | быстрейший
     "openai/gpt-oss-120b",                         -- GPT OSS 120B        | 500 t/s  | топ
     -- ── PREVIEW (свежие модели) ───────────────────────────────────────────
@@ -7026,7 +7024,7 @@ do
     end)
 end
 
-customModelInput = makeTextBox(modelSection, "Custom model id (e.g., llama-3.1-8b-instant)")
+customModelInput = makeTextBox(modelSection, "Custom model id (e.g., openai/gpt-oss-20b)")
 customModelInput.Size = UDim2.new(1, 0, 0, 40)
 customModelInput.Visible = (currentModel == "Custom" or not table.find(groqModels, currentModel))
 customModelInput.FocusLost:Connect(function()
@@ -7045,7 +7043,7 @@ local currentModel = ClientSettings.Models.groq or groqModels[1]
 do
     local _, ctrl = makeRightControlRow(generalScroll, "Модель", "Выбери AI модель.", 230)
     
-    local modelDropdown = makeDropdown(ctrl, groqModels, currentModel or "llama-3.1-8b-instant", function(val)
+    local modelDropdown = makeDropdown(ctrl, groqModels, currentModel or "openai/gpt-oss-20b", function(val)
         ClientSettings.Models.groq = val
         saveModel(val)
     end)
@@ -11007,7 +11005,7 @@ end)
                 Url    = "https://api.groq.com/openai/v1/chat/completions",
                 Method = "POST",
                 Headers = { ["Authorization"] = "Bearer " .. savedKey, ["Content-Type"] = "application/json" },
-                Body = HttpService:JSONEncode({ model = "llama-3.1-8b-instant", max_tokens = 1, messages = {{ role = "user", content = "hi" }} }),
+                Body = HttpService:JSONEncode({ model = "openai/gpt-oss-20b", max_tokens = 1, messages = {{ role = "user", content = "hi" }} }),
             })
             if ok2 and res2 then
                 parseRateLimitHeaders(res2.Headers or res2.headers or {})
