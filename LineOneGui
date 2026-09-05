@@ -6975,6 +6975,7 @@ local groqModels = {
     -- ── PREVIEW (свежие модели) ───────────────────────────────────────────
     "openai/gpt-oss-safeguard-20b",              -- GPT OSS Safety 20B | safety tuned
     "qwen/qwen3.6-27b",                            -- Qwen3.6 27B         | updated logic
+    "qwen/qwen3.8-27b",                            -- Qwen3.8 27B         | latest logic
     "gemini-3-flash-preview",                      -- Gemini 3 Flash         | preview
     "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite  | preview лёгкий
     "gemini-3.5-flash-lite",                       -- Gemini 3.5 Flash Lite | current lightweight
