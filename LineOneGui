@@ -225,6 +225,17 @@ local LOB_GEMINI_FILE    = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE  = "lob_settings.txt"
 local LOB_CSP_FILE       = "lob_customprompt.txt"
 local LOB_MODEL_FILE     = "lob_model.txt"
+local function normalizeApiKey(value)
+    local key = tostring(value or "")
+    key = key:gsub("\239\187\191", "")
+        :gsub("\226\128\139", "")
+        :gsub("\226\128\140", "")
+        :gsub("\226\128\141", "")
+        :gsub("%s+", "")
+        :gsub("[\"'`]", "")
+    local groqKey = key:match("(gsk_[A-Za-z0-9_-]+)")
+    return groqKey or key
+end
 local function saveSettings()
     pcall(function()
         if not writefile then return end
@@ -344,32 +355,32 @@ local function loadModel()
     return (ok and type(result) == "string" and result ~= "") and result or nil
 end
 local function saveApiKey(key)
-    pcall(function() if writefile then writefile(LOB_KEY_FILE, tostring(key or "")) end end)
+    pcall(function() if writefile then writefile(LOB_KEY_FILE, normalizeApiKey(key)) end end)
 end
 local function loadApiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE) end return "" end)
-    return (ok and type(result)=="string") and result or ""
+    return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
 local function saveApiKey2(key)
-    pcall(function() if writefile then writefile(LOB_KEY_FILE2, tostring(key or "")) end end)
+    pcall(function() if writefile then writefile(LOB_KEY_FILE2, normalizeApiKey(key)) end end)
 end
 local function loadApiKey2()
     local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE2) end return "" end)
-    return (ok and type(result)=="string") and result or ""
+    return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
 local function saveApiKey3(key)
-    pcall(function() if writefile then writefile(LOB_KEY_FILE3, tostring(key or "")) end end)
+    pcall(function() if writefile then writefile(LOB_KEY_FILE3, normalizeApiKey(key)) end end)
 end
 local function loadApiKey3()
     local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE3) end return "" end)
-    return (ok and type(result)=="string") and result or ""
+    return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
 local function saveGeminiKey(key)
-    pcall(function() if writefile then writefile(LOB_GEMINI_FILE, tostring(key or "")) end end)
+    pcall(function() if writefile then writefile(LOB_GEMINI_FILE, normalizeApiKey(key)) end end)
 end
 local function loadGeminiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
-    return (ok and type(result)=="string") and result or ""
+    return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
 
 local RunService = game:GetService("RunService")
@@ -970,9 +981,9 @@ local GROQ_COOLDOWN    = 62         -- секунд до восстановле�
 
 local function getGroqKeys()
     return {
-        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq  or ""):gsub("%s+",""),
-        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2 or ""):gsub("%s+",""),
-        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq3 or ""):gsub("%s+",""),
+        normalizeApiKey(ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq),
+        normalizeApiKey(ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2),
+        normalizeApiKey(ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq3),
     }
 end
 
@@ -1316,6 +1327,15 @@ end
 local GeminiProvider = {}
 GeminiProvider.__index = GeminiProvider
 
+local function normalizeGeminiModel(model)
+    model = tostring(model or "gemini-3.5-flash-lite"):match("^%s*(.-)%s*$")
+    -- Migrate the old saved model selection to the current Gemini model.
+    if model == "gemini-2.5-flash-lite" or model == "gemini-2.5-flash" then
+        return "gemini-3.5-flash-lite"
+    end
+    return model
+end
+
 function GeminiProvider.new()
     return setmetatable({}, GeminiProvider)
 end
@@ -1325,7 +1345,7 @@ function GeminiProvider:chatCompletions(payload)
     apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
     if apiKey == "" then return nil, "MissingGeminiKey" end
 
-    local model = payload.model or "gemini-3.5-flash-lite"
+    local model = normalizeGeminiModel(payload.model)
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent"
 
@@ -6966,7 +6986,7 @@ local groqModels = {
     "qwen/qwen3.6-27b",                            -- Qwen3.6 27B         | updated logic
     "gemini-3-flash-preview",                      -- Gemini 3 Flash         | preview
     "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite  | preview лёгкий
-    "gemini-3.5-flash-lite",                       -- Gemini 3.5 Flash Lite  | modern lightweight
+    "gemini-3.5-flash-lite",                       -- Gemini 3.5 Flash Lite | current lightweight
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
@@ -7615,8 +7635,7 @@ do
     if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
 
     local function doApiCheck()
-        local raw = tostring(apiBox.Text or "")
-        local clean = raw:gsub("%s+", "")
+        local clean = normalizeApiKey(apiBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
         saveApiKey(clean)
@@ -7627,20 +7646,18 @@ do
             apiCheckBtn.Text = "Проверить ключ"
             apiCheckBtn.BackgroundTransparency = 0.15
             if not testKey or testKey == "" then setApiStatus(false, "ключ не указан", "Введи API ключ выше."); return end
-            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-            if not req then setApiStatus(false, "ошибка executor", nil); return end
-            local ok2, res2 = pcall(req, {
-                Url = "https://api.groq.com/openai/v1/chat/completions",
-                Method = "POST",
-                Headers = { ["Authorization"] = "Bearer " .. testKey, ["Content-Type"] = "application/json" },
-                Body = HttpService:JSONEncode({ model="llama-3.1-8b-instant", max_tokens=1, messages={{role="user",content="hi"}} }),
-            })
-            if not ok2 then setApiStatus(false, "ошибка сети", nil); return end
-            local s2 = tonumber(res2.StatusCode or res2.statusCode or 0)
+            local res2, s2, statusMsg, rawBody, headers = postJson(
+                "https://api.groq.com/openai/v1/chat/completions",
+                { ["Authorization"] = "Bearer " .. testKey, ["Content-Type"] = "application/json" },
+                { model="llama-3.1-8b-instant", max_tokens=1, messages={{role="user",content="hi"}} }
+            )
             if s2 == 401 then setApiStatus(false, "неверный ключ", nil); return end
             if s2 == 429 then setApiStatus(true, "ключ верный", "Rate limit — попробуй позже."); return end
-            if s2 ~= 200 then setApiStatus(false, "ошибка " .. s2, nil); return end
-            parseRateLimitHeaders(res2.Headers or res2.headers or {})
+            if not res2 then
+                setApiStatus(false, "ошибка " .. tostring(s2 or statusMsg or "сети"), nil)
+                return
+            end
+            parseRateLimitHeaders(headers or {})
             setApiStatus(true, "работает", nil)
         end)
     end
@@ -7652,7 +7669,7 @@ do
         if k and k:sub(1,4) == "gsk_" and #k > 8 then doApiCheck() end
     end)
     apiBox.FocusLost:Connect(function()
-        local clean = tostring(apiBox.Text or ""):gsub("%s+", "")
+        local clean = normalizeApiKey(apiBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
         saveApiKey(clean)
@@ -7770,8 +7787,7 @@ do
     end
 
     local function doGeminiCheck()
-        local raw = tostring(gemBox.Text or "")
-        local clean = raw:gsub("%s+", "")
+        local clean = normalizeApiKey(gemBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.gemini = clean
         saveGeminiKey(clean)
@@ -7787,6 +7803,7 @@ do
             -- Тестируем с выбранной моделью или дефолтом
                 local testModel = (ClientSettings.Models and ClientSettings.Models.groq) or "gemini-3.5-flash-lite"
                 if not testModel:find("^gemini") then testModel = "gemini-3.5-flash-lite" end
+                testModel = normalizeGeminiModel(testModel)
                 local testUrl = "https://generativelanguage.googleapis.com/v1beta/models/" .. testModel .. ":generateContent"
             local ok2, res2 = pcall(req, {
                 Url = testUrl, Method = "POST",
@@ -7840,8 +7857,7 @@ do
     gemCheckBtn.MouseButton1Click:Connect(doGeminiCheck)
 
     gemBox.FocusLost:Connect(function()
-        local raw = tostring(gemBox.Text or "")
-        local clean = raw:gsub("%s+", "")
+        local clean = normalizeApiKey(gemBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.gemini = clean
         saveGeminiKey(clean)
