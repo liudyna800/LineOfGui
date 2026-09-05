@@ -4131,15 +4131,50 @@ local function handleTextChatService(textChatMessage)
     if textSource.UserId == Players.LocalPlayer.UserId then return end
     local chatPlayer = Players:GetPlayerByUserId(textSource.UserId)
     if not chatPlayer then return end
+    local handled = false
+    local textChangedConn
+    local timeoutThread
+
+    local function processText(text)
+        if handled or type(text) ~= "string" or text == "" then return end
+        handled = true
+        if textChangedConn then
+            pcall(function() textChangedConn:Disconnect() end)
+            textChangedConn = nil
+        end
+        if timeoutThread then
+            pcall(task.cancel, timeoutThread)
+            timeoutThread = nil
+        end
+        -- Убираем RichText теги которые TextChatService может добавлять автоматически
+        text = text:gsub("<font[^>]*>", ""):gsub("</font>", "")
+               :gsub("<b>", ""):gsub("</b>", "")
+               :gsub("<i>", ""):gsub("</i>", "")
+               :gsub("<u>", ""):gsub("</u>", "")
+               :gsub("<s>", ""):gsub("</s>", "")
+        processChatMessage(chatPlayer, text)
+    end
+
     local msg = textChatMessage.Text
-    if type(msg) ~= "string" or msg == "" then return end
-    -- Убираем RichText теги которые TextChatService может добавлять автоматически
-    msg = msg:gsub("<font[^>]*>", ""):gsub("</font>", "")
-           :gsub("<b>", ""):gsub("</b>", "")
-           :gsub("<i>", ""):gsub("</i>", "")
-           :gsub("<u>", ""):gsub("</u>", "")
-           :gsub("<s>", ""):gsub("</s>", "")
-    processChatMessage(chatPlayer, msg)
+    if type(msg) == "string" and msg ~= "" then
+        processText(msg)
+        return
+    end
+
+    -- Roblox may populate Text after MessageReceived for rephrased messages.
+    local ok, signal = pcall(function()
+        return textChatMessage:GetPropertyChangedSignal("Text")
+    end)
+    if not ok or not signal then return end
+    textChangedConn = signal:Connect(function()
+        processText(textChatMessage.Text)
+    end)
+    timeoutThread = task.delay(3, function()
+        if textChangedConn then
+            pcall(function() textChangedConn:Disconnect() end)
+            textChangedConn = nil
+        end
+    end)
 end
 
 -- Connect to chat services
