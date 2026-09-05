@@ -1741,6 +1741,11 @@ local function makeSystemPrompt(settings)
     local parts = {}
     local model = settings.Models and settings.Models.groq or ""
 
+    if settings.MemoryEnabled then
+        table.insert(parts,
+            "MEMORY: Previous user and assistant messages supplied before the current message are authoritative conversation context. Use them to answer follow-up questions and remember stated facts. Do not claim you forgot information that is present in that context.")
+    end
+
     -- ── 1. ЛИЧНОСТЬ / КАСТОМНЫЙ ПРОМПТ ──────────────────────────────────
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
@@ -3443,6 +3448,12 @@ local function handleQueuedChat(item)
         local maxPairs = math.max(1, math.min(50, tonumber(settings.MaxHistory) or MAX_HISTORY))
         local maxItems = maxPairs * 2
         local startIdx = math.max(1, #history - maxItems + 1)
+        if startIdx <= #history then
+            table.insert(apiMessages, {
+                role = "system",
+                content = "MEMORY CONTEXT: The following messages are from the current conversation. Use them when answering the next user message."
+            })
+        end
         for i = startIdx, #history do
             table.insert(apiMessages, history[i])
         end
@@ -10611,8 +10622,17 @@ local function ctDoSend()
         -- Строим payload — историю берём только если память включена
         local apiMsgs = {{ role = "system", content = makeSystemPrompt(settings) }}
         if settings.MemoryEnabled then
-            for _, m in ipairs(DirectChatHistory) do
-                table.insert(apiMsgs, m)
+            local maxPairs = math.max(1, math.min(50, tonumber(settings.MaxHistory) or MAX_HISTORY))
+            local maxItems = maxPairs * 2
+            local startIdx = math.max(1, #DirectChatHistory - maxItems + 1)
+            if startIdx <= #DirectChatHistory then
+                table.insert(apiMsgs, {
+                    role = "system",
+                    content = "MEMORY CONTEXT: The following messages are from the current direct conversation. Use them when answering the next user message."
+                })
+            end
+            for i = startIdx, #DirectChatHistory do
+                table.insert(apiMsgs, DirectChatHistory[i])
             end
         end
         -- UsePlayerName в директ-чате
