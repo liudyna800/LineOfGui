@@ -518,6 +518,19 @@ ClientSettings = {
     CustomAnimDatabaseUrl = "",
 }
 
+local function applyCustomAnimSearch(state)
+    ClientSettings.UseCustomAnimSearch = state and true or false
+    if EmoteAPI then
+        pcall(EmoteAPI.SetCustomEnabled, ClientSettings.UseCustomAnimSearch)
+        if ClientSettings.UseCustomAnimSearch then
+            local url = ClientSettings.CustomAnimDatabaseUrl
+            if type(url) == "string" and url ~= "" then
+                pcall(EmoteAPI.LoadCustomDatabase, url)
+            end
+        end
+    end
+end
+
 -- Загружаем сохранённый API ключ и настройки при старте
 do
     local saved = loadApiKey()
@@ -536,6 +549,7 @@ do
         ClientSettings.ApiKeys.groq3 = saved3
     end
     loadSettings()
+    applyCustomAnimSearch(ClientSettings.UseCustomAnimSearch == true)
     if ClientSettings.Debug then
         print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
     end
@@ -1765,13 +1779,22 @@ local function makeSystemPrompt(settings)
 
     -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
+        if settings.ActionsEnabled and EmoteAPI then
+            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
+                "ANIMATION REQUESTS (highest priority, 2-step, ONE tag per message):\n" ..
+                "If the player asks you to sit/dance/wave/play an emote/animation (сядь, присядь, посиди, станцуй, помаши, emote, анимация):\n" ..
+                "1) First reply MUST start with [DO:searchanim QUERY] where QUERY is 1-2 English words. Example: сядь → [DO:searchanim sit] Ок, сажусь.\n" ..
+                "2) Do NOT use [DO:sit] or [DO:dance] for those requests — they will not play the searched animation.\n" ..
+                "3) After ANIMATION SEARCH RESULTS are supplied, reply with [DO:playanim REF] copying REF exactly (builtin:sit or id:3360686498). Never invent refs.\n" ..
+                "Never show these tags as visible chat text.")
+        end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
                 "DO-TAGS (place at START of reply, 1 per message):\n" ..
                 "[DO:wave]=hi/bye  [DO:laugh]=haha/lol  [DO:agree]=yes  [DO:disagree]=no\n" ..
-                "[DO:shrug]=idk  [DO:dance]=dance  [DO:spin]=spin/крутись  [DO:jump]=jump  [DO:goto]=come here\n" ..
+                "[DO:shrug]=idk  [DO:spin]=spin/крутись  [DO:jump]=jump  [DO:goto]=come here\n" ..
                 "[DO:follow]=follow me  [DO:stop]=stop  [DO:cheer]=nice/gg  [DO:sad]=rip\n" ..
-                "spin=крутиться НЕ танцевать! Example: [DO:laugh]haha  покрутись→[DO:spin]")
+                "spin=крутиться НЕ танцевать! Animation requests use [DO:searchanim] not [DO:sit]/[DO:dance]. Example: [DO:laugh]haha  покрутись→[DO:spin]  сядь→[DO:searchanim sit]")
         else
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
                 "You control a Roblox character. Add ONE [DO:tag] at the START of your reply.\n" ..
@@ -1780,8 +1803,8 @@ local function makeSystemPrompt(settings)
                 "\n[DO:laugh]  — что-то реально смешное. НЕ используй просто так" ..
                 "\n[DO:cheer]  — gg, nice, молодец, победа, восторг, ura" ..
                 "\n[DO:point]  — указываешь на что-то, не понял, грустно, rip" ..
-                "\n[DO:sit]    — устал, скучно, расслабляешься, сидишь" ..
-                "\n[DO:dance]  — просят ПОТАНЦЕВАТЬ (dance, станцуй). НЕ путай с spin!" ..
+                "\n[DO:sit]    — устал/скучно как эмоция. Если ПРОСЯТ сесть (сядь) — [DO:searchanim sit]" ..
+                "\n[DO:dance]  — только как эмоция. Если ПРОСЯТ танцевать — [DO:searchanim dance]" ..
                 "\n[DO:spin]   — просят ПОКРУТИТЬСЯ (крутись, spin, покрутись, twirl). НЕ используй dance!" ..
                 "\n[DO:shrug]  — idk, хз, не знаю, пожимаешь плечами" ..
                 "\n[DO:agree]  — да, yes, согласен, конечно, точно" ..
@@ -1802,13 +1825,8 @@ local function makeSystemPrompt(settings)
                 "\nПРИМЕРЫ:" ..
                 "\nкруто!→[DO:cheer]  хаха→[DO:laugh]  да→[DO:agree]  нет→[DO:disagree]" ..
                 "\nхз→[DO:shrug]  прости→[DO:sorry]  что?→[DO:confused]  грустно→[DO:sad]" ..
-                "\nпривет→[DO:wave]  стесняюсь→[DO:shy]  устал→[DO:sit]  потанцуй→[DO:dance]  покрутись→[DO:spin]")
+                "\nпривет→[DO:wave]  стесняюсь→[DO:shy]  устал→[DO:sit]  сядь→[DO:searchanim sit]  потанцуй→[DO:searchanim dance]  покрутись→[DO:spin]")
         end
-    end
-
-    if settings.ActionsEnabled and EmoteAPI then
-        table.insert(parts,
-            "ANIMATION SEARCH ACTIONS: For an animation request, use the two-step round-trip. First output exactly one [DO:searchanim <query in English>] tag and wait for the supplied search results. After results are supplied, output [DO:playanim <ref>] where ref is copied exactly from the results in the form builtin:name or id:12345. Never invent refs and never show these tags as visible chat text.")
     end
 
     -- ── 2б. ЛИЧНОСТЬ (после тегов — чтобы не блокировала)
@@ -2931,18 +2949,44 @@ local function parseActionTag(text)
     local action = nil
     local actionArg = nil
     local cleanText = text
-    local lowerText = text:lower()
 
-    local specialStart, specialEnd = lowerText:find("%[%s*%s*do:%s*searchanim%s+([^%]]+)%s*%]")
+    local function findSpecial(kind)
+        local lt = text:lower()
+        local pos = 1
+        while true do
+            local open = lt:find("[", pos, true)
+            if not open then return nil end
+            local close = lt:find("]", open + 1, true)
+            local innerEnd = close and (close - 1) or #lt
+            local inner = (lt:sub(open + 1, innerEnd):match("^%s*(.-)%s*$") or "")
+            local rest = inner:match("^do%s*:%s*(.*)$")
+            if rest then
+                local payload = rest:match("^" .. kind .. "%s+(.*)$")
+                local cmdOnly = rest:match("^" .. kind .. "%s*$")
+                if payload or cmdOnly then
+                    payload = (payload or ""):gsub("[`\"']", "")
+                    payload = payload:match("^%s*(.-)%s*$") or ""
+                    local cutEnd = close or innerEnd
+                    if not close then
+                        local nl = lt:find("\n", open + 1, true)
+                        cutEnd = nl and (nl - 1) or #text
+                    end
+                    return open, cutEnd, payload
+                end
+            end
+            pos = open + 1
+        end
+    end
+
+    local specialStart, specialEnd, specialArg = findSpecial("searchanim")
     local specialAction = specialStart and "searchanim" or nil
     if not specialStart then
-        specialStart, specialEnd = lowerText:find("%[%s*%s*do:%s*playanim%s+([^%]]+)%s*%]")
+        specialStart, specialEnd, specialArg = findSpecial("playanim")
         specialAction = specialStart and "playanim" or nil
     end
     if specialStart then
-        local _, _, rawArg = text:sub(specialStart, specialEnd):find("%s+([^%]]+)%s*%]")
-        action = specialAction:lower()
-        actionArg = rawArg and rawArg:match("^%s*(.-)%s*$") or ""
+        action = specialAction
+        actionArg = specialArg or ""
         cleanText = text:sub(1, specialStart - 1) .. text:sub(specialEnd + 1)
     end
 
@@ -2974,6 +3018,134 @@ local function parseActionTag(text)
     cleanText = cleanText:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 
     return action, cleanText, actionArg
+end
+
+local function inferAnimSearchQuery(msg)
+    if type(msg) ~= "string" or msg == "" then return nil end
+    local m = msg:lower()
+    local rules = {
+        { "станц", "dance" },
+        { "потанц", "dance" },
+        { "танцу", "dance" },
+        { "dance", "dance" },
+        { "присяд", "sit" },
+        { "присед", "sit" },
+        { "садис", "sit" },
+        { "посид", "sit" },
+        { "сяд", "sit" },
+        { "сиди", "sit" },
+        { "sit%s*down", "sit" },
+        { "%f[%a]sit%f[%A]", "sit" },
+        { "помах", "wave" },
+        { "махн", "wave" },
+        { "%f[%a]wave%f[%A]", "wave" },
+        { "shrug", "shrug" },
+        { "пожм", "shrug" },
+        { "salute", "salute" },
+        { "робот", "robot" },
+        { "robot", "robot" },
+        { "зомби", "zombie" },
+        { "zombie", "zombie" },
+        { "анимац", "dance" },
+        { "эмоци", "wave" },
+        { "%f[%a]emote%f[%A]", "wave" },
+    }
+    for _, rule in ipairs(rules) do
+        if m:find(rule[1]) then
+            return rule[2]
+        end
+    end
+    return nil
+end
+
+local function normalizeAnimRef(ref)
+    if type(ref) ~= "string" then return nil end
+    ref = ref:gsub("[`\"']", "")
+    ref = ref:match("^%s*(.-)%s*$") or ""
+    local first = ref:match("^(builtin:%S+)") or ref:match("^(id:%S+)") or ref
+    first = first:gsub("[%,%.%;%)]$", "")
+    return first
+end
+
+local function playAnimByRef(ref, seconds)
+    ref = normalizeAnimRef(ref)
+    if not ref or ref == "" then return false end
+    local kind, value = ref:match("^(%a+):%s*(.+)$")
+    if not kind then
+        if tonumber(ref) then
+            kind, value = "id", ref
+        else
+            kind, value = "builtin", ref
+        end
+    end
+    value = (value or ""):match("^%s*(.-)%s*$")
+    seconds = seconds or 30
+    if kind == "builtin" then
+        playEmote(value, seconds)
+        return true
+    elseif kind == "id" and EmoteAPI then
+        local ok = pcall(EmoteAPI.PlayById, tonumber(value), seconds)
+        return ok
+    elseif EmoteAPI then
+        local ok = pcall(EmoteAPI.PlayByRef, ref, seconds)
+        return ok
+    end
+    return false
+end
+
+local function runEmoteSearchRoundTrip(apiMessages, payload, timeoutSec, query, originalText)
+    query = type(query) == "string" and (query:match("^%s*(.-)%s*$") or "") or ""
+    query = query:gsub("[`\"']", "")
+    if query == "" or not EmoteAPI then
+        return nil, nil, nil, originalText
+    end
+    local okSearch, results = pcall(EmoteAPI.Search, query, 8)
+    if not okSearch or type(results) ~= "table" then
+        if ClientSettings.Debug then
+            print("[LOB] EmoteAPI.Search failed: " .. tostring(results))
+        end
+        return nil, nil, nil, originalText
+    end
+    local okFormat, formatted = pcall(EmoteAPI.FormatResults, results)
+    if not okFormat or type(formatted) ~= "string" then
+        formatted = "No animations found for that query."
+    end
+    table.insert(apiMessages, { role = "assistant", content = originalText })
+    table.insert(apiMessages, {
+        role = "system",
+        content = "ANIMATION SEARCH RESULTS for query: " .. query
+            .. "\n" .. formatted
+            .. "\nChoose exactly one ref from these results and output [DO:playanim <ref>] plus the normal reply. Copy the ref exactly."
+    })
+    payload.messages = apiMessages
+    local secondText, secondErr
+    local secondDone = false
+    task.spawn(function()
+        secondText, secondErr = providerRouter:chatCompletions(payload)
+        secondDone = true
+    end)
+    local secondWaited = 0
+    while not secondDone and secondWaited < timeoutSec do
+        task.wait(0.5)
+        secondWaited = secondWaited + 0.5
+    end
+    if secondDone and secondText and secondText ~= "" then
+        local text = secondText:match("^%s*(.-)%s*$") or secondText
+        text = text:gsub("%[NAME:[^%]]*%]%s*", "")
+        text = text:gsub("<think>.-</think>%s*", "")
+        text = text:match("^%s*(.-)%s*$") or text
+        local actionName, cleanText, actionArg = parseActionTag(text)
+        return actionName, cleanText, actionArg, text
+    end
+    if ClientSettings.Debug then
+        print("[LOB] anim round-trip empty: " .. tostring(secondErr))
+    end
+    if results[1] then
+        local e = results[1]
+        local ref = e.builtin and ("builtin:" .. tostring(e.id)) or ("id:" .. tostring(e.id))
+        return "playanim", "", ref, originalText
+    end
+    return nil, nil, nil, originalText
 end
 
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
@@ -3679,42 +3851,21 @@ local function handleQueuedChat(item)
     text = text:match("^%s*(.-)%s*$") or text
 
     local actionName, cleanText, actionArg = parseActionTag(text)
-    if actionName == "searchanim" and settings.ActionsEnabled then
-        cleanText = ""
-        if EmoteAPI and actionArg and actionArg ~= "" then
-            local okSearch, results = pcall(EmoteAPI.Search, actionArg, 8)
-            if okSearch and type(results) == "table" then
-                local okFormat, formatted = pcall(EmoteAPI.FormatResults, results)
-                if okFormat and type(formatted) == "string" then
-                    table.insert(apiMessages, {
-                        role = "assistant",
-                        content = text,
-                    })
-                    table.insert(apiMessages, {
-                        role = "system",
-                        content = "ANIMATION SEARCH RESULTS for query: " .. actionArg
-                            .. "\n" .. formatted
-                            .. "\nChoose exactly one ref from these results and output [DO:playanim <ref>] plus the normal reply."
-                    })
-                    payload.messages = apiMessages
-                    local secondText, secondErr
-                    local secondDone = false
-                    task.spawn(function()
-                        secondText, secondErr = providerRouter:chatCompletions(payload)
-                        secondDone = true
-                    end)
-                    local secondWaited = 0
-                    while not secondDone and secondWaited < timeoutSec do
-                        task.wait(0.5)
-                        secondWaited = secondWaited + 0.5
-                    end
-                    if secondDone and secondText and secondText ~= "" then
-                        text = secondText:match("^%s*(.-)%s*$") or secondText
-                        text = text:gsub("%[NAME:[^%]]*%]%s*", "")
-                        text = text:gsub("<think>.-</think>%s*", "")
-                        text = text:match("^%s*(.-)%s*$") or text
-                        actionName, cleanText, actionArg = parseActionTag(text)
-                    end
+    local inferredAnim = inferAnimSearchQuery(item.cleaned)
+    if settings.ActionsEnabled and EmoteAPI then
+        if actionName ~= "searchanim" and actionName ~= "playanim" and inferredAnim then
+            actionName = "searchanim"
+            actionArg = inferredAnim
+        end
+        if actionName == "searchanim" then
+            cleanText = ""
+            local query = (actionArg and actionArg ~= "") and actionArg or inferredAnim
+            if query then
+                local a2, c2, arg2, t2 = runEmoteSearchRoundTrip(apiMessages, payload, timeoutSec, query, text)
+                if a2 then
+                    actionName, cleanText, actionArg, text = a2, c2, arg2, t2
+                else
+                    actionName, actionArg = nil, nil
                 end
             end
         end
@@ -3734,11 +3885,11 @@ local function handleQueuedChat(item)
     print("[SPIN_DBG] action:", tostring(actionName))
     -- Не выполняем actions от isWorld событий если AutoReply выключен
     if not item.isWorld or settings.AutoReply then
-        if actionName == "playanim" and settings.ActionsEnabled and EmoteAPI and actionArg then
+        if actionName == "playanim" and settings.ActionsEnabled and actionArg then
             task.spawn(function()
-                local ok, err = pcall(EmoteAPI.PlayByRef, actionArg, 30)
+                local ok = playAnimByRef(actionArg, 30)
                 if not ok and ClientSettings.Debug then
-                    print("[LOB] EmoteAPI play error: " .. tostring(err))
+                    print("[LOB] EmoteAPI play failed for ref: " .. tostring(actionArg))
                 end
             end)
             cleanText = cleanText or ""
@@ -7037,6 +7188,17 @@ makeToggleRow(
     end
 )
 
+makeToggleRow(
+    automation,
+    "Кастомные анимации",
+    "Искать эмоции ещё и в дополнительной JSON-базе (EmoteAPI). URL задаётся во вкладке Настройки.",
+    ClientSettings.UseCustomAnimSearch == true,
+    function(state)
+        applyCustomAnimSearch(state)
+        saveSettings()
+    end
+)
+
 -- v18.2: Веб-поиск
 makeToggleRow(
     automation,
@@ -7554,6 +7716,29 @@ do
     followModeDd.Frame.Size = UDim2.new(1, 0, 1, 0)
 end
 
+makeAdvancedHeader("Анимации")
+makeToggleRow(
+    advancedScroll,
+    "Кастомные анимации",
+    "Разрешить EmoteAPI искать анимации в дополнительной JSON-базе.",
+    ClientSettings.UseCustomAnimSearch == true,
+    function(state)
+        applyCustomAnimSearch(state)
+        saveSettings()
+    end
+)
+
+local customAnimUrlBox = makeTextBox(advancedScroll, "URL JSON-базы анимаций (необязательно)")
+customAnimUrlBox.Size = UDim2.new(1, -8, 0, 30)
+customAnimUrlBox.Text = ClientSettings.CustomAnimDatabaseUrl or ""
+customAnimUrlBox.FocusLost:Connect(function()
+    ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+    if ClientSettings.UseCustomAnimSearch and EmoteAPI and ClientSettings.CustomAnimDatabaseUrl ~= "" then
+        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+    end
+    saveSettings()
+end)
+
 makeAdvancedHeader("Горячая клавиша")
 makeKeybindRow(advancedScroll, "Показать/Скрыть", "Показать или скрыть интерфейс.", ClientSettings.ToggleKey or Enum.KeyCode.P, function(newKey)
     ClientSettings.ToggleKey = newKey
@@ -8011,43 +8196,6 @@ do
 end
 
 -- Test button removed
-
-makeAdvancedHeader("Анимации")
-makeToggleRow(
-    advancedScroll,
-    "Кастомные анимации",
-    "Разрешить EmoteAPI искать анимации в дополнительной JSON-базе.",
-    ClientSettings.UseCustomAnimSearch == true,
-    function(state)
-        ClientSettings.UseCustomAnimSearch = state
-        if EmoteAPI then
-            pcall(EmoteAPI.SetCustomEnabled, state)
-            if state and ClientSettings.CustomAnimDatabaseUrl ~= "" then
-                pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
-            end
-        end
-        saveSettings()
-    end
-)
-
-local customAnimUrlBox = makeTextBox(advancedScroll, "URL JSON-базы анимаций (необязательно)")
-customAnimUrlBox.Size = UDim2.new(1, -8, 0, 30)
-customAnimUrlBox.Text = ClientSettings.CustomAnimDatabaseUrl or ""
-customAnimUrlBox.FocusLost:Connect(function()
-    ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
-    if ClientSettings.UseCustomAnimSearch and EmoteAPI and ClientSettings.CustomAnimDatabaseUrl ~= "" then
-        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
-    end
-    saveSettings()
-end)
-if ClientSettings.UseCustomAnimSearch and EmoteAPI then
-    pcall(EmoteAPI.SetCustomEnabled, true)
-    if ClientSettings.CustomAnimDatabaseUrl ~= "" then
-        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
-    end
-end
-
-
 
 local perceptionFrame = Instance.new("CanvasGroup")
 perceptionFrame.BackgroundTransparency = 1
