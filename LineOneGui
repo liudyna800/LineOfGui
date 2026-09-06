@@ -7209,17 +7209,19 @@ makeToggleRow(
     end
 )
 
-local customAnimUrlBox = makeTextBox(automation, "URL кастомной базы (пусто = дефолтный источник)")
-customAnimUrlBox.Size = UDim2.new(1, -8, 0, 40)
-customAnimUrlBox.Text = tostring(ClientSettings.CustomAnimDatabaseUrl or "")
-customAnimUrlBox.FocusLost:Connect(function()
-    ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text
-    saveSettings()
-    -- Если поиск уже включён — перезагружаем базу с новым URL сразу
-    if ClientSettings.UseCustomAnimSearch then
-        applyCustomAnimSearch(true)
-    end
-end)
+do
+    local customAnimUrlBox = makeTextBox(automation, "URL кастомной базы (пусто = дефолтный источник)")
+    customAnimUrlBox.Size = UDim2.new(1, -8, 0, 40)
+    customAnimUrlBox.Text = tostring(ClientSettings.CustomAnimDatabaseUrl or "")
+    customAnimUrlBox.FocusLost:Connect(function()
+        ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text
+        saveSettings()
+        -- Если поиск уже включён — перезагружаем базу с новым URL сразу
+        if ClientSettings.UseCustomAnimSearch then
+            applyCustomAnimSearch(true)
+        end
+    end)
+end
 
 -- Официальный список моделей Groq (console.groq.com/docs/models, февраль 2026)
 -- Production Models — стабильные, для реального использования
