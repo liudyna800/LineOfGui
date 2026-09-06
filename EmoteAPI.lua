@@ -24,6 +24,10 @@
 local Players = game:GetService("Players")
 local player  = Players.LocalPlayer
 
+-- Совместимость с Delta/Roblox Luau: глобальной warn() в Luau нет (LuaGlobals).
+-- Определяем безопасный fallback, чтобы ошибки сети/JSON не роняли вызывающий скрипт.
+if type(warn) ~= "function" then warn = function(...) print(...) end end
+
 local EmoteAPI = {}
 
 -- Публичный URL большого стороннего каталога UGC-анимаций (id+имя, только данные,
@@ -99,51 +103,27 @@ end
 -- Подгружает ДОПОЛНИТЕЛЬНЫЙ список эмоций из JSON по URL.
 -- ВАЖНО: это чисто данные (HttpService:JSONDecode), никакого loadstring,
 -- никакого выполнения кода — максимум "плохой ID", не бэкдор.
--- Если url не передан (nil/пустая строка) — используется DEFAULT_CUSTOM_DB_URL.
--- Вызывать один раз при старте/при включении тумблера "Кастомные анимации".
--- Возвращает: ok (bool), count или текст ошибки
+-- Вызывать один раз при старте, если ClientSettings.UseCustomAnimSearch == true.
 function EmoteAPI.LoadCustomDatabase(url)
-    if not url or url == "" then
-        url = EmoteAPI.DEFAULT_CUSTOM_DB_URL
-    end
-
     local HttpService = game:GetService("HttpService")
     local ok, result = pcall(function()
         local raw = game:HttpGet(url)
         local decoded = HttpService:JSONDecode(raw)
-        -- Разные источники по-разному оборачивают массив: либо сам массив,
-        -- либо {data=[...]}, либо {emotes=[...]}, либо {items=[...]}
-        if type(decoded) == "table" then
-            if decoded.data then return decoded.data end
-            if decoded.emotes then return decoded.emotes end
-            if decoded.items then return decoded.items end
-            return decoded
-        end
-        return decoded
+        return decoded.data or decoded
     end)
     if not ok or type(result) ~= "table" then
-        warn("[EmoteAPI] Failed to load custom database from " .. tostring(url) .. ": " .. tostring(result))
-        return false, tostring(result)
+        warn("[EmoteAPI] Failed to load custom database: " .. tostring(result))
+        return false
     end
 
     local loaded = {}
     for _, item in ipairs(result) do
-        if type(item) == "table" then
-            -- Разные источники называют поля по-разному — проверяем варианты
-            local id = item.id or item.Id or item.ID or item.assetId or item.AssetId
-            local name = item.name or item.Name or item.title or item.Title or item.emoteName or item.EmoteName
-            id = tonumber(id)
-            if id and id > 0 and type(name) == "string" and name ~= "" then
-                table.insert(loaded, { id = id, name = name })
-            end
+        local id = tonumber(item.id)
+        local name = item.name
+        if id and id > 0 and type(name) == "string" and name ~= "" then
+            table.insert(loaded, { id = id, name = name })
         end
     end
-
-    if #loaded == 0 then
-        warn("[EmoteAPI] Custom database at " .. tostring(url) .. " loaded but contained 0 valid entries — проверь формат JSON (ожидались поля id/name).")
-        return false, "0 valid entries after parsing"
-    end
-
     CUSTOM_EMOTES = loaded
     return true, #loaded
 end
@@ -230,14 +210,14 @@ local _activeTrack   = nil
 local _activeThread  = nil
 
 local function getHumanoid()
-    local char = player.Character
+    local char = player and player.Character
     return char and char:FindFirstChildOfClass("Humanoid")
 end
 
 -- Возврат в idle через встроенный Animate-скрипт (R6/R15 совместимо)
 local function restoreIdle()
     pcall(function()
-        local char = player.Character
+        local char = player and player.Character
         local animate = char and char:FindFirstChild("Animate")
         local fn = animate and animate:FindFirstChild("PlayEmote")
         if fn then fn:Invoke("idle") end
