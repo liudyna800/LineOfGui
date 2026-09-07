@@ -12,7 +12,7 @@ local TrackStartTime = 0
 local MAX_EMOTE_DURATION = 40
 
 --------------------------------------------------------------------------------
--- 1. EMOTE API (Исправленный надежный поиск и воспроизведение)
+-- 1. EMOTE API (Конвертация Catalog ID -> Animation ID и воспроизведение)
 --------------------------------------------------------------------------------
 
 local EmoteAPI = {}
@@ -25,41 +25,67 @@ function EmoteAPI.Stop()
     end
 end
 
-local function GetAnimationId(assetId)
+local function GetAnimationId(assetId, logFunc)
+    -- 1. Попытка через GetObjects
     local success, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. tostring(assetId))
     end)
     
     if success and objects and #objects > 0 then
-        local item = objects[1]
-        if item:IsA("Animation") and item.AnimationId ~= "" then
-            return item.AnimationId
-        end
-        local animObj = item:FindFirstChildOfClass("Animation")
-        if animObj and animObj.AnimationId ~= "" then
-            return animObj.AnimationId
+        for _, item in ipairs(objects) do
+            if item:IsA("Animation") and item.AnimationId ~= "" then
+                return item.AnimationId
+            end
+            local animObj = item:FindFirstChildOfClass("Animation", true)
+            if animObj and animObj.AnimationId ~= "" then
+                return animObj.AnimationId
+            end
         end
     end
+
+    -- 2. Fallback: Прямое извлечение настоящей AnimationId из сырых данных ассета
+    local httpSuccess, rawData = pcall(function()
+        return game:HttpGet("https://assetdelivery.roblox.com/v1/asset/?id=" .. tostring(assetId))
+    end)
+
+    if httpSuccess and rawData then
+        -- Ищем внутренний rbxassetid или id анимации в контейнере
+        local realAnimId = rawData:match("rbxassetid://(%d+)") or rawData:match("id=(%d+)")
+        if realAnimId and realAnimId ~= tostring(assetId) then
+            if logFunc then logFunc("[AnimFix] Извлечен настоящий AnimationID: " .. realAnimId) end
+            return "rbxassetid://" .. realAnimId
+        end
+    end
+
     return "rbxassetid://" .. tostring(assetId)
 end
 
-function EmoteAPI.Play(assetId)
+function EmoteAPI.Play(assetId, logFunc)
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local humanoid = character:WaitForChild("Humanoid")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
 
     EmoteAPI.Stop()
 
-    local realAnimId = GetAnimationId(assetId)
-    local animObject = Instance.new("Animation")
-    animObject.AnimationId = realAnimId
-
-    local track = animator:LoadAnimation(animObject)
-    track.Priority = Enum.AnimationPriority.Action4
-    track:Play(0.1, 1, 1)
+    local realAnimId = GetAnimationId(assetId, logFunc)
     
-    CurrentTrack = track
-    TrackStartTime = os.clock()
+    local playSuccess, err = pcall(function()
+        local animObject = Instance.new("Animation")
+        animObject.AnimationId = realAnimId
+
+        local track = animator:LoadAnimation(animObject)
+        track.Priority = Enum.AnimationPriority.Action4
+        track:Play(0.1, 1, 1)
+        
+        CurrentTrack = track
+        TrackStartTime = os.clock()
+    end)
+
+    if not playSuccess and logFunc then
+        logFunc("[Emote Error] Ошибка загрузки анимации: " .. tostring(err))
+    end
 end
 
 function EmoteAPI.SearchCatalog(query, logFunc)
@@ -98,7 +124,7 @@ function EmoteAPI.SearchCatalog(query, logFunc)
         end)
     end
 
-    -- Метод 2: Глобальный fallback поиск (если Метод 1 вернул 0)
+    -- Метод 2: Глобальный fallback поиск
     if #itemsFound == 0 and request then
         if logFunc then logFunc("[Catalog Fallback] Переключение на общий поиск...") end
         pcall(function()
@@ -204,7 +230,7 @@ function GeminiAPI.ProcessEmoteQuery(russianQuery, apiKey, selectedModel, logFun
                 if #results > 0 then
                     local target = results[1]
                     if logFunc then logFunc("[SUCCESS] Воспроизведение: " .. target.Name .. " (ID: " .. target.Id .. ")") end
-                    EmoteAPI.Play(target.Id)
+                    EmoteAPI.Play(target.Id, logFunc)
                     return
                 else
                     if logFunc then logFunc("[FAIL] По слову '" .. keyword .. "' ничего не найдено.") end
