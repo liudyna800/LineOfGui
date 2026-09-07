@@ -4,10 +4,14 @@ local MainFrame = Instance.new("Frame")
 local UICorner = Instance.new("UICorner")
 local TitleBar = Instance.new("TextLabel")
 local MinimizeButton = Instance.new("TextButton")
+
+-- Статистика ключей сверху
+local StatsLabel = Instance.new("TextLabel")
+
 local ScrollFrame = Instance.new("ScrollingFrame")
 local UIListLayout = Instance.new("UIListLayout")
 
--- Кнопка для разворачивания (кругдоя)
+-- Кнопка для разворачивания (круглая)
 local ToggleButton = Instance.new("TextButton")
 local ToggleCorner = Instance.new("UICorner")
 
@@ -26,7 +30,7 @@ else
     ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Кнопка сворачивания/разворачивания (Круглая)
+-- Круглая кнопка сворачивания
 ToggleButton.Name = "ToggleButton"
 ToggleButton.Size = UDim2.new(0, 45, 0, 45)
 ToggleButton.Position = UDim2.new(0, 20, 0, 100)
@@ -40,9 +44,9 @@ ToggleButton.Parent = ScreenGui
 ToggleCorner.CornerRadius = UDim.new(1, 0)
 ToggleCorner.Parent = ToggleButton
 
--- Главное окно GUI
+-- Главное окно GUI (немного шире, чтобы помещались длинные ники)
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 240, 0, 300)
+MainFrame.Size = UDim2.new(0, 270, 0, 320)
 MainFrame.Position = UDim2.new(0, 20, 0, 150)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
@@ -54,11 +58,11 @@ UICorner.Parent = MainFrame
 
 -- Шапка окна
 TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 TitleBar.Text = "  Key Tracker"
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.TextSize = 14
+TitleBar.TextSize = 13
 TitleBar.Font = Enum.Font.SourceSansBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
 TitleBar.Parent = MainFrame
@@ -67,10 +71,10 @@ local TitleCorner = Instance.new("UICorner")
 TitleCorner.CornerRadius = UDim.new(0, 8)
 TitleCorner.Parent = TitleBar
 
--- Кнопка закрытия/сворачивания внутри окна
+-- Кнопка сворачивания внутри окна
 MinimizeButton.Name = "MinimizeButton"
 MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-MinimizeButton.Position = UDim2.new(1, -35, 0, 2)
+MinimizeButton.Position = UDim2.new(1, -35, 0, 0)
 MinimizeButton.BackgroundTransparency = 1
 MinimizeButton.Text = "-"
 MinimizeButton.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -78,10 +82,26 @@ MinimizeButton.TextSize = 18
 MinimizeButton.Font = Enum.Font.SourceSansBold
 MinimizeButton.Parent = TitleBar
 
+-- Панель со счетчиком ключей
+StatsLabel.Name = "StatsLabel"
+StatsLabel.Size = UDim2.new(1, -10, 0, 25)
+StatsLabel.Position = UDim2.new(0, 5, 0, 32)
+StatsLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatsLabel.TextSize = 11
+StatsLabel.Font = Enum.Font.SourceSansBold
+StatsLabel.Text = " Зеленых: 0 | Красных: 0 | Белых: 0"
+StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatsLabel.Parent = MainFrame
+
+local StatsCorner = Instance.new("UICorner")
+StatsCorner.CornerRadius = UDim.new(0, 4)
+StatsCorner.Parent = StatsLabel
+
 -- Список игроков
 ScrollFrame.Name = "ScrollFrame"
-ScrollFrame.Size = UDim2.new(1, -10, 1, -45)
-ScrollFrame.Position = UDim2.new(0, 5, 0, 40)
+ScrollFrame.Size = UDim2.new(1, -10, 1, -65)
+ScrollFrame.Position = UDim2.new(0, 5, 0, 60)
 ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 ScrollFrame.ScrollBarThickness = 4
@@ -100,12 +120,10 @@ end
 ToggleButton.MouseButton1Click:Connect(ToggleUI)
 MinimizeButton.MouseButton1Click:Connect(ToggleUI)
 
--- Функция проверки ключей у игрока (можно настроить под конкретную игру)
+-- Функция проверки ключей
 local function GetPlayerKey(player)
     local backpack = player:FindFirstChild("Backpack")
     local character = player.Character
-    
-    -- Проверка в рюкзаке и в руках
     local containers = {backpack, character}
     
     local hasRed = false
@@ -127,13 +145,13 @@ local function GetPlayerKey(player)
         end
     end
 
-    if hasRed then return "Red Key", Color3.fromRGB(255, 75, 75)
-    elseif hasGreen then return "Green Key", Color3.fromRGB(75, 255, 75)
-    elseif hasWhite then return "Key (White)", Color3.fromRGB(240, 240, 240)
-    else return "No Key", Color3.fromRGB(120, 120, 120) end
+    if hasRed then return "Red", Color3.fromRGB(255, 75, 75)
+    elseif hasGreen then return "Green", Color3.fromRGB(75, 255, 75)
+    elseif hasWhite then return "White", Color3.fromRGB(240, 240, 240)
+    else return "None", Color3.fromRGB(120, 120, 120) end
 end
 
--- Обновление списка игроков
+-- Обновление списка игроков и счетчиков
 local function UpdatePlayerList()
     -- Очищаем старые элементы
     for _, child in ipairs(ScrollFrame:GetChildren()) do
@@ -142,9 +160,17 @@ local function UpdatePlayerList()
         end
     end
 
-    -- Заполняем новыми
+    local greenCount = 0
+    local redCount = 0
+    local whiteCount = 0
+
+    -- Собираем данные по всем игрокам
     for _, player in ipairs(Players:GetPlayers()) do
-        local keyText, keyColor = GetPlayerKey(player)
+        local keyType, keyColor = GetPlayerKey(player)
+
+        if keyType == "Green" then greenCount = greenCount + 1
+        elseif keyType == "Red" then redCount = redCount + 1
+        elseif keyType == "White" then whiteCount = whiteCount + 1 end
 
         local PlayerRow = Instance.new("Frame")
         PlayerRow.Size = UDim2.new(1, 0, 0, 26)
@@ -156,23 +182,24 @@ local function UpdatePlayerList()
         RowCorner.Parent = PlayerRow
 
         local NameLabel = Instance.new("TextLabel")
-        NameLabel.Size = UDim2.new(0.6, 0, 1, 0)
-        NameLabel.Position = UDim2.new(0, 8, 0, 0)
+        NameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+        NameLabel.Position = UDim2.new(0, 6, 0, 0)
         NameLabel.BackgroundTransparency = 1
-        NameLabel.Text = player.Name
+        -- Формат: Displayname (@username)
+        NameLabel.Text = player.DisplayName .. " (@" .. player.Name .. ")"
         NameLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-        NameLabel.TextSize = 12
+        NameLabel.TextSize = 11
         NameLabel.Font = Enum.Font.SourceSans
         NameLabel.TextXAlignment = Enum.TextXAlignment.Left
         NameLabel.Parent = PlayerRow
 
         local StatusLabel = Instance.new("TextLabel")
-        StatusLabel.Size = UDim2.new(0.4, -8, 1, 0)
-        StatusLabel.Position = UDim2.new(0.6, 0, 0, 0)
+        StatusLabel.Size = UDim2.new(0.35, -6, 1, 0)
+        StatusLabel.Position = UDim2.new(0.65, 0, 0, 0)
         StatusLabel.BackgroundTransparency = 1
-        StatusLabel.Text = keyText
+        StatusLabel.Text = keyType .. " Key"
         StatusLabel.TextColor3 = keyColor
-        StatusLabel.TextSize = 12
+        StatusLabel.TextSize = 11
         StatusLabel.Font = Enum.Font.SourceSansBold
         StatusLabel.TextXAlignment = Enum.TextXAlignment.Right
         StatusLabel.Parent = PlayerRow
@@ -180,10 +207,13 @@ local function UpdatePlayerList()
         PlayerRow.Parent = ScrollFrame
     end
 
+    -- Обновляем текст счетчиков сверху
+    StatsLabel.Text = string.Format(" 🟢:%d  🔴:%d  ⚪:%d", greenCount, redCount, whiteCount)
+
     ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, #Players:GetPlayers() * 30)
 end
 
--- Автообновление списка каждую секунду
+-- Автообновление каждую секунду
 task.spawn(function()
     while true do
         pcall(UpdatePlayerList)
