@@ -5,6 +5,7 @@ local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
+local InsertService = game:GetService("InsertService")
 
 local LocalPlayer = Players.LocalPlayer
 local CurrentTrack = nil
@@ -12,7 +13,7 @@ local TrackStartTime = 0
 local MAX_EMOTE_DURATION = 40
 
 --------------------------------------------------------------------------------
--- 1. EMOTE API (Конвертация Catalog ID -> Animation ID и воспроизведение)
+-- 1. EMOTE API
 --------------------------------------------------------------------------------
 
 local EmoteAPI = {}
@@ -25,66 +26,57 @@ function EmoteAPI.Stop()
     end
 end
 
-local function GetAnimationId(assetId, logFunc)
-    -- 1. Попытка через GetObjects
-    local success, objects = pcall(function()
-        return game:GetObjects("rbxassetid://" .. tostring(assetId))
-    end)
-    
-    if success and objects and #objects > 0 then
-        for _, item in ipairs(objects) do
-            if item:IsA("Animation") and item.AnimationId ~= "" then
-                return item.AnimationId
-            end
-            local animObj = item:FindFirstChildOfClass("Animation", true)
-            if animObj and animObj.AnimationId ~= "" then
-                return animObj.AnimationId
+local function GetAnimationId(assetId)
+    local animId = nil
+    pcall(function()
+        local model = InsertService:LoadAsset(assetId)
+        for _, v in ipairs(model:GetDescendants()) do
+            if v:IsA("Animation") and v.AnimationId ~= "" then
+                animId = v.AnimationId
+                break
             end
         end
-    end
-
-    -- 2. Fallback: Прямое извлечение настоящей AnimationId из сырых данных ассета
-    local httpSuccess, rawData = pcall(function()
-        return game:HttpGet("https://assetdelivery.roblox.com/v1/asset/?id=" .. tostring(assetId))
+        model:Destroy()
     end)
-
-    if httpSuccess and rawData then
-        -- Ищем внутренний rbxassetid или id анимации в контейнере
-        local realAnimId = rawData:match("rbxassetid://(%d+)") or rawData:match("id=(%d+)")
-        if realAnimId and realAnimId ~= tostring(assetId) then
-            if logFunc then logFunc("[AnimFix] Извлечен настоящий AnimationID: " .. realAnimId) end
-            return "rbxassetid://" .. realAnimId
-        end
-    end
-
-    return "rbxassetid://" .. tostring(assetId)
+    return animId or ("rbxassetid://" .. tostring(assetId))
 end
 
-function EmoteAPI.Play(assetId, logFunc)
+function EmoteAPI.Play(assetId, emoteName, logFunc)
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
+    local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
 
     EmoteAPI.Stop()
 
-    local realAnimId = GetAnimationId(assetId, logFunc)
-    
-    local playSuccess, err = pcall(function()
-        local animObject = Instance.new("Animation")
-        animObject.AnimationId = realAnimId
+    local playedBuiltIn = false
+    if emoteName then
+        local successEmote = pcall(function()
+            humanoid:PlayEmote(emoteName)
+        end)
+        if successEmote then
+            playedBuiltIn = true
+            if logFunc then logFunc("[Success] Запущена встроенная эмоция: " .. emoteName) end
+        end
+    end
 
-        local track = animator:LoadAnimation(animObject)
-        track.Priority = Enum.AnimationPriority.Action4
-        track:Play(0.1, 1, 1)
-        
-        CurrentTrack = track
-        TrackStartTime = os.clock()
+    if playedBuiltIn then return end
+
+    local realAnimId = GetAnimationId(assetId)
+    local animObject = Instance.new("Animation")
+    animObject.AnimationId = realAnimId
+
+    local success, track = pcall(function()
+        return animator:LoadAnimation(animObject)
     end)
 
-    if not playSuccess and logFunc then
-        logFunc("[Emote Error] Ошибка загрузки анимации: " .. tostring(err))
+    if success and track then
+        track.Priority = Enum.AnimationPriority.Action4
+        track:Play(0.1, 1, 1)
+        CurrentTrack = track
+        TrackStartTime = os.clock()
+        if logFunc then logFunc("[Success] Анимация проигрывается (" .. tostring(realAnimId) .. ")") end
+    else
+        if logFunc then logFunc("[Error] Roblox заблокировал загрузку этого AssetID.") end
     end
 end
 
@@ -92,16 +84,13 @@ function EmoteAPI.SearchCatalog(query, logFunc)
     local itemsFound = {}
     query = tostring(query):lower():gsub("[%c%p]", "")
 
-    if logFunc then logFunc("[Catalog] Запрос в каталог: '" .. query .. "'") end
+    if logFunc then logFunc("[Catalog] Поиск: '" .. query .. "'") end
 
-    -- Прямой ID
     local directId = tonumber(query)
     if directId then
-        if logFunc then logFunc("[Catalog] Прямой ID: " .. directId) end
         return {{Name = "Custom ID: " .. tostring(directId), Id = directId}}
     end
 
-    -- Метод 1: Категориальный поиск Roblox
     if request then
         pcall(function()
             local url = "https://catalog.roblox.com/v1/search/items?category=Community&subcategory=Emotes&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
@@ -124,9 +113,7 @@ function EmoteAPI.SearchCatalog(query, logFunc)
         end)
     end
 
-    -- Метод 2: Глобальный fallback поиск
     if #itemsFound == 0 and request then
-        if logFunc then logFunc("[Catalog Fallback] Переключение на общий поиск...") end
         pcall(function()
             local url = "https://catalog.roblox.com/v1/search/items?keyword=" .. HttpService:UrlEncode(query .. " emote") .. "&limit=10"
             local response = request({
@@ -162,7 +149,7 @@ function GeminiAPI.SendRequest(userPrompt, apiKey, selectedModel, attempt, logFu
     end
 
     if apiKey == "" or apiKey == nil then
-        if logFunc then logFunc("[Gemini Error] ВВЕДИ API КЛЮЧ В ПОЛЕ GUI!") end
+        if logFunc then logFunc("[Gemini Error] Введи API ключ!") end
         return nil
     end
 
@@ -208,11 +195,8 @@ function GeminiAPI.SendRequest(userPrompt, apiKey, selectedModel, attempt, logFu
         else
             if logFunc then 
                 logFunc("[Gemini Error] HTTP Код: " .. tostring(response.StatusCode))
-                logFunc("[Gemini Response] " .. tostring(response.Body):sub(1, 150))
             end
         end
-    else
-        if logFunc then logFunc("[Gemini Error] Ошибка отправки запроса сетью.") end
     end
 
     return nil
@@ -230,7 +214,7 @@ function GeminiAPI.ProcessEmoteQuery(russianQuery, apiKey, selectedModel, logFun
                 if #results > 0 then
                     local target = results[1]
                     if logFunc then logFunc("[SUCCESS] Воспроизведение: " .. target.Name .. " (ID: " .. target.Id .. ")") end
-                    EmoteAPI.Play(target.Id, logFunc)
+                    EmoteAPI.Play(target.Id, keyword, logFunc)
                     return
                 else
                     if logFunc then logFunc("[FAIL] По слову '" .. keyword .. "' ничего не найдено.") end
@@ -239,12 +223,12 @@ function GeminiAPI.ProcessEmoteQuery(russianQuery, apiKey, selectedModel, logFun
             task.wait(0.3)
         end
 
-        if logFunc then logFunc("[FATAL] 3 попытки исчерпаны. Ничего не найдено.") end
+        if logFunc then logFunc("[FATAL] Ничего не найдено.") end
     end)
 end
 
 --------------------------------------------------------------------------------
--- 3. АВТО-СТОП (Движение, прыжок, 40 сек)
+-- 3. АВТО-СТОП
 --------------------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
@@ -412,4 +396,4 @@ CommandBox.FocusLost:Connect(function(enterPressed)
     end
 end)
 
-AddLog("[System] Готово. Вставь API-ключ в поле выше и отправь команду.")
+AddLog("[System] Готово. Вставь API-ключ и отправь команду.")
