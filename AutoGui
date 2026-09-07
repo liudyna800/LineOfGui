@@ -11,13 +11,8 @@ local CurrentTrack = nil
 local TrackStartTime = 0
 local MAX_EMOTE_DURATION = 40
 
--- API Конфигурация Gemini
--- ВСТАВЬ СУДА РАБОЧИЙ API КЛЮЧ GOOGLE GEMINI (Error 401 возникает если ключ забанен/невалиден)
-local GEMINI_KEY = "AQ.Ab8RN6JDIgTYue-pXQPWSEpCo-kh9TeCjZu9PRU6YnzD9VkFFQ" 
-local GEMINI_MODEL = "gemini-3.5-flash-lite" -- Используем стабильный эндпоинт v1beta
-
 --------------------------------------------------------------------------------
--- 1. EMOTE API (Воспроизведение кастомных ID / Каталога)
+-- 1. EMOTE API (Воспроизведение и поиск в каталоге)
 --------------------------------------------------------------------------------
 
 local EmoteAPI = {}
@@ -71,16 +66,14 @@ function EmoteAPI.SearchCatalog(query, logFunc)
     local itemsFound = {}
     query = tostring(query):lower():gsub("[%c%p]", "")
 
-    if logFunc then logFunc("[Catalog Search] Отправка запроса по ключевику: '" .. query .. "'") end
+    if logFunc then logFunc("[Catalog] Поиск в каталоге Roblox: '" .. query .. "'") end
 
-    -- Прямой ввод ID
     local directId = tonumber(query)
     if directId then
-        if logFunc then logFunc("[Catalog] Введен прямой Asset ID: " .. directId) end
+        if logFunc then logFunc("[Catalog] Прямой ID: " .. directId) end
         return {{Name = "Custom ID: " .. tostring(directId), Id = directId}}
     end
 
-    -- Запрос к Roblox Catalog API
     if request then
         pcall(function()
             local url = "https://catalog.roblox.com/v1/search/items?category=11&subCategory=38&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
@@ -101,30 +94,34 @@ function EmoteAPI.SearchCatalog(query, logFunc)
 end
 
 --------------------------------------------------------------------------------
--- 2. GEMINI AI ENGINE (Модуль ИИ для анализа кастомных запросов)
+-- 2. GEMINI AI ENGINE
 --------------------------------------------------------------------------------
 
 local GeminiAPI = {}
 
-function GeminiAPI.SendRequest(userPrompt, attempt, logFunc)
+function GeminiAPI.SendRequest(userPrompt, apiKey, selectedModel, attempt, logFunc)
     if not request then
-        if logFunc then logFunc("[Gemini Error] Инжектор не поддерживает функцию 'request'.") end
+        if logFunc then logFunc("[Gemini Error] 'request' не поддерживается инжектором.") end
         return nil
     end
 
-    -- Настройка инструкций для разных попыток поиска
+    if apiKey == "" or apiKey == nil then
+        if logFunc then logFunc("[Gemini Error] ВВЕДИ API КЛЮЧ В ПОЛЕ GUI!") end
+        return nil
+    end
+
     local attemptPrompts = {
         [1] = "Выдели 1 ключевое английское слово для поиска анимации в каталоге Roblox.",
         [2] = "Прошлый вариант не дал результатов. Дай 1 простой английский синоним или базовое слово действия.",
-        [3] = "Дай 1 максимально общее английское слово категории (например: sit, dance, wave, pose, run, idle)."
+        [3] = "Дай 1 общее английское слово категории (например: sit, dance, wave, pose, run, idle)."
     }
 
     local systemInstruction = "Ты модуль ИИ для игрового движка. Пользователь пишет запрос на русском языке. " ..
         attemptPrompts[attempt] .. " Выдавай В ОТВЕТЕ ТОЛЬКО ОДНО СЛОВО на английском, без знаков препинания, кавычек и форматирования."
 
-    if logFunc then logFunc("[Gemini AI] Попытка " .. attempt .. "/3: Отправка HTTP POST...") end
+    if logFunc then logFunc("[Gemini AI] Попытка " .. attempt .. "/3 (" .. selectedModel .. ")...") end
 
-    local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. GEMINI_MODEL .. ":generateContent?key=" .. GEMINI_KEY
+    local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. selectedModel .. ":generateContent?key=" .. apiKey
     local body = {
         contents = {
             {
@@ -149,12 +146,12 @@ function GeminiAPI.SendRequest(userPrompt, attempt, logFunc)
             if decodeSuccess and data and data.candidates and data.candidates[1] then
                 local rawText = data.candidates[1].content.parts[1].text
                 local cleanWord = rawText:gsub("%s+", ""):gsub("[%p]", ""):lower()
-                if logFunc then logFunc("[Gemini AI] ИИ вернул ключевик: '" .. cleanWord .. "'") end
+                if logFunc then logFunc("[Gemini AI] Ответ ИИ: '" .. cleanWord .. "'") end
                 return cleanWord
             end
         else
             if logFunc then 
-                logFunc("[Gemini HTTP Error] Код ошибки: " .. tostring(response.StatusCode))
+                logFunc("[Gemini Error] HTTP Код: " .. tostring(response.StatusCode))
                 logFunc("[Gemini Response] " .. tostring(response.Body):sub(1, 150))
             end
         end
@@ -165,33 +162,33 @@ function GeminiAPI.SendRequest(userPrompt, attempt, logFunc)
     return nil
 end
 
-function GeminiAPI.ProcessEmoteQuery(russianQuery, logFunc)
+function GeminiAPI.ProcessEmoteQuery(russianQuery, apiKey, selectedModel, logFunc)
     task.spawn(function()
-        if logFunc then logFunc("=== СТАРТ ИИ ОБРАБОТКИ: '" .. russianQuery .. "' ===") end
+        if logFunc then logFunc("=== СТАРТ ОБРАБОТКИ: '" .. russianQuery .. "' ===") end
 
         for attempt = 1, 3 do
-            local keyword = GeminiAPI.SendRequest(russianQuery, attempt, logFunc)
+            local keyword = GeminiAPI.SendRequest(russianQuery, apiKey, selectedModel, attempt, logFunc)
             
             if keyword and keyword ~= "" then
                 local results = EmoteAPI.SearchCatalog(keyword, logFunc)
                 if #results > 0 then
                     local target = results[1]
-                    if logFunc then logFunc("[SUCCESS] ИИ успешно выбрал эмоцию: " .. target.Name .. " (ID: " .. target.Id .. ")") end
+                    if logFunc then logFunc("[SUCCESS] Воспроизведение: " .. target.Name .. " (ID: " .. target.Id .. ")") end
                     EmoteAPI.Play(target.Id)
                     return
                 else
-                    if logFunc then logFunc("[FAIL] По слову '" .. keyword .. "' ничего не найдено в каталоге. Переход к следующей попытке.") end
+                    if logFunc then logFunc("[FAIL] По слову '" .. keyword .. "' ничего не найдено в каталоге.") end
                 end
             end
-            task.wait(0.4)
+            task.wait(0.3)
         end
 
-        if logFunc then logFunc("[FATAL] ИИ потратил все 3 попытки и не смог подобрать рабочий ключ.") end
+        if logFunc then logFunc("[FATAL] 3 попытки исчерпаны. Ничего не найдено.") end
     end)
 end
 
 --------------------------------------------------------------------------------
--- 3. Авто-стоп (Сброс при движении и по 40-сек таймеру)
+-- 3. АВТО-СТОП (При движении и по 40-сек таймеру)
 --------------------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
@@ -222,15 +219,15 @@ end)
 --------------------------------------------------------------------------------
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AIEmoteTestBench"
+ScreenGui.Name = "GeminiEmoteBench"
 ScreenGui.ResetOnSpawn = false
 
 local parentTarget = (gethui and gethui()) or CoreGui or LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.Parent = parentTarget
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 380, 0, 320)
-MainFrame.Position = UDim2.new(0.5, -190, 0.5, -160)
+MainFrame.Size = UDim2.new(0, 380, 0, 360)
+MainFrame.Position = UDim2.new(0.5, -190, 0.5, -180)
 MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 MainFrame.Active = true
 MainFrame.Parent = ScreenGui
@@ -242,33 +239,53 @@ MainCorner.Parent = MainFrame
 local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, 0, 0, 35)
 TitleLabel.BackgroundColor3 = Color3.fromRGB(26, 26, 32)
-TitleLabel.Text = "  Gemini AI Custom Emote Integration Test"
+TitleLabel.Text = "  Gemini AI Custom Emote Integration"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 12
 TitleLabel.Parent = MainFrame
 
-local InputBox = Instance.new("TextBox")
-InputBox.Size = UDim2.new(1, -20, 0, 36)
-InputBox.Position = UDim2.new(0, 10, 0, 45)
-InputBox.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
-InputBox.PlaceholderText = "Введите кастомную команду для ИИ..."
-InputBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
-InputBox.Text = ""
-InputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-InputBox.Font = Enum.Font.Gotham
-InputBox.TextSize = 12
-InputBox.ClearTextOnFocus = false
-InputBox.Parent = MainFrame
+-- Поле ввода API ключа
+local KeyBox = Instance.new("TextBox")
+KeyBox.Size = UDim2.new(1, -20, 0, 32)
+KeyBox.Position = UDim2.new(0, 10, 0, 42)
+KeyBox.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
+KeyBox.PlaceholderText = "Вставь Gemini API Key сюда..."
+KeyBox.PlaceholderColor3 = Color3.fromRGB(120, 100, 100)
+KeyBox.Text = ""
+KeyBox.TextColor3 = Color3.fromRGB(100, 255, 100)
+KeyBox.Font = Enum.Font.Code
+KeyBox.TextSize = 11
+KeyBox.ClearTextOnFocus = false
+KeyBox.Parent = MainFrame
 
-local InputCorner = Instance.new("UICorner")
-InputCorner.CornerRadius = UDim.new(0, 6)
-InputCorner.Parent = InputBox
+local KeyCorner = Instance.new("UICorner")
+KeyCorner.CornerRadius = UDim.new(0, 6)
+KeyCorner.Parent = KeyBox
 
+-- Поле команды
+local CommandBox = Instance.new("TextBox")
+CommandBox.Size = UDim2.new(1, -20, 0, 32)
+CommandBox.Position = UDim2.new(0, 10, 0, 80)
+CommandBox.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
+CommandBox.PlaceholderText = "Введите команду (сядь, танцуй, помахай)..."
+CommandBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
+CommandBox.Text = ""
+CommandBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+CommandBox.Font = Enum.Font.Gotham
+CommandBox.TextSize = 11
+CommandBox.ClearTextOnFocus = false
+CommandBox.Parent = MainFrame
+
+local CommandCorner = Instance.new("UICorner")
+CommandCorner.CornerRadius = UDim.new(0, 6)
+CommandCorner.Parent = CommandBox
+
+-- Логгер
 local LogFrame = Instance.new("ScrollingFrame")
-LogFrame.Size = UDim2.new(1, -20, 0, 220)
-LogFrame.Position = UDim2.new(0, 10, 0, 90)
+LogFrame.Size = UDim2.new(1, -20, 0, 230)
+LogFrame.Position = UDim2.new(0, 10, 0, 120)
 LogFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
 LogFrame.ScrollBarThickness = 4
 LogFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -332,12 +349,15 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-InputBox.FocusLost:Connect(function(enterPressed)
-    if enterPressed and InputBox.Text ~= "" then
-        local query = InputBox.Text
-        InputBox.Text = ""
-        GeminiAPI.ProcessEmoteQuery(query, AddLog)
+CommandBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed and CommandBox.Text ~= "" then
+        local query = CommandBox.Text
+        local currentKey = KeyBox.Text:gsub("%s+", "")
+        CommandBox.Text = ""
+        
+        -- Используем выбранную модель gemini-3.5-flash-lite
+        GeminiAPI.ProcessEmoteQuery(query, currentKey, "gemini-3.5-flash-lite", AddLog)
     end
 end)
 
-AddLog("[System] Модуль ИИ готов. Обнови API ключ в скрипте и отправь запрос.")
+AddLog("[System] Модуль готов. Вставь API-ключ в верхнее поле GUI и отправь команду.")
