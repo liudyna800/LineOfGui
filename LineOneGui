@@ -414,6 +414,12 @@ if not player then
     return
 end
 
+local EmoteAPI = nil
+pcall(function()
+    local source = game:HttpGet("https://raw.githubusercontent.com/liudyna800/LineOfGui/refs/heads/main/EmoteAPI.lua")
+    EmoteAPI = loadstring(source)()
+end)
+
 local LocalCharacter = player.Character
 local LocalRoot = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
 local localCharConn = nil
@@ -444,56 +450,6 @@ player.CharacterRemoving:Connect(function()
         localCharConn = nil
     end
 end)
-
--- §EMOTE_API
--- Отдельная библиотека поиска+проигрывания анимаций по запросу ИИ.
--- Подключается через loadstring — если гитхаб недоступен, EmoteAPI остаётся
--- nil и вся фича [DO:searchanim]/[DO:playanim] просто не активируется ниже,
--- весь остальной бот продолжает работать как обычно.
-local EmoteAPI = nil
-do
-    local ok, err = pcall(function()
-        local sourceCode = game:HttpGet("https://raw.githubusercontent.com/liudyna800/LineOfGui/refs/heads/main/EmoteAPI.lua")
-        local compiled = loadstring(sourceCode)
-        if not compiled then
-            error("loadstring вернул nil — синтаксическая ошибка в EmoteAPI.lua")
-        end
-        EmoteAPI = compiled()
-    end)
-    if not ok then
-        warn("[EmoteAPI] Не удалось подключить библиотеку: " .. tostring(err))
-    elseif type(EmoteAPI) ~= "table" then
-        warn("[EmoteAPI] Модуль загрузился, но не вернул таблицу (return EmoteAPI отсутствует?)")
-        EmoteAPI = nil
-    else
-        print("[EmoteAPI] Библиотека подключена успешно.")
-    end
-end
-
--- Включает/выключает поиск по большому стороннему каталогу UGC-анимаций.
--- Вызывается из UI-тумблера "Кастомные анимации" и один раз при старте,
--- если настройка была сохранена включённой в прошлой сессии.
-local function applyCustomAnimSearch(state)
-    if not EmoteAPI then
-        warn("[EmoteAPI] applyCustomAnimSearch вызван, но библиотека не подключена — игнорирую.")
-        return
-    end
-    EmoteAPI.SetCustomEnabled(state)
-    if state then
-        task.spawn(function()
-            local url = ClientSettings and ClientSettings.CustomAnimDatabaseUrl
-            print("[EmoteAPI] Загружаю кастомную базу анимаций" .. ((url and url ~= "") and (" из " .. url) or " (дефолтный источник)") .. "...")
-            local ok, countOrErr = EmoteAPI.LoadCustomDatabase(url)
-            if ok then
-                print("[EmoteAPI] Кастомная база загружена: " .. tostring(countOrErr) .. " анимаций.")
-            else
-                warn("[EmoteAPI] ОШИБКА загрузки кастомной базы: " .. tostring(countOrErr))
-            end
-        end)
-    else
-        print("[EmoteAPI] Кастомный поиск анимаций выключен.")
-    end
-end
 
 -- Client-side settings storage (no server dependencies)
 -- §SETTINGS
@@ -558,6 +514,8 @@ ClientSettings = {
     ReactToMention = true,   -- v17.5: реагировать на упоминание своего ника
     WorldReactions = true,   -- v18: реагировать на прыжки/взгляды игроков рядом
     WebSearch = false,       -- v18.2: использовать compound-beta для веб-поиска
+    UseCustomAnimSearch = false,
+    CustomAnimDatabaseUrl = "",
 }
 
 -- Загружаем сохранённый API ключ и настройки при старте
@@ -580,10 +538,6 @@ do
     loadSettings()
     if ClientSettings.Debug then
         print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
-    end
-    -- Восстанавливаем состояние поиска по кастомной базе анимаций, если было включено в прошлой сессии
-    if ClientSettings.UseCustomAnimSearch and EmoteAPI then
-        applyCustomAnimSearch(true)
     end
     local savedModel = loadModel()
     if savedModel then
@@ -1850,21 +1804,11 @@ local function makeSystemPrompt(settings)
                 "\nхз→[DO:shrug]  прости→[DO:sorry]  что?→[DO:confused]  грустно→[DO:sad]" ..
                 "\nпривет→[DO:wave]  стесняюсь→[DO:shy]  устал→[DO:sit]  потанцуй→[DO:dance]  покрутись→[DO:spin]")
         end
+    end
 
-        -- ── 2а. ПОИСК АНИМАЦИЙ (EmoteAPI) — только если библиотека реально подключилась ──
-        if EmoteAPI then
-            table.insert(parts,
-                "ANIMATION SEARCH (separate from DO-tags above, use INSTEAD of a DO-tag when it fits better):\n" ..
-                "If the player asks for a specific pose/animation not covered by the DO-tags above " ..
-                "(e.g. \"sit down\", \"do a robot dance\", \"shrug\"), reply with ONLY this tag and NOTHING else:\n" ..
-                "[DO:searchanim <english query>]\n" ..
-                "Example: player says \"сядь\" → you reply exactly: [DO:searchanim sit]\n" ..
-                "Do NOT write any other text in that message. You will then be given a list of matching " ..
-                "animations as a system message. In your NEXT reply, pick exactly ONE result and reply with:\n" ..
-                "[DO:playanim <ref>] followed by your normal short chat reply to the player.\n" ..
-                "The <ref> must be copied EXACTLY as shown in the search results (e.g. \"sit\" or \"stadium\") — " ..
-                "never invent a ref that wasn't in the results. If the search found nothing useful, just reply normally without any [DO:] tag.")
-        end
+    if settings.ActionsEnabled and EmoteAPI then
+        table.insert(parts,
+            "ANIMATION SEARCH ACTIONS: For an animation request, use the two-step round-trip. First output exactly one [DO:searchanim <query in English>] tag and wait for the supplied search results. After results are supplied, output [DO:playanim <ref>] where ref is copied exactly from the results in the form builtin:name or id:12345. Never invent refs and never show these tags as visible chat text.")
     end
 
     -- ── 2б. ЛИЧНОСТЬ (после тегов — чтобы не блокировала)
@@ -2985,15 +2929,32 @@ local function parseActionTag(text)
     if not text then return nil, "" end
 
     local action = nil
+    local actionArg = nil
     local cleanText = text
+
+    local specialStart, specialEnd, specialArg = text:find("%[%s*[Dd][Oo]:%s*searchanim%s+([^%]]+)%s*%]")
+    local specialAction = specialStart and "searchanim" or nil
+    if not specialStart then
+        specialStart, specialEnd, specialArg = text:find("%[%s*[Dd][Oo]:%s*playanim%s+([^%]]+)%s*%]")
+        specialAction = specialStart and "playanim" or nil
+    end
+    if specialStart then
+        action = specialAction:lower()
+        actionArg = specialArg:match("^%s*(.-)%s*$")
+        cleanText = text:sub(1, specialStart - 1) .. text:sub(specialEnd + 1)
+    end
 
     -- Ищем тег регистронезависимо напрямую в text
     -- Паттерн 1: закрытый тег [DO:xxx] или [do:xxx]
-    local tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)%s*%]")
-    if tagStart then
-        action = captured:lower()
-        cleanText = text:sub(1, tagStart - 1) .. text:sub(tagEnd + 1)
-    else
+    local tagStart, tagEnd, captured
+    if not action then
+        tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)%s*%]")
+        if tagStart then
+            action = captured:lower()
+            cleanText = text:sub(1, tagStart - 1) .. text:sub(tagEnd + 1)
+        end
+    end
+    if not action then
         -- Паттерн 2: незакрытый тег — Gemini иногда забывает закрывающую скобку
         tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)")
         if tagStart then
@@ -3010,7 +2971,7 @@ local function parseActionTag(text)
     -- Trim
     cleanText = cleanText:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 
-    return action, cleanText
+    return action, cleanText, actionArg
 end
 
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
@@ -3715,6 +3676,44 @@ local function handleQueuedChat(item)
     text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
     text = text:match("^%s*(.-)%s*$") or text
 
+    local actionName, cleanText, actionArg = parseActionTag(text)
+    if actionName == "searchanim" and settings.ActionsEnabled then
+        cleanText = ""
+        if EmoteAPI and actionArg and actionArg ~= "" then
+            local okSearch, results = pcall(EmoteAPI.Search, actionArg, 8)
+            if okSearch and type(results) == "table" then
+                local okFormat, formatted = pcall(EmoteAPI.FormatResults, results)
+                if okFormat and type(formatted) == "string" then
+                    table.insert(apiMessages, {
+                        role = "system",
+                        content = "ANIMATION SEARCH RESULTS for query: " .. actionArg
+                            .. "\n" .. formatted
+                            .. "\nChoose exactly one ref from these results and output [DO:playanim <ref>] plus the normal reply."
+                    })
+                    payload.messages = apiMessages
+                    local secondText, secondErr
+                    local secondDone = false
+                    task.spawn(function()
+                        secondText, secondErr = providerRouter:chatCompletions(payload)
+                        secondDone = true
+                    end)
+                    local secondWaited = 0
+                    while not secondDone and secondWaited < timeoutSec do
+                        task.wait(0.5)
+                        secondWaited = secondWaited + 0.5
+                    end
+                    if secondDone and secondText and secondText ~= "" then
+                        text = secondText:match("^%s*(.-)%s*$") or secondText
+                        text = text:gsub("%[NAME:[^%]]*%]%s*", "")
+                        text = text:gsub("<think>.-</think>%s*", "")
+                        text = text:match("^%s*(.-)%s*$") or text
+                        actionName, cleanText, actionArg = parseActionTag(text)
+                    end
+                end
+            end
+        end
+    end
+
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
     if settings.CameraLook and item.player and item.player.Character then
         local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
@@ -3723,122 +3722,23 @@ local function handleQueuedChat(item)
         end
     end
 
-    -- ═══════════════════════════════════════════════════════════════════
-    -- §EMOTE_SEARCH_ROUNDTRIP
-    -- Дедик. проверка на [DO:searchanim ...] — ДО общего parseActionTag,
-    -- потому что общий парсер захватывает только [%w_]+ (без пробелов) и
-    -- ломает текст на "sit]"-подобный мусор для тегов с аргументом.
-    -- ═══════════════════════════════════════════════════════════════════
-    local searchQuery = text:match("%[%s*[Dd][Oo]:%s*[Ss]earchanim%s+([^%]\n]+)%]?")
-    if searchQuery and EmoteAPI then
-        searchQuery = searchQuery:gsub("%s+$", "")
-        print("[EmoteAPI] Запрос поиска от ИИ (игрок " .. tostring(item.name or item.userId) .. "): \"" .. searchQuery .. "\"")
-
-        local searchOk, searchResults = pcall(function()
-            return EmoteAPI.Search(searchQuery, 8)
-        end)
-        if not searchOk then
-            warn("[EmoteAPI] ОШИБКА: EmoteAPI.Search упал с ошибкой: " .. tostring(searchResults))
-            searchResults = {}
-        end
-
-        local resultsText
-        local validRefs = {}
-        if #searchResults == 0 then
-            warn("[EmoteAPI] Поиск \"" .. searchQuery .. "\" не дал ни одного результата.")
-            resultsText = "[SEARCH RESULTS for \"" .. searchQuery .. "\"]: no matching animations found. " ..
-                "Reply normally to the player in 1 short sentence. Do NOT use [DO:playanim] or [DO:searchanim] this time."
-        else
-            local lines = {}
-            for i, e in ipairs(searchResults) do
-                local ref = e.builtin and ("builtin:" .. tostring(e.id)) or ("id:" .. tostring(e.id))
-                validRefs[ref] = true
-                table.insert(lines, i .. ". " .. tostring(e.name) .. " (ref: " .. ref .. ")")
-            end
-            print("[EmoteAPI] Найдено " .. #searchResults .. " результатов: " .. table.concat(lines, " | "))
-            resultsText = "[SEARCH RESULTS for \"" .. searchQuery .. "\"]:\n" .. table.concat(lines, "\n") ..
-                "\nPick exactly ONE ref from this list and reply with [DO:playanim <ref>] followed by a short normal reply to the player."
-        end
-
-        local secondMessages = {}
-        for _, m in ipairs(apiMessages) do table.insert(secondMessages, m) end
-        table.insert(secondMessages, { role = "assistant", content = text })
-        table.insert(secondMessages, { role = "system", content = resultsText })
-
-        local secondPayload = {
-            model       = model,
-            temperature = payload.temperature,
-            max_tokens  = maxTok,
-            messages    = secondMessages,
-        }
-        if model:find("^qwen/") then
-            secondPayload.reasoning_effort = "none"
-            secondPayload.temperature = nil
-        end
-
-        local text2, err2
-        do
-            local done2 = false
-            task.spawn(function()
-                text2, err2 = providerRouter:chatCompletions(secondPayload)
-                done2 = true
-            end)
-            local waited2 = 0
-            while not done2 and waited2 < timeoutSec do
-                task.wait(0.5)
-                waited2 = waited2 + 0.5
-            end
-            if not done2 then
-                warn("[EmoteAPI] ОШИБКА: второй запрос (выбор анимации) не ответил за " .. timeoutSec .. " сек — таймаут. Анимация не проигрывается.")
-                text2 = nil
-            end
-        end
-
-        if err2 or not text2 or text2 == "" then
-            warn("[EmoteAPI] ОШИБКА второго запроса: " .. tostring(err2 or "пустой ответ от провайдера") .. " — анимация не проигрывается.")
-            text = "..."  -- нейтральная заглушка: первый ответ ИИ состоял ТОЛЬКО из тега, нормального текста нет
-        else
-            text2 = text2:match("^%s*(.-)%s*$") or text2
-            text2 = text2:gsub("%[NAME:[^%]]*%]%s*", "")
-            text2 = text2:gsub("<think>.-</think>%s*", "")
-
-            local chosenRef = text2:match("%[%s*[Dd][Oo]:%s*[Pp]layanim%s+([^%]\n]+)%]?")
-            if chosenRef then
-                chosenRef = chosenRef:gsub("%s+$", "")
-                -- Убираем сам тег из финального текста (обычный gsub тут не справится из-за пробела в аргументе)
-                text2 = text2:gsub("%[%s*[Dd][Oo]:%s*[Pp]layanim%s+[^%]\n]+%]?%s*", "")
-
-                if validRefs[chosenRef] then
-                    print("[EmoteAPI] ИИ выбрал ref=\"" .. chosenRef .. "\" — запускаю анимацию.")
-                    task.spawn(function()
-                        local ok, err = pcall(function()
-                            return EmoteAPI.PlayByRef(chosenRef, 30)
-                        end)
-                        if not ok then
-                            warn("[EmoteAPI] ОШИБКА EmoteAPI.PlayByRef(\"" .. tostring(chosenRef) .. "\"): " .. tostring(err))
-                        elseif not err then
-                            warn("[EmoteAPI] EmoteAPI.PlayByRef(\"" .. tostring(chosenRef) .. "\") вернул false — не найден Humanoid у игрока или LoadAnimation отклонил ID.")
-                        else
-                            print("[EmoteAPI] Анимация \"" .. tostring(chosenRef) .. "\" успешно запущена на 30 сек.")
-                        end
-                    end)
-                else
-                    warn("[EmoteAPI] ОШИБКА: ИИ выбрал ref \"" .. tostring(chosenRef) .. "\", которого НЕ было в списке результатов поиска (возможная галлюцинация). Анимация не запускается, но текст ответа отправится как обычно.")
-                end
-            else
-                print("[EmoteAPI] Во втором ответе ИИ нет тега [DO:playanim] — анимация не запускается. Сырой второй ответ (первые 150 симв.): " .. text2:sub(1, 150))
-            end
-
-            text = text2
-        end
-    end
-
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
-    local actionName, cleanText = parseActionTag(text)
+    print("[SPIN_DBG] raw:", text:sub(1,100))
+    print("[SPIN_DBG] action:", tostring(actionName))
     -- Не выполняем actions от isWorld событий если AutoReply выключен
     if not item.isWorld or settings.AutoReply then
-        cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
+        if actionName == "playanim" and settings.ActionsEnabled and EmoteAPI and actionArg then
+            task.spawn(function()
+                local ok, err = pcall(EmoteAPI.PlayByRef, actionArg, 30)
+                if not ok and ClientSettings.Debug then
+                    print("[LOB] EmoteAPI play error: " .. tostring(err))
+                end
+            end)
+            cleanText = cleanText or ""
+        else
+            cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
+        end
     else
         -- Просто убираем тег из текста без выполнения
         cleanText = cleanText or text
@@ -6478,11 +6378,6 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     makeCorner(row, 22)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
 
-    -- [FIX] hasDesc объявлен ЗДЕСЬ, до первого использования ниже.
-    -- БАГ ДО: hasDesc читался как nil-глобал двумя строками раньше своего
-    -- local-объявления — точка-индикатор всегда падала в ветку "без описания".
-    local hasDesc = descText and descText ~= ""
-
     -- Точка-индикатор — выравниваем по строке заголовка, не по центру всего row
     local dot = Instance.new("Frame")
     dot.Size = UDim2.new(0, 6, 0, 6)
@@ -6501,6 +6396,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     dot.Parent = row
     makeCorner(dot, 999)
 
+    local hasDesc = descText and descText ~= ""
     local label = makeTextLabel(row, labelText, 13, "semibold")
     label.Name = "Label"
     -- Отступ слева учитывает: 8px до точки + 6px точка + 6px зазор = 20px, справа 14px для switch
@@ -7135,6 +7031,40 @@ makeToggleRow(
     end
 )
 
+makeToggleRow(
+    automation,
+    "Кастомные анимации",
+    "Разрешить EmoteAPI искать анимации в дополнительной JSON-базе.",
+    ClientSettings.UseCustomAnimSearch == true,
+    function(state)
+        ClientSettings.UseCustomAnimSearch = state
+        if EmoteAPI then
+            pcall(EmoteAPI.SetCustomEnabled, state)
+            if state and ClientSettings.CustomAnimDatabaseUrl ~= "" then
+                pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+            end
+        end
+        saveSettings()
+    end
+)
+
+local customAnimUrlBox = makeTextBox(automation, "URL JSON-базы анимаций (необязательно)")
+customAnimUrlBox.Size = UDim2.new(1, -8, 0, 30)
+customAnimUrlBox.Text = ClientSettings.CustomAnimDatabaseUrl or ""
+customAnimUrlBox.FocusLost:Connect(function()
+    ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+    if ClientSettings.UseCustomAnimSearch and EmoteAPI and ClientSettings.CustomAnimDatabaseUrl ~= "" then
+        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+    end
+    saveSettings()
+end)
+if ClientSettings.UseCustomAnimSearch and EmoteAPI then
+    pcall(EmoteAPI.SetCustomEnabled, true)
+    if ClientSettings.CustomAnimDatabaseUrl ~= "" then
+        pcall(EmoteAPI.LoadCustomDatabase, ClientSettings.CustomAnimDatabaseUrl)
+    end
+end
+
 -- v18.2: Веб-поиск
 makeToggleRow(
     automation,
@@ -7195,33 +7125,6 @@ makeToggleRow(
         saveSettings()
     end
 )
-
--- Кастомные анимации: поиск по большому стороннему каталогу UGC-анимаций (EmoteAPI)
-makeToggleRow(
-    automation,
-    "🕺 Кастомные анимации",
-    "ИИ ищет анимации в большом каталоге (не только 38 проверенных). Источник — сторонний JSON, без выполнения кода.",
-    ClientSettings.UseCustomAnimSearch == true,
-    function(state)
-        ClientSettings.UseCustomAnimSearch = state
-        saveSettings()
-        applyCustomAnimSearch(state)
-    end
-)
-
-do
-    local customAnimUrlBox = makeTextBox(automation, "URL кастомной базы (пусто = дефолтный источник)")
-    customAnimUrlBox.Size = UDim2.new(1, -8, 0, 40)
-    customAnimUrlBox.Text = tostring(ClientSettings.CustomAnimDatabaseUrl or "")
-    customAnimUrlBox.FocusLost:Connect(function()
-        ClientSettings.CustomAnimDatabaseUrl = customAnimUrlBox.Text
-        saveSettings()
-        -- Если поиск уже включён — перезагружаем базу с новым URL сразу
-        if ClientSettings.UseCustomAnimSearch then
-            applyCustomAnimSearch(true)
-        end
-    end)
-end
 
 -- Официальный список моделей Groq (console.groq.com/docs/models, февраль 2026)
 -- Production Models — стабильные, для реального использования
