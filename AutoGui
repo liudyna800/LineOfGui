@@ -1,119 +1,247 @@
--- Modified by AI assistant on 2026-09-06
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-local Window = Rayfield:CreateWindow({Name = "Delta Hub", LoadingTitle = "Delta Hub Loading...", LoadingSubtitle = "by lazy dev", ConfigurationSaving = {Enabled = false}})
-local Tab = {}
-Tab.Player = Window:CreateTab("Player", 4483362458)
-Tab.Server = Window:CreateTab("Server", 4483362458)
-Tab.Teleports = Window:CreateTab("Teleports", 4483362458)
-Tab.Cosmetics = Window:CreateTab("Cosmetics", 4483362458)
-local gui = {cons = {}}
-local function Notify(txt) Rayfield:Notify({Title = "Delta Hub", Content = txt, Duration = 3, Image = 4483362458}) end
-local cons = gui.cons
-local emptyFunc = function() end
-local plrs = cloneref(game:GetService("Players"))
-local starGui = cloneref(game:GetService("StarterGui"))
-local rStor = cloneref(game:GetService("ReplicatedStorage"))
-local runServ = cloneref(game:GetService("RunService"))
-local networkCli = cloneref(game:GetService("NetworkClient"))
-local Teams = cloneref(game:GetService("Teams"))
-local TeleportService = cloneref(game:GetService("TeleportService"))
-local lplr = plrs.LocalPlayer
-local pStats = lplr:WaitForChild("stats")
+-- Services
+local Players = game:GetService("Players")
+local AvatarEditorService = game:GetService("AvatarEditorService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
 
-function GetHumRootPart(char) return char:FindFirstChild("HumanoidRootPart") end
+local LocalPlayer = Players.LocalPlayer
+local CurrentTrack = nil
 
-local find = {Gun = "InflictTarget", Knife = "SecondaryEquipment", Infect = "Infect"}
-do
-    local desFind = function(res, class)
-        local last = res
-        while true do
-            local s, r = pcall(function() return last and typeof(last) == "Instance" and last.Parent and last.ClassName end)
-            if not s or string.find(string.lower(last.ClassName), class) then break end
-            last = last.Parent; task.wait()
+--------------------------------------------------------------------------------
+-- 1. Логика воспроизведения и конвертации ID
+--------------------------------------------------------------------------------
+
+-- Извлекает чистый AnimationId из ассета Roblox
+local function GetAnimationId(assetId)
+    local success, objects = pcall(function()
+        return game:GetObjects("rbxassetid://" .. tostring(assetId))
+    end)
+    
+    if success and objects and #objects > 0 then
+        local item = objects[1]
+        if item:IsA("Animation") and item.AnimationId ~= "" then
+            return item.AnimationId
         end
-        return last
-    end
-    for i, v in find do find[i] = function(recurs)
-        local res = (recurs and (plrs:FindFirstChild(v, true) or workspace:FindFirstChild(v, true))) or (lplr.Backpack:FindFirstChild(v, true) or lplr.Character:FindFirstChild(v, true))
-        return (res and desFind(res, "tool"))
-    end end
-end
-
-do
-    local blacklistedScripts = {"States"}
-    if lplr.Character then for _, v in blacklistedScripts do if lplr.Character:FindFirstChild(v) then lplr.Character[v]:Destroy() end end end
-    table.insert(cons, lplr.CharacterAdded:Connect(function(chr) for _, v in blacklistedScripts do chr:WaitForChild(v):Destroy() end end))
-    networkCli:SetOutgoingKBPSLimit(tonumber("-inf"))
-end
-
-Tab.Player:CreateButton({Name = "Destroy Zones", Callback = function()
-    for _, v in {starGui:FindFirstChild("PlayerLocalScripts(ReOnSp)"), lplr.PlayerGui:FindFirstChild("PlayerLocalScripts(ReOnSp)")} do
-        if v then for _, v in v:GetChildren() do if v.ClassName == "LocalScript" then v:Destroy() end end end
-    end
-    workspace.AntiGlitch:Destroy() workspace.ZombieBlockers:Destroy() workspace["Map Wall"].BaseWalls:Destroy()
-end})
-
-do
-    local function AddHighlight(plr)
-        if plr.Character and not plr.Character:FindFirstChildWhichIsA("Highlight") then
-            local highlight = Instance.new("Highlight"); highlight.Adornee = plr.Character; highlight.Parent = plr.Character
+        local animObj = item:FindFirstChildOfClass("Animation")
+        if animObj and animObj.AnimationId ~= "" then
+            return animObj.AnimationId
         end
     end
-    Tab.Player:CreateToggle({Name = "ESP", Default = false, Callback = function(state)
-        if state then
-            for _, plr in plrs:GetPlayers() do if plr ~= lplr then AddHighlight(plr) end end
-            table.insert(cons, plrs.PlayerAdded:Connect(AddHighlight))
-            table.insert(cons, lplr.CharacterAdded:Connect(function() AddHighlight(lplr) end))
-        else
-            for _, plr in plrs:GetPlayers() do
-                if plr.Character then
-                    local highlight = plr.Character:FindFirstChildWhichIsA("Highlight")
-                    if highlight then highlight:Destroy() end
-                end
+    
+    return "rbxassetid://" .. tostring(assetId)
+end
+
+-- Проигрывает анимацию на персонаже
+local function PlayEmote(assetId)
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
+
+    -- Останавливаем текущую эмоцию, если она играет
+    if CurrentTrack then
+        CurrentTrack:Stop(0.1)
+        CurrentTrack = nil
+    end
+
+    -- Получаем прямой ID анимации
+    local realAnimId = GetAnimationId(assetId)
+
+    local animObject = Instance.new("Animation")
+    animObject.AnimationId = realAnimId
+
+    local track = animator:LoadAnimation(animObject)
+    track.Priority = Enum.AnimationPriority.Action4
+    track:Play(0.1, 1, 1)
+    
+    CurrentTrack = track
+end
+
+--------------------------------------------------------------------------------
+-- 2. Создание GUI
+--------------------------------------------------------------------------------
+
+-- Главный контейнер
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CustomEmoteHub"
+ScreenGui.ResetOnSpawn = false
+
+-- В зависимости от среды ставим в CoreGui или PlayerGui
+local parentTarget = (gethui and gethui()) or CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = parentTarget
+
+-- Главное окно
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 320, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -200)
+MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(60, 60, 80)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = MainFrame
+
+-- Заголовок (Title Bar)
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, 0, 0, 35)
+TitleLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+TitleLabel.Text = "  Emote Finder"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextSize = 14
+TitleLabel.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleLabel
+
+-- Поле поиска (Search Box)
+local SearchBox = Instance.new("TextBox")
+SearchBox.Size = UDim2.new(1, -20, 0, 32)
+SearchBox.Position = UDim2.new(0, 10, 0, 45)
+SearchBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+SearchBox.PlaceholderText = "Введите название эмоции..."
+SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+SearchBox.Text = ""
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.TextSize = 13
+SearchBox.ClearTextOnFocus = false
+SearchBox.Parent = MainFrame
+
+local SearchCorner = Instance.new("UICorner")
+SearchCorner.CornerRadius = UDim.new(0, 6)
+SearchCorner.Parent = SearchBox
+
+-- Скролл-список результатов
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -20, 1, -90)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 85)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.ScrollBarThickness = 4
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Padding = UDim.new(0, 6)
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Parent = ScrollFrame
+
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 5)
+end)
+
+--------------------------------------------------------------------------------
+-- 3. Механика перетаскивания (Drag)
+--------------------------------------------------------------------------------
+
+local dragging, dragInput, dragStart, startPos
+
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(
+        startPos.X.Scale, startPos.X.Offset + delta.X,
+        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+    )
+end
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
             end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        updateDrag(input)
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- 4. Поиск в каталоге и генерация карточек
+--------------------------------------------------------------------------------
+
+local function SearchEmotes(keyword)
+    -- Очистка старых результатов
+    for _, child in ipairs(ScrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
         end
-    end})
+    end
+
+    -- Настройка параметров поиска
+    local searchParams = CatalogSearchParams.new()
+    searchParams.SearchKeyword = keyword or ""
+    searchParams.AssetTypes = { Enum.AvatarAssetType.EmoteAnimation }
+    searchParams.CategoryFilter = Enum.CatalogCategoryFilter.None
+    searchParams.SalesTypeFilter = Enum.SalesTypeFilter.All
+    searchParams.IncludeOffSale = true
+    searchParams.Limit = 20
+
+    local success, pages = pcall(function()
+        return AvatarEditorService:SearchCatalog(searchParams)
+    end)
+
+    if not success or not pages then return end
+
+    local pageData = pages:GetCurrentPage()
+
+    for _, item in ipairs(pageData) do
+        -- Кнопка эмоции
+        local ItemBtn = Instance.new("TextButton")
+        ItemBtn.Size = UDim2.new(1, 0, 0, 36)
+        ItemBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        ItemBtn.Text = "   " .. (item.Name or "Unknown Emote")
+        ItemBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+        ItemBtn.TextXAlignment = Enum.TextXAlignment.Left
+        ItemBtn.Font = Enum.Font.Gotham
+        ItemBtn.TextSize = 12
+        ItemBtn.Parent = ScrollFrame
+
+        local BtnCorner = Instance.new("UICorner")
+        BtnCorner.CornerRadius = UDim.new(0, 6)
+        BtnCorner.Parent = ItemBtn
+
+        -- Обработка нажатия на элемент списка
+        ItemBtn.MouseButton1Click:Connect(function()
+            PlayEmote(item.Id)
+        end)
+    end
 end
 
-Tab.Player:CreateButton({Name = "Speed Boost", Callback = function()
-    local hum = lplr.Character and lplr.Character:FindFirstChildWhichIsA("Humanoid")
-    if hum then hum.WalkSpeed = 32 end
-end})
+-- Вызов поиска при нажатии Enter в TextBox
+SearchBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        SearchEmotes(SearchBox.Text)
+    end
+end)
 
-Tab.Server:CreateButton({Name = "Rejoin Server", Callback = function()
-    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, lplr)
-end})
-
-do
-    local autoKnife = false
-    Tab.Server:CreateToggle({Name = "Auto Knife", Default = false, Callback = function(state)
-        autoKnife = state
-        if state then
-            local con; con = runServ.Heartbeat:Connect(function()
-                if find.Knife() and find.Knife().Parent ~= lplr.Character then
-                    local knife = find.Knife()
-                    local stats = lplr:FindFirstChild("stats")
-                    local ping = stats and stats.Network.ServerStatsItem["Data Ping"]:GetValue() or 0
-                    task.wait((ping < 150 and .1) or 0) knife.Parent = lplr.Character
-                else knife = find.Knife() end end)
-        elseif con and con.Connected then con:Disconnect() end
-    end})
-end
-
-Tab.Cosmetics:CreateButton({Name = "Change Zombie Face", Callback = function() lplr.PlayerGui.Main.ChooseFaceFrame.Visible = true end})
-Tab.Cosmetics:CreateButton({Name = "Change Zombie Skincolor", Callback = function() lplr.PlayerGui.Main.ChooseColorFrame.Visible = true end})
-Tab.Cosmetics:CreateButton({Name = "Scientist outfit", Callback = function() fireclickdetector(workspace.Lab.Specials["Doctor/Physician"].ClickPart.ClickDetector) end})
-Tab.Cosmetics:CreateButton({Name = "Patient outfit", Callback = function() fireclickdetector(workspace.Lab.Specials.Experimental.ClickPart.ClickDetector) end})
-
-Tab.Teleports:CreateButton({Name = "Human Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(108.507301, 2.99802589, 21.1811543, -0.999974489, 6.69067859e-08, -0.00714055588, 6.73346392e-08, 1, -5.96783067e-08, 0.00714055588, -6.01575962e-08, -0.999974489) end})
-Tab.Teleports:CreateButton({Name = "Zombie Spawn", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-77.0017929, 2.99802589, 88.050827, 0.999998748, -2.56961403e-08, 0.00158172031, 2.56525929e-08, 1, 2.75529164e-08, -0.00158172031, -2.75123071e-08, 0.999998748) end})
-Tab.Teleports:CreateButton({Name = "Virus Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-62.0080452, -15.501976, -51.7825928, 0.999956429, 2.60252282e-08, 0.00933171995, -2.59568829e-08, 1, -7.44509965e-09, -0.00933171995, 7.20255322e-09, 0.999956429) end})
-Tab.Teleports:CreateButton({Name = "Upstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-37.5837288, 2.99802613, -6.82807255, 0.999866545, 2.99475147e-08, 0.0163355526, -3.00902876e-08, 1, 8.49411652e-09, -0.0163355526, -8.98452512e-09, 0.999866545) end})
-Tab.Teleports:CreateButton({Name = "Downstairs Cure room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(-89.571701, -15.5019779, 68.9455948, 0.999979734, -5.49140289e-09, -0.00636379281, 5.43602141e-09, 1, -8.71987904e-09, 0.00636379281, 8.68510863e-09, 0.999979734) end})
-Tab.Teleports:CreateButton({Name = "Security Room", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(170.688843, 2.99802589, -7.46687269, -0.00315899728, -1.09685722e-07, -0.999994993, -1.74622983e-10, 1, -1.09685722e-07, 0.999994993, -1.74622983e-10, -0.00315899728) end})
-Tab.Teleports:CreateButton({Name = "Roof", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(10.5755024, 25.498024, 32.7063293, -0.999892056, 1.2178937e-08, 0.0146923074, 1.24196662e-08, 1, 1.62934413e-08, -0.0146923074, 1.64741554e-08, -0.999892056) end})
-Tab.Teleports:CreateButton({Name = "Outside of Map", Callback = function() GetHumRootPart(lplr.Character).CFrame = CFrame.new(40.5333252, 2.59802508, 1005.94537, -0.999990642, -3.43452164e-08, -0.00432587136, -3.4408604e-08, 1, 1.45791699e-08, 0.00432587136, 1.47278811e-08, -0.999990642) end})
-
-Tab.Player:CreateButton({Name = "Godmode", Callback = function() Notify("If it fails then retry") rStor.Remotes.ChangeState:FireServer("Died") task.wait(plrs.RespawnTime + .2) rStor.Remotes.ChangeState:FireServer("Died") end})
-
-Notify("Delta Hub Loaded!")
+-- Автоматический начальный поиск при запуске
+SearchEmotes("")
