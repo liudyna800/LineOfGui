@@ -12,7 +12,7 @@ local TrackStartTime = 0
 local MAX_EMOTE_DURATION = 40
 
 --------------------------------------------------------------------------------
--- 1. EMOTE API (Воспроизведение и поиск в каталоге)
+-- 1. EMOTE API (Исправленный надежный поиск и воспроизведение)
 --------------------------------------------------------------------------------
 
 local EmoteAPI = {}
@@ -66,18 +66,27 @@ function EmoteAPI.SearchCatalog(query, logFunc)
     local itemsFound = {}
     query = tostring(query):lower():gsub("[%c%p]", "")
 
-    if logFunc then logFunc("[Catalog] Поиск в каталоге Roblox: '" .. query .. "'") end
+    if logFunc then logFunc("[Catalog] Запрос в каталог: '" .. query .. "'") end
 
+    -- Прямой ID
     local directId = tonumber(query)
     if directId then
         if logFunc then logFunc("[Catalog] Прямой ID: " .. directId) end
         return {{Name = "Custom ID: " .. tostring(directId), Id = directId}}
     end
 
+    -- Метод 1: Категориальный поиск Roblox
     if request then
         pcall(function()
-            local url = "https://catalog.roblox.com/v1/search/items?category=11&subCategory=38&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
-            local response = request({Url = url, Method = "GET"})
+            local url = "https://catalog.roblox.com/v1/search/items?category=Community&subcategory=Emotes&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
+            local response = request({
+                Url = url,
+                Method = "GET",
+                Headers = {
+                    ["User-Agent"] = "Roblox/WinInet",
+                    ["Accept"] = "application/json"
+                }
+            })
             if response and response.Body then
                 local data = HttpService:JSONDecode(response.Body)
                 if data and data.data then
@@ -89,7 +98,28 @@ function EmoteAPI.SearchCatalog(query, logFunc)
         end)
     end
 
-    if logFunc then logFunc("[Catalog] Найдено совпадений: " .. #itemsFound) end
+    -- Метод 2: Глобальный fallback поиск (если Метод 1 вернул 0)
+    if #itemsFound == 0 and request then
+        if logFunc then logFunc("[Catalog Fallback] Переключение на общий поиск...") end
+        pcall(function()
+            local url = "https://catalog.roblox.com/v1/search/items?keyword=" .. HttpService:UrlEncode(query .. " emote") .. "&limit=10"
+            local response = request({
+                Url = url,
+                Method = "GET",
+                Headers = {["User-Agent"] = "Roblox/WinInet"}
+            })
+            if response and response.Body then
+                local data = HttpService:JSONDecode(response.Body)
+                if data and data.data then
+                    for _, item in ipairs(data.data) do
+                        table.insert(itemsFound, {Name = item.name, Id = item.id})
+                    end
+                end
+            end
+        end)
+    end
+
+    if logFunc then logFunc("[Catalog] Найдено элементов: " .. #itemsFound) end
     return itemsFound
 end
 
@@ -177,7 +207,7 @@ function GeminiAPI.ProcessEmoteQuery(russianQuery, apiKey, selectedModel, logFun
                     EmoteAPI.Play(target.Id)
                     return
                 else
-                    if logFunc then logFunc("[FAIL] По слову '" .. keyword .. "' ничего не найдено в каталоге.") end
+                    if logFunc then logFunc("[FAIL] По слову '" .. keyword .. "' ничего не найдено.") end
                 end
             end
             task.wait(0.3)
@@ -188,7 +218,7 @@ function GeminiAPI.ProcessEmoteQuery(russianQuery, apiKey, selectedModel, logFun
 end
 
 --------------------------------------------------------------------------------
--- 3. АВТО-СТОП (При движении и по 40-сек таймеру)
+-- 3. АВТО-СТОП (Движение, прыжок, 40 сек)
 --------------------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
@@ -215,7 +245,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 4. GUI ТЕСТОВОГО СТЕНДА
+-- 4. GUI
 --------------------------------------------------------------------------------
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -246,7 +276,6 @@ TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 12
 TitleLabel.Parent = MainFrame
 
--- Поле ввода API ключа
 local KeyBox = Instance.new("TextBox")
 KeyBox.Size = UDim2.new(1, -20, 0, 32)
 KeyBox.Position = UDim2.new(0, 10, 0, 42)
@@ -264,7 +293,6 @@ local KeyCorner = Instance.new("UICorner")
 KeyCorner.CornerRadius = UDim.new(0, 6)
 KeyCorner.Parent = KeyBox
 
--- Поле команды
 local CommandBox = Instance.new("TextBox")
 CommandBox.Size = UDim2.new(1, -20, 0, 32)
 CommandBox.Position = UDim2.new(0, 10, 0, 80)
@@ -282,9 +310,8 @@ local CommandCorner = Instance.new("UICorner")
 CommandCorner.CornerRadius = UDim.new(0, 6)
 CommandCorner.Parent = CommandBox
 
--- Логгер
 local LogFrame = Instance.new("ScrollingFrame")
-LogFrame.Size = UDim2.new(1, -20, 0, 230)
+LogFrame.Size = UDim2.new(1, -20, 0, 220)
 LogFrame.Position = UDim2.new(0, 10, 0, 120)
 LogFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
 LogFrame.ScrollBarThickness = 4
@@ -355,9 +382,8 @@ CommandBox.FocusLost:Connect(function(enterPressed)
         local currentKey = KeyBox.Text:gsub("%s+", "")
         CommandBox.Text = ""
         
-        -- Используем выбранную модель gemini-3.5-flash-lite
         GeminiAPI.ProcessEmoteQuery(query, currentKey, "gemini-3.5-flash-lite", AddLog)
     end
 end)
 
-AddLog("[System] Модуль готов. Вставь API-ключ в верхнее поле GUI и отправь команду.")
+AddLog("[System] Готово. Вставь API-ключ в поле выше и отправь команду.")
