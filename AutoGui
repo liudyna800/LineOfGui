@@ -1,6 +1,7 @@
 -- Services
 local Players = game:GetService("Players")
 local AvatarEditorService = game:GetService("AvatarEditorService")
+local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 
@@ -11,7 +12,6 @@ local CurrentTrack = nil
 -- 1. Логика воспроизведения и конвертации ID
 --------------------------------------------------------------------------------
 
--- Извлекает чистый AnimationId из ассета Roblox
 local function GetAnimationId(assetId)
     local success, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. tostring(assetId))
@@ -27,36 +27,26 @@ local function GetAnimationId(assetId)
             return animObj.AnimationId
         end
     end
-    
     return "rbxassetid://" .. tostring(assetId)
 end
 
--- Проигрывает анимацию на персонаже
 local function PlayEmote(assetId)
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
 
-    -- Останавливаем текущую эмоцию, если она играет
     if CurrentTrack then
         CurrentTrack:Stop(0.1)
         CurrentTrack = nil
     end
 
-    -- Получаем прямой ID анимации
     local realAnimId = GetAnimationId(assetId)
-
     local animObject = Instance.new("Animation")
     animObject.AnimationId = realAnimId
 
     local track = animator:LoadAnimation(animObject)
     track.Priority = Enum.AnimationPriority.Action4
     track:Play(0.1, 1, 1)
-    
     CurrentTrack = track
 end
 
@@ -64,22 +54,17 @@ end
 -- 2. Создание GUI
 --------------------------------------------------------------------------------
 
--- Главный контейнер
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "CustomEmoteHub"
+ScreenGui.Name = "CustomEmoteHubFix"
 ScreenGui.ResetOnSpawn = false
 
--- В зависимости от среды ставим в CoreGui или PlayerGui
 local parentTarget = (gethui and gethui()) or CoreGui or LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.Parent = parentTarget
 
--- Главное окно
 local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 320, 0, 400)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -200)
+MainFrame.Size = UDim2.new(0, 320, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -210)
 MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
-MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Parent = ScreenGui
 
@@ -92,32 +77,26 @@ MainStroke.Color = Color3.fromRGB(60, 60, 80)
 MainStroke.Thickness = 1.5
 MainStroke.Parent = MainFrame
 
--- Заголовок (Title Bar)
 local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, 0, 0, 35)
 TitleLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
-TitleLabel.Text = "  Emote Finder"
+TitleLabel.Text = "  Emote Finder Fix"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 14
 TitleLabel.Parent = MainFrame
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = TitleLabel
-
--- Поле поиска (Search Box)
 local SearchBox = Instance.new("TextBox")
 SearchBox.Size = UDim2.new(1, -20, 0, 32)
 SearchBox.Position = UDim2.new(0, 10, 0, 45)
 SearchBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-SearchBox.PlaceholderText = "Введите название эмоции..."
+SearchBox.PlaceholderText = "Поиск или прямо введи ID..."
 SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
 SearchBox.Text = ""
 SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
 SearchBox.Font = Enum.Font.Gotham
-SearchBox.TextSize = 13
+SearchBox.TextSize = 12
 SearchBox.ClearTextOnFocus = false
 SearchBox.Parent = MainFrame
 
@@ -125,7 +104,6 @@ local SearchCorner = Instance.new("UICorner")
 SearchCorner.CornerRadius = UDim.new(0, 6)
 SearchCorner.Parent = SearchBox
 
--- Скролл-список результатов
 local ScrollFrame = Instance.new("ScrollingFrame")
 ScrollFrame.Size = UDim2.new(1, -20, 1, -90)
 ScrollFrame.Position = UDim2.new(0, 10, 0, 85)
@@ -145,29 +123,18 @@ UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 3. Механика перетаскивания (Drag)
+-- 3. Drag Logic
 --------------------------------------------------------------------------------
 
 local dragging, dragInput, dragStart, startPos
-
-local function updateDrag(input)
-    local delta = input.Position - dragStart
-    MainFrame.Position = UDim2.new(
-        startPos.X.Scale, startPos.X.Offset + delta.X,
-        startPos.Y.Scale, startPos.Y.Offset + delta.Y
-    )
-end
 
 MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         dragStart = input.Position
         startPos = MainFrame.Position
-        
         input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
         end)
     end
 end)
@@ -180,68 +147,109 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
-        updateDrag(input)
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
 
 --------------------------------------------------------------------------------
--- 4. Поиск в каталоге и генерация карточек
+-- 4. Функция Поиска с Двойным Фоллбэком
 --------------------------------------------------------------------------------
 
-local function SearchEmotes(keyword)
-    -- Очистка старых результатов
+local function ClearScroll()
     for _, child in ipairs(ScrollFrame:GetChildren()) do
-        if child:IsA("TextButton") then
+        if child:IsA("TextButton") or child:IsA("TextLabel") then
             child:Destroy()
         end
     end
+end
 
-    -- Настройка параметров поиска
-    local searchParams = CatalogSearchParams.new()
-    searchParams.SearchKeyword = keyword or ""
-    searchParams.AssetTypes = { Enum.AvatarAssetType.EmoteAnimation }
-    searchParams.CategoryFilter = Enum.CatalogCategoryFilter.None
-    searchParams.SalesTypeFilter = Enum.SalesTypeFilter.All
-    searchParams.IncludeOffSale = true
-    searchParams.Limit = 20
+local function AddButton(name, id)
+    local ItemBtn = Instance.new("TextButton")
+    ItemBtn.Size = UDim2.new(1, 0, 0, 36)
+    ItemBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    ItemBtn.Text = "   " .. name
+    ItemBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+    ItemBtn.TextXAlignment = Enum.TextXAlignment.Left
+    ItemBtn.Font = Enum.Font.Gotham
+    ItemBtn.TextSize = 12
+    ItemBtn.Parent = ScrollFrame
 
+    local BtnCorner = Instance.new("UICorner")
+    BtnCorner.CornerRadius = UDim.new(0, 6)
+    BtnCorner.Parent = ItemBtn
+
+    ItemBtn.MouseButton1Click:Connect(function()
+        PlayEmote(id)
+    end)
+end
+
+local function SearchEmotes(query)
+    ClearScroll()
+    
+    -- Проверка: если ввели чистый ID вместо текста
+    local directId = tonumber(query)
+    if directId then
+        AddButton("Запустить ID: " .. tostring(directId), directId)
+        PlayEmote(directId)
+        return
+    end
+
+    local itemsFound = {}
+
+    -- Метод 1: Пытаемся запросить через AvatarEditorService
     local success, pages = pcall(function()
+        local searchParams = CatalogSearchParams.new()
+        searchParams.SearchKeyword = query or ""
+        searchParams.AssetTypes = { Enum.AvatarAssetType.EmoteAnimation }
         return AvatarEditorService:SearchCatalog(searchParams)
     end)
 
-    if not success or not pages then return end
+    if success and pages then
+        local pageData = pcall(function() return pages:GetCurrentPage() end) and pages:GetCurrentPage() or {}
+        for _, item in ipairs(pageData) do
+            table.insert(itemsFound, {Name = item.Name, Id = item.Id})
+        end
+    end
 
-    local pageData = pages:GetCurrentPage()
-
-    for _, item in ipairs(pageData) do
-        -- Кнопка эмоции
-        local ItemBtn = Instance.new("TextButton")
-        ItemBtn.Size = UDim2.new(1, 0, 0, 36)
-        ItemBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-        ItemBtn.Text = "   " .. (item.Name or "Unknown Emote")
-        ItemBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-        ItemBtn.TextXAlignment = Enum.TextXAlignment.Left
-        ItemBtn.Font = Enum.Font.Gotham
-        ItemBtn.TextSize = 12
-        ItemBtn.Parent = ScrollFrame
-
-        local BtnCorner = Instance.new("UICorner")
-        BtnCorner.CornerRadius = UDim.new(0, 6)
-        BtnCorner.Parent = ItemBtn
-
-        -- Обработка нажатия на элемент списка
-        ItemBtn.MouseButton1Click:Connect(function()
-            PlayEmote(item.Id)
+    -- Метод 2: Если Апи блокируется, делаем прямой HTTP Запрос в каталог Roblox
+    if #itemsFound == 0 and request then
+        pcall(function()
+            local url = "https://catalog.roblox.com/v1/search/items?category=11&subCategory=38&keyword=" .. HttpService:UrlEncode(query or "") .. "&limit=30"
+            local response = request({Url = url, Method = "GET"})
+            if response and response.Body then
+                local data = HttpService:JSONDecode(response.Body)
+                if data and data.data then
+                    for _, item in ipairs(data.data) do
+                        table.insert(itemsFound, {Name = item.name, Id = item.id})
+                    end
+                end
+            end
         end)
+    end
+
+    -- Отрисовка результатов
+    if #itemsFound > 0 then
+        for _, item in ipairs(itemsFound) do
+            AddButton(item.Name, item.Id)
+        end
+    else
+        local ErrLabel = Instance.new("TextLabel")
+        ErrLabel.Size = UDim2.new(1, 0, 0, 40)
+        ErrLabel.BackgroundTransparency = 1
+        ErrLabel.Text = "Ничего не найдено / Блокировка API"
+        ErrLabel.TextColor3 = Color3.fromRGB(200, 80, 80)
+        ErrLabel.Font = Enum.Font.Gotham
+        ErrLabel.TextSize = 12
+        ErrLabel.Parent = ScrollFrame
     end
 end
 
--- Вызов поиска при нажатии Enter в TextBox
 SearchBox.FocusLost:Connect(function(enterPressed)
     if enterPressed then
         SearchEmotes(SearchBox.Text)
     end
 end)
 
--- Автоматический начальный поиск при запуске
+-- Пустой дефолтный поиск
 SearchEmotes("")
