@@ -8,6 +8,8 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local CurrentTrack = nil
+local TrackStartTime = 0
+local MAX_EMOTE_DURATION = 40 -- Максимальная длительность в секундах
 
 --------------------------------------------------------------------------------
 -- 1. Логика воспроизведения, остановки и конвертации ID
@@ -17,6 +19,7 @@ local function StopEmote()
     if CurrentTrack then
         CurrentTrack:Stop(0.15)
         CurrentTrack = nil
+        TrackStartTime = 0
     end
 end
 
@@ -52,26 +55,34 @@ local function PlayEmote(assetId)
     local track = animator:LoadAnimation(animObject)
     track.Priority = Enum.AnimationPriority.Action4
     track:Play(0.1, 1, 1)
+    
     CurrentTrack = track
+    TrackStartTime = os.clock() -- Фиксируем время запуска
 end
 
 --------------------------------------------------------------------------------
--- 2. Авто-остановка эмоции при ходьбе / прыжке / падении
+-- 2. Проверки: движение, прыжки и таймер (40 сек)
 --------------------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
     if not CurrentTrack or not CurrentTrack.IsPlaying then return end
     
+    -- 1. Проверка таймера (40 секунд)
+    if (os.clock() - TrackStartTime) >= MAX_EMOTE_DURATION then
+        StopEmote()
+        return
+    end
+
     local character = LocalPlayer.Character
     if not character then return end
     
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
 
-    -- 1. Проверка движения (клавиатура / джойстик)
+    -- 2. Проверка движения
     local isMoving = humanoid.MoveDirection.Magnitude > 0.05
     
-    -- 2. Проверка прыжка или падения
+    -- 3. Проверка прыжка / падения
     local state = humanoid:GetState()
     local isJumpingOrFalling = (state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall)
 
@@ -110,7 +121,7 @@ MainStroke.Parent = MainFrame
 local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, 0, 0, 35)
 TitleLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
-TitleLabel.Text = "  Emote Finder Fix"
+TitleLabel.Text = "  Emote Finder (40s Limit)"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 TitleLabel.Font = Enum.Font.GothamBold
@@ -183,7 +194,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 --------------------------------------------------------------------------------
--- 5. Функция Поиска
+-- 5. Поиск
 --------------------------------------------------------------------------------
 
 local function ClearScroll()
