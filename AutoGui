@@ -3,14 +3,22 @@ local Players = game:GetService("Players")
 local AvatarEditorService = game:GetService("AvatarEditorService")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local CurrentTrack = nil
 
 --------------------------------------------------------------------------------
--- 1. Логика воспроизведения и конвертации ID
+-- 1. Логика воспроизведения, остановки и конвертации ID
 --------------------------------------------------------------------------------
+
+local function StopEmote()
+    if CurrentTrack then
+        CurrentTrack:Stop(0.15)
+        CurrentTrack = nil
+    end
+end
 
 local function GetAnimationId(assetId)
     local success, objects = pcall(function()
@@ -35,10 +43,7 @@ local function PlayEmote(assetId)
     local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
 
-    if CurrentTrack then
-        CurrentTrack:Stop(0.1)
-        CurrentTrack = nil
-    end
+    StopEmote()
 
     local realAnimId = GetAnimationId(assetId)
     local animObject = Instance.new("Animation")
@@ -51,7 +56,32 @@ local function PlayEmote(assetId)
 end
 
 --------------------------------------------------------------------------------
--- 2. Создание GUI
+-- 2. Авто-остановка эмоции при ходьбе / прыжке / падении
+--------------------------------------------------------------------------------
+
+RunService.RenderStepped:Connect(function()
+    if not CurrentTrack or not CurrentTrack.IsPlaying then return end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    -- 1. Проверка движения (клавиатура / джойстик)
+    local isMoving = humanoid.MoveDirection.Magnitude > 0.05
+    
+    -- 2. Проверка прыжка или падения
+    local state = humanoid:GetState()
+    local isJumpingOrFalling = (state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall)
+
+    if isMoving or isJumpingOrFalling then
+        StopEmote()
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- 3. Создание GUI
 --------------------------------------------------------------------------------
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -123,7 +153,7 @@ UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 3. Drag Logic
+-- 4. Drag Logic
 --------------------------------------------------------------------------------
 
 local dragging, dragInput, dragStart, startPos
@@ -153,7 +183,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 --------------------------------------------------------------------------------
--- 4. Функция Поиска с Двойным Фоллбэком
+-- 5. Функция Поиска
 --------------------------------------------------------------------------------
 
 local function ClearScroll()
@@ -187,7 +217,6 @@ end
 local function SearchEmotes(query)
     ClearScroll()
     
-    -- Проверка: если ввели чистый ID вместо текста
     local directId = tonumber(query)
     if directId then
         AddButton("Запустить ID: " .. tostring(directId), directId)
@@ -197,7 +226,6 @@ local function SearchEmotes(query)
 
     local itemsFound = {}
 
-    -- Метод 1: Пытаемся запросить через AvatarEditorService
     local success, pages = pcall(function()
         local searchParams = CatalogSearchParams.new()
         searchParams.SearchKeyword = query or ""
@@ -212,7 +240,6 @@ local function SearchEmotes(query)
         end
     end
 
-    -- Метод 2: Если Апи блокируется, делаем прямой HTTP Запрос в каталог Roblox
     if #itemsFound == 0 and request then
         pcall(function()
             local url = "https://catalog.roblox.com/v1/search/items?category=11&subCategory=38&keyword=" .. HttpService:UrlEncode(query or "") .. "&limit=30"
@@ -228,7 +255,6 @@ local function SearchEmotes(query)
         end)
     end
 
-    -- Отрисовка результатов
     if #itemsFound > 0 then
         for _, item in ipairs(itemsFound) do
             AddButton(item.Name, item.Id)
@@ -251,5 +277,4 @@ SearchBox.FocusLost:Connect(function(enterPressed)
     end
 end)
 
--- Пустой дефолтный поиск
 SearchEmotes("")
