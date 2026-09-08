@@ -321,6 +321,10 @@ local function CallGemini(promptText, temperature)
         },
         generationConfig = {
             temperature = temperature or 0.2,
+            maxOutputTokens = 20,
+            thinkingConfig = {
+                thinkingLevel = "low", -- полностью выключить нельзя для Flash/Flash-Lite, но можно снизить — иначе modelью "думает" по умолчанию на уровне medium, отсюда и долгий ответ
+            },
         },
     })
 
