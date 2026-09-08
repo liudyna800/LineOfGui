@@ -1,222 +1,566 @@
--- Создаем главный контейнер
-local ScreenGui = Instance.new("ScreenGui")
-local MainFrame = Instance.new("Frame")
-local UICorner = Instance.new("UICorner")
-local TitleBar = Instance.new("TextLabel")
-local MinimizeButton = Instance.new("TextButton")
-
--- Статистика ключей сверху
-local StatsLabel = Instance.new("TextLabel")
-
-local ScrollFrame = Instance.new("ScrollingFrame")
-local UIListLayout = Instance.new("UIListLayout")
-
--- Кнопка для разворачивания (круглая)
-local ToggleButton = Instance.new("TextButton")
-local ToggleCorner = Instance.new("UICorner")
-
+-- Services
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+local AvatarEditorService = game:GetService("AvatarEditorService")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
--- Настройка ScreenGui
-ScreenGui.Name = "KeyTrackerGUI"
-ScreenGui.ResetOnSpawn = false
-if syn and syn.protect_gui then
-    syn.protect_gui(ScreenGui)
-    ScreenGui.Parent = game.CoreGui
-elseif gethui then
-    ScreenGui.Parent = gethui()
-else
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
+local CurrentTrack = nil
+local TrackStartTime = 0
+local MAX_EMOTE_DURATION = 40 -- Максимальная длительность в секундах
+
+-- ══════════════════════════════════════════════════════════════════════
+-- §AI_CONFIG — настройки ИИ-поиска (тестовый режим, ключ хранится в памяти)
+-- ══════════════════════════════════════════════════════════════════════
+local GeminiApiKey = ""
+local GEMINI_MODEL = "gemini-3.5-flash-lite"
+local GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/" .. GEMINI_MODEL .. ":generateContent"
+
+
+--------------------------------------------------------------------------------
+-- 1. Логика воспроизведения, остановки и конвертации ID
+--------------------------------------------------------------------------------
+
+local function StopEmote()
+    if CurrentTrack then
+        CurrentTrack:Stop(0.15)
+        CurrentTrack = nil
+        TrackStartTime = 0
+    end
 end
 
--- Круглая кнопка сворачивания
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = UDim2.new(0, 45, 0, 45)
-ToggleButton.Position = UDim2.new(0, 20, 0, 100)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-ToggleButton.Text = "🔑"
-ToggleButton.TextSize = 20
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Visible = true
-ToggleButton.Parent = ScreenGui
+local function GetAnimationId(assetId)
+    local success, objects = pcall(function()
+        return game:GetObjects("rbxassetid://" .. tostring(assetId))
+    end)
+    
+    if success and objects and #objects > 0 then
+        local item = objects[1]
+        if item:IsA("Animation") and item.AnimationId ~= "" then
+            return item.AnimationId
+        end
+        local animObj = item:FindFirstChildOfClass("Animation")
+        if animObj and animObj.AnimationId ~= "" then
+            return animObj.AnimationId
+        end
+    end
+    return "rbxassetid://" .. tostring(assetId)
+end
 
-ToggleCorner.CornerRadius = UDim.new(1, 0)
-ToggleCorner.Parent = ToggleButton
+local function PlayEmote(assetId)
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
 
--- Главное окно GUI (немного шире, чтобы помещались длинные ники)
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 270, 0, 320)
-MainFrame.Position = UDim2.new(0, 20, 0, 150)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-MainFrame.BorderSizePixel = 0
-MainFrame.Visible = false
+    StopEmote()
+
+    local realAnimId = GetAnimationId(assetId)
+    local animObject = Instance.new("Animation")
+    animObject.AnimationId = realAnimId
+
+    local track = animator:LoadAnimation(animObject)
+    track.Priority = Enum.AnimationPriority.Action4
+    track:Play(0.1, 1, 1)
+    
+    CurrentTrack = track
+    TrackStartTime = os.clock() -- Фиксируем время запуска
+end
+
+--------------------------------------------------------------------------------
+-- 2. Проверки: движение, прыжки и таймер (40 сек)
+--------------------------------------------------------------------------------
+
+RunService.RenderStepped:Connect(function()
+    if not CurrentTrack or not CurrentTrack.IsPlaying then return end
+    
+    -- 1. Проверка таймера (40 секунд)
+    if (os.clock() - TrackStartTime) >= MAX_EMOTE_DURATION then
+        StopEmote()
+        return
+    end
+
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    -- 2. Проверка движения
+    local isMoving = humanoid.MoveDirection.Magnitude > 0.05
+    
+    -- 3. Проверка прыжка / падения
+    local state = humanoid:GetState()
+    local isJumpingOrFalling = (state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall)
+
+    if isMoving or isJumpingOrFalling then
+        StopEmote()
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- 3. Создание GUI
+--------------------------------------------------------------------------------
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CustomEmoteHubFix"
+ScreenGui.ResetOnSpawn = false
+
+local parentTarget = (gethui and gethui()) or CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = parentTarget
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 320, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+MainFrame.Active = true
 MainFrame.Parent = ScreenGui
 
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
 
--- Шапка окна
-TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-TitleBar.Text = "  Key Tracker"
-TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.TextSize = 13
-TitleBar.Font = Enum.Font.SourceSansBold
-TitleBar.TextXAlignment = Enum.TextXAlignment.Left
-TitleBar.Parent = MainFrame
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(60, 60, 80)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = MainFrame
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = TitleBar
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, 0, 0, 35)
+TitleLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+TitleLabel.Text = "  Emote Finder (40s Limit)"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextSize = 14
+TitleLabel.Parent = MainFrame
 
--- Кнопка сворачивания внутри окна
-MinimizeButton.Name = "MinimizeButton"
-MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-MinimizeButton.Position = UDim2.new(1, -35, 0, 0)
-MinimizeButton.BackgroundTransparency = 1
-MinimizeButton.Text = "-"
-MinimizeButton.TextColor3 = Color3.fromRGB(200, 200, 200)
-MinimizeButton.TextSize = 18
-MinimizeButton.Font = Enum.Font.SourceSansBold
-MinimizeButton.Parent = TitleBar
+local SearchBox = Instance.new("TextBox")
+SearchBox.Size = UDim2.new(1, -20, 0, 32)
+SearchBox.Position = UDim2.new(0, 10, 0, 45)
+SearchBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+SearchBox.PlaceholderText = "Поиск или прямо введи ID..."
+SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+SearchBox.Text = ""
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.TextSize = 12
+SearchBox.ClearTextOnFocus = false
+SearchBox.Parent = MainFrame
 
--- Панель со счетчиком ключей
-StatsLabel.Name = "StatsLabel"
-StatsLabel.Size = UDim2.new(1, -10, 0, 25)
-StatsLabel.Position = UDim2.new(0, 5, 0, 32)
-StatsLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-StatsLabel.TextSize = 11
-StatsLabel.Font = Enum.Font.SourceSansBold
-StatsLabel.Text = " Зеленых: 0 | Красных: 0 | Белых: 0"
-StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatsLabel.Parent = MainFrame
+local SearchCorner = Instance.new("UICorner")
+SearchCorner.CornerRadius = UDim.new(0, 6)
+SearchCorner.Parent = SearchBox
 
-local StatsCorner = Instance.new("UICorner")
-StatsCorner.CornerRadius = UDim.new(0, 4)
-StatsCorner.Parent = StatsLabel
-
--- Список игроков
-ScrollFrame.Name = "ScrollFrame"
-ScrollFrame.Size = UDim2.new(1, -10, 1, -65)
-ScrollFrame.Position = UDim2.new(0, 5, 0, 60)
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -20, 1, -90)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 85)
 ScrollFrame.BackgroundTransparency = 1
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 ScrollFrame.ScrollBarThickness = 4
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 ScrollFrame.Parent = MainFrame
 
-UIListLayout.Parent = ScrollFrame
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Padding = UDim.new(0, 6)
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-UIListLayout.Padding = UDim.new(0, 4)
+UIListLayout.Parent = ScrollFrame
 
--- Логика сворачивания/разворачивания
-local function ToggleUI()
-    MainFrame.Visible = not MainFrame.Visible
-    ToggleButton.Visible = not MainFrame.Visible
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 5)
+end)
+
+--------------------------------------------------------------------------------
+-- 4. Drag Logic
+--------------------------------------------------------------------------------
+
+local dragging, dragInput, dragStart, startPos
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- 5. Поиск
+--------------------------------------------------------------------------------
+
+local function ClearScroll()
+    for _, child in ipairs(ScrollFrame:GetChildren()) do
+        if child:IsA("TextButton") or child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
 end
 
-ToggleButton.MouseButton1Click:Connect(ToggleUI)
-MinimizeButton.MouseButton1Click:Connect(ToggleUI)
+local function AddButton(name, id)
+    local ItemBtn = Instance.new("TextButton")
+    ItemBtn.Size = UDim2.new(1, 0, 0, 36)
+    ItemBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    ItemBtn.Text = "   " .. name
+    ItemBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+    ItemBtn.TextXAlignment = Enum.TextXAlignment.Left
+    ItemBtn.Font = Enum.Font.Gotham
+    ItemBtn.TextSize = 12
+    ItemBtn.Parent = ScrollFrame
 
--- Функция проверки ключей
-local function GetPlayerKey(player)
-    local backpack = player:FindFirstChild("Backpack")
-    local character = player.Character
-    local containers = {backpack, character}
+    local BtnCorner = Instance.new("UICorner")
+    BtnCorner.CornerRadius = UDim.new(0, 6)
+    BtnCorner.Parent = ItemBtn
+
+    ItemBtn.MouseButton1Click:Connect(function()
+        PlayEmote(id)
+    end)
+end
+
+local function SearchEmotes(query)
+    ClearScroll()
     
-    local hasRed = false
-    local hasGreen = false
-    local hasWhite = false
+    local directId = tonumber(query)
+    if directId then
+        AddButton("Запустить ID: " .. tostring(directId), directId)
+        PlayEmote(directId)
+        return
+    end
 
-    for _, container in ipairs(containers) do
-        if container then
-            for _, item in ipairs(container:GetChildren()) do
-                local name = item.Name:lower()
-                if name:find("red key") or name:find("красный ключ") then
-                    hasRed = true
-                elseif name:find("green key") or name:find("зеленый ключ") then
-                    hasGreen = true
-                elseif name:find("key") or name:find("white key") or name:find("белый ключ") then
-                    hasWhite = true
+    local itemsFound = {}
+
+    local success, pages = pcall(function()
+        local searchParams = CatalogSearchParams.new()
+        searchParams.SearchKeyword = query or ""
+        searchParams.AssetTypes = { Enum.AvatarAssetType.EmoteAnimation }
+        return AvatarEditorService:SearchCatalog(searchParams)
+    end)
+
+    if success and pages then
+        local pageData = pcall(function() return pages:GetCurrentPage() end) and pages:GetCurrentPage() or {}
+        for _, item in ipairs(pageData) do
+            table.insert(itemsFound, {Name = item.Name, Id = item.Id})
+        end
+    end
+
+    if #itemsFound == 0 and request then
+        pcall(function()
+            local url = "https://catalog.roblox.com/v1/search/items?category=11&subCategory=38&keyword=" .. HttpService:UrlEncode(query or "") .. "&limit=30"
+            local response = request({Url = url, Method = "GET"})
+            if response and response.Body then
+                local data = HttpService:JSONDecode(response.Body)
+                if data and data.data then
+                    for _, item in ipairs(data.data) do
+                        table.insert(itemsFound, {Name = item.name, Id = item.id})
+                    end
                 end
+            end
+        end)
+    end
+
+    if #itemsFound > 0 then
+        for _, item in ipairs(itemsFound) do
+            AddButton(item.Name, item.Id)
+        end
+    else
+        local ErrLabel = Instance.new("TextLabel")
+        ErrLabel.Size = UDim2.new(1, 0, 0, 40)
+        ErrLabel.BackgroundTransparency = 1
+        ErrLabel.Text = "Ничего не найдено / Блокировка API"
+        ErrLabel.TextColor3 = Color3.fromRGB(200, 80, 80)
+        ErrLabel.Font = Enum.Font.Gotham
+        ErrLabel.TextSize = 12
+        ErrLabel.Parent = ScrollFrame
+    end
+end
+
+SearchBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        SearchEmotes(SearchBox.Text)
+    end
+end)
+
+SearchEmotes("")
+
+--------------------------------------------------------------------------------
+-- 6. ИИ-поиск (Gemini) — двухшаговая схема: перевод запроса → выбор из результатов
+--------------------------------------------------------------------------------
+
+-- Универсальный вызов Gemini generateContent. Возвращает (text, nil) при успехе
+-- или (nil, причина) при ошибке — причина всегда конкретная, не просто "не сработало".
+local function CallGemini(promptText)
+    if not GeminiApiKey or GeminiApiKey == "" then
+        return nil, "API ключ не задан (пустое поле)"
+    end
+    if type(request) ~= "function" then
+        return nil, "Функция request/http_request недоступна в этом executor"
+    end
+
+    local body = HttpService:JSONEncode({
+        contents = {
+            {
+                role = "user",
+                parts = { { text = promptText } },
+            },
+        },
+    })
+
+    local ok, response = pcall(function()
+        return request({
+            Url = GEMINI_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["x-goog-api-key"] = GeminiApiKey,
+            },
+            Body = body,
+        })
+    end)
+
+    if not ok then
+        return nil, "HTTP-запрос упал с ошибкой: " .. tostring(response)
+    end
+    if not response then
+        return nil, "Пустой response от request()"
+    end
+    if response.StatusCode and response.StatusCode ~= 200 then
+        return nil, "HTTP статус " .. tostring(response.StatusCode) .. ": " .. tostring(response.Body):sub(1, 300)
+    end
+    if not response.Body then
+        return nil, "В ответе нет поля Body"
+    end
+
+    local decodeOk, decoded = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+    if not decodeOk then
+        return nil, "Не удалось распарсить JSON ответа: " .. tostring(decoded)
+    end
+
+    local candidate = decoded and decoded.candidates and decoded.candidates[1]
+    local text = candidate and candidate.content and candidate.content.parts and candidate.content.parts[1] and candidate.content.parts[1].text
+
+    if not text then
+        local blockReason = decoded and decoded.promptFeedback and decoded.promptFeedback.blockReason
+        if blockReason then
+            return nil, "Gemini заблокировал запрос: " .. tostring(blockReason)
+        end
+        return nil, "В ответе нет candidates[1].content.parts[1].text. Сырой ответ: " .. tostring(response.Body):sub(1, 300)
+    end
+
+    text = text:match("^%s*(.-)%s*$") or text
+    return text
+end
+
+-- Шаг 1: переводим свободный текст игрока ("сядь") в короткий английский поисковый запрос ("sit")
+local function AskGeminiForSearchQuery(userText)
+    local prompt = "You are helping find a Roblox emote/animation by name. " ..
+        "The player asked (in any language): \"" .. userText .. "\". " ..
+        "Reply with ONLY one short English search keyword or phrase for this animation/pose " ..
+        "(examples: \"sit\", \"dance\", \"wave\", \"robot\"). " ..
+        "No punctuation, no quotes, no explanation — just the keyword."
+    print("[EmoteAI] Шаг 1/2: спрашиваю Gemini перевод запроса для \"" .. userText .. "\"...")
+    local result, err = CallGemini(prompt)
+    if not result then
+        warn("[EmoteAI] ОШИБКА на шаге перевода запроса: " .. tostring(err))
+        return nil, err
+    end
+    print("[EmoteAI] Gemini предложил английский запрос: \"" .. result .. "\"")
+    return result
+end
+
+-- Шаг 2: даём Gemini список найденных результатов и просим выбрать номер лучшего совпадения
+local function AskGeminiToPick(userText, items)
+    if #items == 0 then
+        return nil, "Список результатов пуст — нечего выбирать"
+    end
+
+    local lines = {}
+    for i, it in ipairs(items) do
+        table.insert(lines, tostring(i) .. ". " .. tostring(it.Name) .. " (id:" .. tostring(it.Id) .. ")")
+    end
+
+    local prompt = "The player originally asked for an animation: \"" .. userText .. "\". " ..
+        "Here is a numbered list of search results:\n" .. table.concat(lines, "\n") ..
+        "\nReply with ONLY the number of the single best matching result. Just the digit, nothing else."
+
+    print("[EmoteAI] Шаг 2/2: прошу Gemini выбрать из " .. #items .. " результатов...")
+    local result, err = CallGemini(prompt)
+    if not result then
+        warn("[EmoteAI] ОШИБКА на шаге выбора результата: " .. tostring(err))
+        return nil, err
+    end
+
+    local num = tonumber(result:match("%d+"))
+    if not num or not items[num] then
+        warn("[EmoteAI] ОШИБКА: Gemini вернул нераспознаваемый/невалидный номер: \"" .. result .. "\" (диапазон 1-" .. #items .. ")")
+        return nil, "невалидный номер: " .. tostring(result)
+    end
+
+    print("[EmoteAI] Gemini выбрал #" .. num .. ": " .. items[num].Name .. " (id:" .. items[num].Id .. ")")
+    return items[num]
+end
+
+-- Полный цикл: собираем результаты поиска БЕЗ побочных эффектов (не через SearchEmotes,
+-- чтобы не зависеть от того, что она сразу проигрывает числовые ID и рисует кнопки).
+local function CollectSearchResults(query)
+    local itemsFound = {}
+
+    local success, pages = pcall(function()
+        local searchParams = CatalogSearchParams.new()
+        searchParams.SearchKeyword = query or ""
+        searchParams.AssetTypes = { Enum.AvatarAssetType.EmoteAnimation }
+        return AvatarEditorService:SearchCatalog(searchParams)
+    end)
+
+    if success and pages then
+        local pageOk, pageData = pcall(function() return pages:GetCurrentPage() end)
+        if pageOk and pageData then
+            for _, item in ipairs(pageData) do
+                table.insert(itemsFound, { Name = item.Name, Id = item.Id })
             end
         end
     end
 
-    if hasRed then return "Red", Color3.fromRGB(255, 75, 75)
-    elseif hasGreen then return "Green", Color3.fromRGB(75, 255, 75)
-    elseif hasWhite then return "White", Color3.fromRGB(240, 240, 240)
-    else return "None", Color3.fromRGB(120, 120, 120) end
-end
-
--- Обновление списка игроков и счетчиков
-local function UpdatePlayerList()
-    -- Очищаем старые элементы
-    for _, child in ipairs(ScrollFrame:GetChildren()) do
-        if child:IsA("Frame") then
-            child:Destroy()
-        end
+    if #itemsFound == 0 and type(request) == "function" then
+        pcall(function()
+            local url = "https://catalog.roblox.com/v1/search/items?category=11&subCategory=38&keyword=" .. HttpService:UrlEncode(query or "") .. "&limit=30"
+            local response = request({ Url = url, Method = "GET" })
+            if response and response.Body then
+                local data = HttpService:JSONDecode(response.Body)
+                if data and data.data then
+                    for _, item in ipairs(data.data) do
+                        table.insert(itemsFound, { Name = item.name, Id = item.id })
+                    end
+                end
+            end
+        end)
     end
 
-    local greenCount = 0
-    local redCount = 0
-    local whiteCount = 0
-
-    -- Собираем данные по всем игрокам
-    for _, player in ipairs(Players:GetPlayers()) do
-        local keyType, keyColor = GetPlayerKey(player)
-
-        if keyType == "Green" then greenCount = greenCount + 1
-        elseif keyType == "Red" then redCount = redCount + 1
-        elseif keyType == "White" then whiteCount = whiteCount + 1 end
-
-        local PlayerRow = Instance.new("Frame")
-        PlayerRow.Size = UDim2.new(1, 0, 0, 26)
-        PlayerRow.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-        PlayerRow.BorderSizePixel = 0
-        
-        local RowCorner = Instance.new("UICorner")
-        RowCorner.CornerRadius = UDim.new(0, 4)
-        RowCorner.Parent = PlayerRow
-
-        local NameLabel = Instance.new("TextLabel")
-        NameLabel.Size = UDim2.new(0.65, 0, 1, 0)
-        NameLabel.Position = UDim2.new(0, 6, 0, 0)
-        NameLabel.BackgroundTransparency = 1
-        -- Формат: Displayname (@username)
-        NameLabel.Text = player.DisplayName .. " (@" .. player.Name .. ")"
-        NameLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-        NameLabel.TextSize = 11
-        NameLabel.Font = Enum.Font.SourceSans
-        NameLabel.TextXAlignment = Enum.TextXAlignment.Left
-        NameLabel.Parent = PlayerRow
-
-        local StatusLabel = Instance.new("TextLabel")
-        StatusLabel.Size = UDim2.new(0.35, -6, 1, 0)
-        StatusLabel.Position = UDim2.new(0.65, 0, 0, 0)
-        StatusLabel.BackgroundTransparency = 1
-        StatusLabel.Text = keyType .. " Key"
-        StatusLabel.TextColor3 = keyColor
-        StatusLabel.TextSize = 11
-        StatusLabel.Font = Enum.Font.SourceSansBold
-        StatusLabel.TextXAlignment = Enum.TextXAlignment.Right
-        StatusLabel.Parent = PlayerRow
-
-        PlayerRow.Parent = ScrollFrame
-    end
-
-    -- Обновляем текст счетчиков сверху
-    StatsLabel.Text = string.Format(" 🟢:%d  🔴:%d  ⚪:%d", greenCount, redCount, whiteCount)
-
-    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, #Players:GetPlayers() * 30)
+    return itemsFound
 end
 
--- Автообновление каждую секунду
-task.spawn(function()
-    while true do
-        pcall(UpdatePlayerList)
-        task.wait(1)
+-- Главная функция для UI: игрок пишет "сядь" → полный цикл → анимация проигрывается сама.
+local function RunAISearch(userText)
+    if not userText or userText:match("^%s*$") then
+        warn("[EmoteAI] Пустой запрос — нечего искать.")
+        return
+    end
+
+    local englishQuery, err1 = AskGeminiForSearchQuery(userText)
+    if not englishQuery then
+        StatusLabel.Text = "Ошибка перевода: " .. tostring(err1)
+        StatusLabel.TextColor3 = Color3.fromRGB(220, 80, 80)
+        return
+    end
+    StatusLabel.Text = "Ищу: \"" .. englishQuery .. "\"..."
+    StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 100)
+
+    local items = CollectSearchResults(englishQuery)
+    print("[EmoteAI] Найдено " .. #items .. " результатов каталога по запросу \"" .. englishQuery .. "\"")
+
+    if #items == 0 then
+        warn("[EmoteAI] По запросу \"" .. englishQuery .. "\" каталог ничего не вернул.")
+        StatusLabel.Text = "Ничего не найдено по запросу \"" .. englishQuery .. "\""
+        StatusLabel.TextColor3 = Color3.fromRGB(220, 80, 80)
+        ClearScroll()
+        for _, it in ipairs(items) do AddButton(it.Name, it.Id) end
+        return
+    end
+
+    ClearScroll()
+    for _, it in ipairs(items) do AddButton(it.Name, it.Id) end
+
+    local chosen, err2 = AskGeminiToPick(userText, items)
+    if not chosen then
+        StatusLabel.Text = "ИИ не смог выбрать: " .. tostring(err2) .. " (выбери сам из списка)"
+        StatusLabel.TextColor3 = Color3.fromRGB(220, 150, 80)
+        return
+    end
+
+    StatusLabel.Text = "Играю: " .. chosen.Name
+    StatusLabel.TextColor3 = Color3.fromRGB(100, 220, 120)
+    PlayEmote(chosen.Id)
+end
+
+--------------------------------------------------------------------------------
+-- 7. Доп. UI для ИИ-поиска: поле ключа + поле натурального запроса + статус
+--------------------------------------------------------------------------------
+
+MainFrame.Size = UDim2.new(0, 320, 0, 560)
+
+local ApiKeyBox = Instance.new("TextBox")
+ApiKeyBox.Size = UDim2.new(1, -20, 0, 30)
+ApiKeyBox.Position = UDim2.new(0, 10, 0, 420)
+ApiKeyBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+ApiKeyBox.PlaceholderText = "Gemini API key..."
+ApiKeyBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+ApiKeyBox.Text = ""
+ApiKeyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+ApiKeyBox.Font = Enum.Font.Gotham
+ApiKeyBox.TextSize = 12
+ApiKeyBox.ClearTextOnFocus = false
+ApiKeyBox.Parent = MainFrame
+
+local ApiKeyCorner = Instance.new("UICorner")
+ApiKeyCorner.CornerRadius = UDim.new(0, 6)
+ApiKeyCorner.Parent = ApiKeyBox
+
+ApiKeyBox.FocusLost:Connect(function()
+    GeminiApiKey = ApiKeyBox.Text
+    print("[EmoteAI] API ключ обновлён (длина: " .. tostring(#GeminiApiKey) .. " симв.)")
+end)
+
+local AIBox = Instance.new("TextBox")
+AIBox.Size = UDim2.new(1, -20, 0, 32)
+AIBox.Position = UDim2.new(0, 10, 0, 458)
+AIBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+AIBox.PlaceholderText = "Спроси ИИ: например 'сядь'..."
+AIBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+AIBox.Text = ""
+AIBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+AIBox.Font = Enum.Font.Gotham
+AIBox.TextSize = 12
+AIBox.ClearTextOnFocus = false
+AIBox.Parent = MainFrame
+
+local AIBoxCorner = Instance.new("UICorner")
+AIBoxCorner.CornerRadius = UDim.new(0, 6)
+AIBoxCorner.Parent = AIBox
+
+AIBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        StatusLabel.Text = "Думаю..."
+        StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 100)
+        task.spawn(function()
+            RunAISearch(AIBox.Text)
+        end)
     end
 end)
+
+StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -20, 0, 20)
+StatusLabel.Position = UDim2.new(0, 10, 0, 496)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Готов."
+StatusLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.TextSize = 11
+StatusLabel.Parent = MainFrame
