@@ -304,7 +304,7 @@ SearchEmotes("")
 
 -- Универсальный вызов Gemini generateContent. Возвращает (text, nil) при успехе
 -- или (nil, причина) при ошибке — причина всегда конкретная, не просто "не сработало".
-local function CallGemini(promptText)
+local function CallGemini(promptText, temperature)
     if not GeminiApiKey or GeminiApiKey == "" then
         return nil, "API ключ не задан (пустое поле)"
     end
@@ -318,6 +318,9 @@ local function CallGemini(promptText)
                 role = "user",
                 parts = { { text = promptText } },
             },
+        },
+        generationConfig = {
+            temperature = temperature or 0.2,
         },
     })
 
@@ -385,36 +388,65 @@ local function AskGeminiForSearchQuery(userText)
     return result
 end
 
+-- Память о последнем выборе по каждому запросу (в нижнем регистре), чтобы
+-- явно просить ИИ не повторять тот же вариант при одинаковом запросе подряд.
+local LastChosenByQuery = {}
+
+-- Перемешивание массива (Fisher-Yates) — чтобы порядок в списке не был всегда
+-- одинаковым, иначе ИИ склонен стабильно выбирать "первый попавшийся".
+local function ShuffleItems(items)
+    local shuffled = {}
+    for i, v in ipairs(items) do shuffled[i] = v end
+    for i = #shuffled, 2, -1 do
+        local j = math.random(1, i)
+        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+    end
+    return shuffled
+end
+
 -- Шаг 2: даём Gemini список найденных результатов и просим выбрать номер лучшего совпадения
 local function AskGeminiToPick(userText, items)
     if #items == 0 then
         return nil, "Список результатов пуст — нечего выбирать"
     end
 
+    local shuffled = ShuffleItems(items)
+
     local lines = {}
-    for i, it in ipairs(items) do
+    for i, it in ipairs(shuffled) do
         table.insert(lines, tostring(i) .. ". " .. tostring(it.Name) .. " (id:" .. tostring(it.Id) .. ")")
     end
 
+    local queryKey = userText:lower():match("^%s*(.-)%s*$")
+    local avoidLine = ""
+    local lastId = LastChosenByQuery[queryKey]
+    if lastId then
+        avoidLine = "\nNote: last time for this same request you picked id:" .. tostring(lastId) ..
+            " — if there is another reasonably good match in the list this time, prefer variety and pick a DIFFERENT one instead."
+    end
+
     local prompt = "The player originally asked for an animation: \"" .. userText .. "\". " ..
-        "Here is a numbered list of search results:\n" .. table.concat(lines, "\n") ..
+        "Here is a numbered list of search results (order is randomized each time):\n" .. table.concat(lines, "\n") ..
+        avoidLine ..
         "\nReply with ONLY the number of the single best matching result. Just the digit, nothing else."
 
-    print("[EmoteAI] Шаг 2/2: прошу Gemini выбрать из " .. #items .. " результатов...")
-    local result, err = CallGemini(prompt)
+    print("[EmoteAI] Шаг 2/2: прошу Gemini выбрать из " .. #shuffled .. " результатов (temperature=0.9 для разнообразия)...")
+    local result, err = CallGemini(prompt, 0.9)
     if not result then
         warn("[EmoteAI] ОШИБКА на шаге выбора результата: " .. tostring(err))
         return nil, err
     end
 
     local num = tonumber(result:match("%d+"))
-    if not num or not items[num] then
-        warn("[EmoteAI] ОШИБКА: Gemini вернул нераспознаваемый/невалидный номер: \"" .. result .. "\" (диапазон 1-" .. #items .. ")")
+    if not num or not shuffled[num] then
+        warn("[EmoteAI] ОШИБКА: Gemini вернул нераспознаваемый/невалидный номер: \"" .. result .. "\" (диапазон 1-" .. #shuffled .. ")")
         return nil, "невалидный номер: " .. tostring(result)
     end
 
-    print("[EmoteAI] Gemini выбрал #" .. num .. ": " .. items[num].Name .. " (id:" .. items[num].Id .. ")")
-    return items[num]
+    local chosen = shuffled[num]
+    LastChosenByQuery[queryKey] = chosen.Id
+    print("[EmoteAI] Gemini выбрал #" .. num .. ": " .. chosen.Name .. " (id:" .. chosen.Id .. ")")
+    return chosen
 end
 
 -- Полный цикл: собираем результаты поиска БЕЗ побочных эффектов (не через SearchEmotes,
