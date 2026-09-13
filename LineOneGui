@@ -3369,7 +3369,7 @@ end
 
 -- §NEARBY
 -- v20 Beta 2: DescribeAvatar - hair/accessories/head/clothes, NEVER face or mood
-local function describeAvatar(player)
+function describeAvatar(player) -- global: chunk register limit 200
     if not player then return "" end
     local char = player.Character
     if not char then return "" end
@@ -11481,15 +11481,10 @@ end)
     end)
 end
 
--- DEBUG: печатаем viewport и device info в консоль
-do
-    local uis2 = game:GetService("UserInputService")
-    local cam2 = workspace.CurrentCamera
-    local vp2 = cam2 and cam2.ViewportSize or Vector2.new(0,0)
-    print(string.format("[LineOfBots] viewport=%.0fx%.0f touch=%s keyboard=%s",
-        vp2.X, vp2.Y,
-        tostring(uis2.TouchEnabled),
-        tostring(uis2.KeyboardEnabled)
-    ))
-end
+-- DEBUG viewport (zero locals: chunk register limit 200)
+print(string.format("[LineOfBots] viewport=%.0fx%.0f touch=%s keyboard=%s",
+    workspace.CurrentCamera.ViewportSize.X, workspace.CurrentCamera.ViewportSize.Y,
+    tostring(game:GetService("UserInputService").TouchEnabled),
+    tostring(game:GetService("UserInputService").KeyboardEnabled)))
+
 createInterface()
