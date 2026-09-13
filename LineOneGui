@@ -3380,7 +3380,7 @@ function describeAvatar(player) -- global: chunk register limit 200
             local at = tostring(d.AccessoryType or "")
             local nm = tostring(d.Name or "?"):sub(1, 40)
             if at:find("Hair") then table.insert(hair, nm)
-            elseif not at:find("Face") then table.insert(extra, nm) end
+            elseif not at:find("Face") then local tp = at:match("%.(%w+)$") or "acc" table.insert(extra, nm .. " [" .. tp:lower() .. "]") end
         end
     end
     if #hair > 0 then table.insert(bits, "hair: " .. table.concat(hair, " + "):sub(1, 90))
@@ -3734,7 +3734,7 @@ local function handleQueuedChat(item)
         if avDesc ~= "" then
             table.insert(apiMessages, {
                 role    = "system",
-                content = "[AVATAR of " .. tostring(item.displayName or item.name or "?") .. ": " .. avDesc .. ". Never describe face, smile or mood.]"
+                content = "[AVATAR of " .. tostring(item.displayName or item.name or "?") .. ": " .. avDesc .. ". Describe ONLY listed items, never invent hoods/hats/clothes.]"
             })
         end
     end
@@ -11107,7 +11107,7 @@ local function ctDoSend()
         if ClientSettings.AvatarAwareness then
             local selfDesc = describeAvatar(Players.LocalPlayer)
             if selfDesc ~= "" then
-                table.insert(apiMsgs, { role = "system", content = "[YOUR AVATAR: " .. selfDesc .. ". Never describe face, smile or mood.]" })
+                table.insert(apiMsgs, { role = "system", content = "[YOUR AVATAR: " .. selfDesc .. ". Describe ONLY listed items, never invent hoods/hats/clothes.]" })
             end
         end
 
