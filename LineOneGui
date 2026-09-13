@@ -1996,9 +1996,6 @@ local function makeSystemPrompt(settings)
         table.insert(cannot, "see player screen/video")
         table.insert(cannot, "parkour/climb/build/fight/use items/teleport/change the game")
         table.insert(parts, "HONESTY ABOUT ABILITIES. You CAN: " .. table.concat(canDo, "; ") .. ". You CANNOT: " .. table.concat(cannot, "; ") .. ". If asked about a CANNOT item, say you cannot do it briefly. If asked about a CAN item that is currently disabled, say you can do it but it is disabled in settings. Never claim a disabled or CANNOT ability as available.")
-        if settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch then
-            table.insert(parts, "ANIMATION PREFERENCE: when player asks for a specific pose/dance/meme animation, prefer [DO:searchanim <english query>] over built-in DO tags. Reply with ONLY the search tag first.")
-        end
     end
 
     table.insert(parts,
