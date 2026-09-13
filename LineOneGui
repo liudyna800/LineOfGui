@@ -1985,6 +1985,10 @@ local function makeSystemPrompt(settings)
     end
 
     -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
+    -- v20 Beta 2: honesty about abilities
+    table.insert(parts,
+        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop), simple follow/goto movement. You CANNOT: hear voice chat, see player screen/video/avatar, parkour/climb/build/fight/use items/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
+
     table.insert(parts,
         "LANGUAGE: Messages start with [LANG:XX]. [LANG:RU]=reply in Russian. [LANG:EN]=reply in English. [LANG:OTHER]=match player's language. Never switch languages mid-conversation.")
 
