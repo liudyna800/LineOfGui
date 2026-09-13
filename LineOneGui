@@ -255,6 +255,7 @@ local function saveSettings()
             "PlayerAwareness=" .. b(cs.PlayerAwareness, true),
             "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
             "CameraLook="      .. b(cs.CameraLook,      true),
+            "AvatarAwareness=" .. b(cs.AvatarAwareness, false),
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
             "FollowConfirm="   .. b(cs.FollowConfirm,   true),
             "TokenEconomy="    .. b(cs.TokenEconomy,    false),
@@ -317,6 +318,7 @@ local function loadSettings()
         cs.PlayerAwareness = getBool("PlayerAwareness", true)
         cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
         cs.CameraLook      = getBool("CameraLook",      true)
+        cs.AvatarAwareness = getBool("AvatarAwareness", false)
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
         cs.FollowConfirm   = getBool("FollowConfirm",   true)
         cs.TokenEconomy    = getBool("TokenEconomy",    false)
@@ -650,7 +652,8 @@ ClientSettings = {
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     PlayerAwareness = true, -- v17: ИИ видит кто рядом, с какой стороны, как себя ведёт
-    CameraLook = true,      -- v17: бот плавно смотрит на говорящего игрока
+    CameraLook = true,
+    AvatarAwareness = false, -- v20: avatar look (no face)      -- v17: бот плавно смотрит на говорящего игрока
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -708,6 +711,7 @@ do
     if cs2.PlayerAwareness == nil then cs2.PlayerAwareness = true  end
     if cs2.PlaceAwareness  == nil then cs2.PlaceAwareness  = true  end
     if cs2.CameraLook      == nil then cs2.CameraLook      = true  end
+    if cs2.AvatarAwareness == nil then cs2.AvatarAwareness = false end
     if cs2.StripHash       == nil then cs2.StripHash       = true  end
     if cs2.FollowingEnabled== nil then cs2.FollowingEnabled= true  end
     if cs2.Range and cs2.Range.ShowVisualizer == nil then cs2.Range.ShowVisualizer = false end
@@ -3364,6 +3368,40 @@ local function detectBehavior(uid, myRoot)
 end
 
 -- §NEARBY
+-- v20 Beta 2: DescribeAvatar - hair/accessories/head/clothes, NEVER face or mood
+local function describeAvatar(player)
+    if not player then return "" end
+    local char = player.Character
+    if not char then return "" end
+    local bits = {}
+    local hair, extra = {}, {}
+    for _, d in ipairs(char:GetChildren()) do
+        if d:IsA("Accessory") then
+            local at = tostring(d.AccessoryType or "")
+            local nm = tostring(d.Name or "?"):sub(1, 40)
+            if at:find("Hair") then table.insert(hair, nm)
+            elseif not at:find("Face") then table.insert(extra, nm) end
+        end
+    end
+    if #hair > 0 then table.insert(bits, "hair: " .. table.concat(hair, " + "):sub(1, 90))
+    else table.insert(bits, "no hair (bald)") end
+    if #extra > 0 then
+        local shown = {}
+        for i = 1, math.min(4, #extra) do table.insert(shown, extra[i]) end
+        table.insert(bits, "accessories: " .. table.concat(shown, ", "):sub(1, 110))
+    end
+    local head = char:FindFirstChild("Head")
+    if head then
+        local custom = head:IsA("MeshPart") or head:FindFirstChildOfClass("SpecialMesh") ~= nil
+        table.insert(bits, custom and "custom-shaped head (not classic)" or "classic round head")
+    end
+    local hasShirt = char:FindFirstChildOfClass("Shirt") ~= nil
+    local hasPants = char:FindFirstChildOfClass("Pants") ~= nil
+    local hasGraphic = char:FindFirstChild("Shirt Graphic") ~= nil
+    table.insert(bits, "shirt: " .. (hasShirt and "yes" or "no") .. ", pants: " .. (hasPants and "yes" or "no") .. (hasGraphic and ", graphic print" or ""))
+    return table.concat(bits, "; ")
+end
+
 local function buildPlayerAwarenessContext(settings)
     if not settings.PlayerAwareness then return "" end
     local myRoot = getLocalRootPart()
