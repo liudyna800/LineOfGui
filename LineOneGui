@@ -1960,7 +1960,7 @@ local function makeSystemPrompt(settings)
                 "If the player asks for a specific pose/animation not covered by the DO-tags above " ..
                 "(e.g. \"sit down\", \"do a robot dance\", \"shrug\"), reply EXACTLY like a dance reply: tag at START + one short playful sentence as if you are ALREADY doing it (never say wait/searching/second):\n" ..
                 "[DO:searchanim <english query>]\n" ..
-                "Example: player says \"сядь\" → you reply: [DO:searchanim sit] Держи, сажусь!\n" ..
+                "Example: player says \"сядь\" → you reply with the tag plus one short natural sentence about the action itself\n" ..
                 "You will then be given a list of matching " ..
                 "animations as a system message. In your NEXT reply, pick exactly ONE result and reply with:\n" ..
                 "[DO:playanim <ref>] followed by your normal short chat reply to the player.\n" ..
