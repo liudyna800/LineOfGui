@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v20 Beta 2  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
+-- ║         LINEOFBOTS v20 Beta 1  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -214,7 +214,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v20 Beta 2 LOADED")
+print("LOB VERSION: v20 Beta 1 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -4598,13 +4598,13 @@ local Themes = {
 
         -- Сайдбар: чуть темнее окна
         Sidebar             = Color3.fromRGB(9, 12, 28),
-        SidebarTransparency = 0.55,
+        SidebarTransparency = 0.05,
         SidebarSelected     = Color3.fromRGB(40, 70, 160),
         SidebarSelectedT    = 0.20,
 
         -- Карточки: едва прозрачные, чёткие
         Card                = Color3.fromRGB(28, 38, 80),
-        CardTransparency    = 0.45,
+        CardTransparency    = 0.05,
 
         -- Кнопки
         Button              = Color3.fromRGB(25, 35, 75),
@@ -5825,30 +5825,11 @@ local function createInterface()
     local window = Instance.new("CanvasGroup")
     window.Size = UDim2.new(0, winW, 0, winH)
     window.Position = UDim2.fromOffset(0, 0)
-    window.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    window.BackgroundColor3 = THEME.Window
     window.BackgroundTransparency = THEME.WindowTransparency or 0.05
     window.ClipsDescendants = false
     window.Parent = windowHolder
     makeCorner(window, 18)
-    -- [v20 Beta 2.5] gradient na podlozhke, ne plenka poverkh: bgFrame za kontentom
-    window.BackgroundTransparency = 1
-    do
-        local bgFrame = Instance.new("Frame")
-        bgFrame.Name = "UltraBG"
-        bgFrame.Size = UDim2.new(1, 0, 1, 0)
-        bgFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        bgFrame.BorderSizePixel = 0
-        bgFrame.Parent = window
-        makeCorner(bgFrame, 18)
-        local ultraGrad = Instance.new("UIGradient")
-        ultraGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 120, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(90, 100, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(175, 90, 255)),
-        })
-        ultraGrad.Rotation = 135
-        ultraGrad.Parent = bgFrame
-    end
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
 
 
@@ -5922,7 +5903,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v20 beta 2", 10, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v20 beta 1", 10, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
