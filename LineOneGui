@@ -1988,6 +1988,11 @@ local function makeSystemPrompt(settings)
     -- v20 Beta 2: honesty about abilities (static, fast)
     table.insert(parts,
         "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement. You CANNOT: hear voice chat, see player screen/video/avatar, parkour/climb/build/fight/use items/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
+    do
+        local stA = settings.ActionsEnabled and "on" or "off"
+        local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
+        table.insert(parts, "SETTINGS STATE: Actions=" .. stA .. ", CustomAnims=" .. stU .. ". If an ability above is off, tell the player you can do it but it is currently disabled in settings.")
+    end
 
     table.insert(parts,
         "LANGUAGE: Messages start with [LANG:XX]. [LANG:RU]=reply in Russian. [LANG:EN]=reply in English. [LANG:OTHER]=match player's language. Never switch languages mid-conversation.")
