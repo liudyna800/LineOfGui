@@ -3941,6 +3941,11 @@ local function handleQueuedChat(item)
                 print("[EmoteAPI] Во втором ответе ИИ нет тега [DO:playanim] — анимация не запускается. Сырой второй ответ (первые 150 симв.): " .. text2:sub(1, 150))
             end
 
+            local _stripped = text2:gsub("%[.-%]", ""):gsub("%s+", "")
+            if _stripped == "" then
+                local _fill = (langTag == "RU") and "smotri!" or "watch!"
+                text2 = text2 .. " " .. _fill
+            end
             text = text2
         end
     end
