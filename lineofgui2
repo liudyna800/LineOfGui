@@ -3395,7 +3395,26 @@ function describeAvatar(player) -- global: chunk register limit 200
     local head = char:FindFirstChild("Head")
     if head then
         local custom = head:IsA("MeshPart") or head:FindFirstChildOfClass("SpecialMesh") ~= nil
-        table.insert(bits, custom and "custom-shaped head (not classic)" or "classic round head")
+        if not custom then table.insert(bits, "classic round head")
+        else
+            local mid = ""
+            if head:IsA("MeshPart") then mid = tostring(head.MeshId or "")
+            else local sm = head:FindFirstChildOfClass("SpecialMesh") mid = tostring(sm and sm.MeshId or "") end
+            local aid = mid:match("(%d+)")
+            ClientSettings._headNames = ClientSettings._headNames or {}
+            local hn = aid and ClientSettings._headNames[aid]
+            if hn then table.insert(bits, "head: " .. hn)
+            else
+                if aid and not ClientSettings._headNames[aid .. "_q"] then
+                    ClientSettings._headNames[aid .. "_q"] = true
+                    task.spawn(function()
+                        local ok, info = pcall(function() return game:GetService("MarketplaceService"):GetProductInfo(tonumber(aid)) end)
+                        if ok and info and info.Name then ClientSettings._headNames[aid] = tostring(info.Name):sub(1, 50) end
+                    end)
+                end
+                table.insert(bits, "custom-shaped head (not classic)")
+            end
+        end
     end
     local hasShirt = char:FindFirstChildOfClass("Shirt") ~= nil
     local hasPants = char:FindFirstChildOfClass("Pants") ~= nil
