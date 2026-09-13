@@ -1985,18 +1985,9 @@ local function makeSystemPrompt(settings)
     end
 
     -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
-    -- v20 Beta 2.13: dynamic honesty (toggles-aware) + UGC truth + prefer UGC
-    do
-        local canDo, cannot = {}, {}
-        table.insert(canDo, "text chat")
-        if settings.ActionsEnabled then table.insert(canDo, "built-in [DO:] emotions/movement (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop)") else table.insert(cannot, "built-in [DO:] emotions/movement (Actions disabled in settings)") end
-        if settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch then table.insert(canDo, "UGC animations via [DO:searchanim <query>] then [DO:playanim <ref>]") else table.insert(cannot, "UGC/custom animations (Custom animations disabled in settings)") end
-        if settings.ActionsEnabled then table.insert(canDo, "simple follow/goto movement") else table.insert(cannot, "follow/goto movement (Actions disabled)") end
-        table.insert(cannot, "hear voice chat")
-        table.insert(cannot, "see player screen/video")
-        table.insert(cannot, "parkour/climb/build/fight/use items/teleport/change the game")
-        table.insert(parts, "HONESTY ABOUT ABILITIES. You CAN: " .. table.concat(canDo, "; ") .. ". You CANNOT: " .. table.concat(cannot, "; ") .. ". If asked about a CANNOT item, say you cannot do it briefly. If asked about a CAN item that is currently disabled, say you can do it but it is disabled in settings. Never claim a disabled or CANNOT ability as available.")
-    end
+    -- v20 Beta 2: honesty about abilities (static, fast)
+    table.insert(parts,
+        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement. You CANNOT: hear voice chat, see player screen/video/avatar, parkour/climb/build/fight/use items/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
 
     table.insert(parts,
         "LANGUAGE: Messages start with [LANG:XX]. [LANG:RU]=reply in Russian. [LANG:EN]=reply in English. [LANG:OTHER]=match player's language. Never switch languages mid-conversation.")
