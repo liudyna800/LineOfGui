@@ -4600,7 +4600,7 @@ local Themes = {
         Sidebar             = Color3.fromRGB(52, 40, 110),
         SidebarTransparency = 0.10,
         SidebarSelected     = Color3.fromRGB(96, 72, 188),
-        SidebarSelectedT    = 0.20,
+        SidebarSelectedT    = 0.05,
 
         -- Карточки: едва прозрачные, чёткие
         Card                = Color3.fromRGB(22, 30, 70),
@@ -10884,8 +10884,10 @@ ctSendBtn.Font = Enum.Font.GothamBold
 ctSendBtn.TextSize = 13
 ctSendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ctSendBtn.AutoButtonColor = false
+ctSendBtn.BackgroundTransparency = 0
 ctSendBtn.Parent = ctInputArea
 makeCorner(ctSendBtn, 999)
+makeStroke(ctSendBtn, 1.5, Color3.fromRGB(255, 255, 255), 0.35)
 ctSendBtn.MouseEnter:Connect(function() tween(ctSendBtn, TWEEN_FAST, { BackgroundTransparency = 0.2 }) end)
 ctSendBtn.MouseLeave:Connect(function() tween(ctSendBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
 
