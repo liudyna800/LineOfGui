@@ -1991,7 +1991,7 @@ local function makeSystemPrompt(settings)
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
-        table.insert(parts, "YOUR CURRENT SETTINGS: Actions=" .. stA .. ", CustomAnims=" .. stU .. ". This is YOUR state right now, not hypothetical. If CustomAnims=off, UGC search/play is DISABLED for you: say \\"UGC disabled in my settings\\", do NOT say \\"if enabled\\", do NOT perform it, do NOT substitute a built-in dance. If Actions=off, say actions are disabled and reply text-only with no [DO:] tag.")
+        table.insert(parts, "YOUR CURRENT SETTINGS: Actions=" .. stA .. ", CustomAnims=" .. stU .. ". This is YOUR state right now, not hypothetical. If CustomAnims=off, UGC search/play is DISABLED for you: say UGC disabled in my settings, do NOT say if enabled, do NOT perform it, do NOT substitute a built-in dance. If Actions=off, say actions are disabled and reply text-only with no [DO:] tag.")
     end
 
     table.insert(parts,
