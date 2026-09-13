@@ -4037,6 +4037,10 @@ local function handleQueuedChat(item)
         -- Просто убираем тег из текста без выполнения
         cleanText = cleanText or text
     end
+    -- v20 Beta 2: action played but text empty -> fallback so bot never acts silently
+    if (not cleanText or cleanText == "") and actionName and actionName ~= "" then
+        cleanText = ((langTag or "RU") == "RU") and "smotri!" or "watch!"
+    end
 
     -- Сохраняем в историю только если память включена
     -- ВАЖНО: сохраняем userContent (с [NAME:X] если UsePlayerName включён) — 
