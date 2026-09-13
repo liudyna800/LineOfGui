@@ -6308,10 +6308,10 @@ local function makeTabButton(name, iconId)
     -- Акцентная полоска (переливается когда активна)
     local strip = Instance.new("Frame")
     strip.Name = "AccentStrip"
-    strip.BackgroundColor3 = THEME.Accent
+    strip.BackgroundColor3 = Color3.fromRGB(225, 215, 255)
     strip.BorderSizePixel = 0
-    strip.Size = UDim2.new(0, 3, 0, 22)
-    strip.Position = UDim2.new(0, 4, 0.5, -11)
+    strip.Size = UDim2.new(0, 4, 0, 26)
+    strip.Position = UDim2.new(0, 4, 0.5, -13)
     strip.Visible = false
     strip.Parent = btn
     makeCorner(strip, 2)
