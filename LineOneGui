@@ -5830,8 +5830,16 @@ local function createInterface()
     window.ClipsDescendants = false
     window.Parent = windowHolder
     makeCorner(window, 18)
-    -- [v20 Beta 2.1] Intel Ultra fix: temnee, diagonal 135, chitaemy tekst
+    -- [v20 Beta 2.5] gradient na podlozhke, ne plenka poverkh: bgFrame za kontentom
+    window.BackgroundTransparency = 1
     do
+        local bgFrame = Instance.new("Frame")
+        bgFrame.Name = "UltraBG"
+        bgFrame.Size = UDim2.new(1, 0, 1, 0)
+        bgFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        bgFrame.BorderSizePixel = 0
+        bgFrame.Parent = window
+        makeCorner(bgFrame, 18)
         local ultraGrad = Instance.new("UIGradient")
         ultraGrad.Color = ColorSequence.new({
             ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 120, 255)),
@@ -5839,7 +5847,7 @@ local function createInterface()
             ColorSequenceKeypoint.new(1, Color3.fromRGB(175, 90, 255)),
         })
         ultraGrad.Rotation = 135
-        ultraGrad.Parent = window
+        ultraGrad.Parent = bgFrame
     end
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
 
