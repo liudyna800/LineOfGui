@@ -7391,6 +7391,17 @@ makeToggleRow(
     end
 )
 
+makeToggleRow(
+    automation,
+    "Распознавание аватаров",
+    "ИИ видит волосы, аксессуары и одежду говорящего. Лицо всегда игнорируется.",
+    ClientSettings.AvatarAwareness == true,
+    function(state)
+        ClientSettings.AvatarAwareness = state
+        saveSettings()
+    end
+)
+
 -- Кастомные анимации: разрешить ИИ использовать дополнительную библиотеку UGC-эмоций (EmoteAPI)
 makeToggleRow(
     automation,
@@ -11093,6 +11104,12 @@ local function ctDoSend()
             end
         end
         table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
+        if ClientSettings.AvatarAwareness then
+            local selfDesc = describeAvatar(Players.LocalPlayer)
+            if selfDesc ~= "" then
+                table.insert(apiMsgs, { role = "system", content = "[YOUR AVATAR: " .. selfDesc .. ". Never describe face, smile or mood.]" })
+            end
+        end
 
         -- directMaxTokens: берём настройку пользователя, минимум 512 для директ-чата
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 512, 512)
