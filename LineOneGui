@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v20 Beta 1  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
+-- ║         LINEOFBOTS v20 Beta 2  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -214,7 +214,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v20 Beta 1 LOADED")
+print("LOB VERSION: v20 Beta 2 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -5914,7 +5914,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v20 beta 1", 10, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v20 beta 2", 10, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
