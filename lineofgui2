@@ -11046,13 +11046,20 @@ local function ctDoSend()
             payload.temperature = nil
         end
 
-        local text, err = providerRouter:chatCompletions(payload)
-
+        -- v20 Beta 2: timeout 25s + retry only on fast fail (no doubling of slow calls)
+        local text, err
+        local _dt0 = os.clock()
+        do
+            local done = false
+            task.spawn(function() text, err = providerRouter:chatCompletions(payload) done = true end)
+            while not done and (os.clock() - _dt0) < 25 do task.wait(0.5) end
+            if not done then err = "timeout (25s direct)" end
+        end
         -- Авто-retry при сетевой ошибке (1 попытка)
         if not text and err then
             local errL = tostring(err):lower()
             local isNetErr = errL:find("timeout") or errL:find("timed") or errL:find("network") or errL:find("connection")
-            if isNetErr then
+            if isNetErr and (os.clock() - _dt0) < 10 then
                 task.wait(2)
                 text, err = providerRouter:chatCompletions(payload)
             end
