@@ -3401,6 +3401,7 @@ function describeAvatar(player) -- global: chunk register limit 200
             if head:IsA("MeshPart") then mid = tostring(head.MeshId or "")
             else local sm = head:FindFirstChildOfClass("SpecialMesh") mid = tostring(sm and sm.MeshId or "") end
             local aid = mid:match("(%d+)")
+            headMesh = mid
             ClientSettings._headNames = ClientSettings._headNames or {}
             local hn = aid and ClientSettings._headNames[aid]
             if hn then table.insert(bits, "head: " .. hn)
@@ -3677,6 +3678,11 @@ local function handleQueuedChat(item)
     if not item.isWorld and not settings.AutoReply then return end
     -- Guard: пустое сообщение не обрабатываем
     if not item.cleaned or item.cleaned:match("^%s*$") then return end
+    if item.cleaned and item.cleaned:lower() == "avatardebug" then
+        local dbg, mesh = describeAvatar(item.player)
+        sendBotMessage("DBG avatar=[" .. tostring(dbg) .. "] mesh=" .. tostring(mesh))
+        return
+    end
     -- [v19.9.8] ФИКС: если игрок ушёл пока ждал в очереди — пропускаем запрос
     -- БАГИ ДО: тратились токены на сообщения игроков которые уже вышли с сервера
     if not item.isWorld and item.player and not item.player.Parent then return end
