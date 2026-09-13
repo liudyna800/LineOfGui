@@ -3379,8 +3379,10 @@ function describeAvatar(player) -- global: chunk register limit 200
         if d:IsA("Accessory") then
             local at = tostring(d.AccessoryType or "")
             local nm = tostring(d.Name or "?"):sub(1, 40)
+            local nlow = nm:lower()
+            if nlow:find("smile") or nlow:find("grin") or nlow:find("frown") then continue end
             if at:find("Hair") then table.insert(hair, nm)
-            elseif not at:find("Face") then local tp = at:match("%.(%w+)$") or "acc" table.insert(extra, nm .. " [" .. tp:lower() .. "]") end
+            else local tp = at:match("%.(%w+)$") or "acc" table.insert(extra, nm .. " [" .. tp:lower() .. "]") end
         end
     end
     if #hair > 0 then table.insert(bits, "hair: " .. table.concat(hair, " + "):sub(1, 90))
