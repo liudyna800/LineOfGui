@@ -4599,7 +4599,7 @@ local Themes = {
         -- Сайдбар: чуть темнее окна
         Sidebar             = Color3.fromRGB(52, 40, 110),
         SidebarTransparency = 0.10,
-        SidebarSelected     = Color3.fromRGB(40, 70, 160),
+        SidebarSelected     = Color3.fromRGB(96, 72, 188),
         SidebarSelectedT    = 0.20,
 
         -- Карточки: едва прозрачные, чёткие
@@ -4617,16 +4617,16 @@ local Themes = {
         TextDim             = Color3.fromRGB(130, 155, 210),
 
         -- Toggle
-        ToggleOn            = Color3.fromRGB(80, 160, 255),
+        ToggleOn            = Color3.fromRGB(140, 110, 230),
         ToggleOff           = Color3.fromRGB(25, 38, 90),
 
         -- Рамки — чёткие, видимые
         Stroke              = Color3.fromRGB(60, 90, 180),
         StrokeTransparency  = 0.55,
 
-        IconTint            = Color3.fromRGB(160, 200, 255),
+        IconTint            = Color3.fromRGB(190, 175, 255),
         InputBg             = Color3.fromRGB(8, 12, 32),
-        Accent              = Color3.fromRGB(80, 160, 255),
+        Accent              = Color3.fromRGB(140, 110, 230),
         AuroraPalette       = AURORA_COLORS,
         AuroraSpeed         = 0.35,
     },
@@ -5844,8 +5844,8 @@ local function createInterface()
         local g = Instance.new("UIGradient")
         g.Color = ColorSequence.new({
             ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 32, 72)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(45, 55, 130)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(95, 70, 170)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(62, 78, 175)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(128, 98, 225)),
         })
         g.Rotation = 40
         g.Parent = bg
