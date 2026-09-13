@@ -1958,10 +1958,10 @@ local function makeSystemPrompt(settings)
             table.insert(parts,
                 "ANIMATION SEARCH (separate from DO-tags above, use INSTEAD of a DO-tag when it fits better):\n" ..
                 "If the player asks for a specific pose/animation not covered by the DO-tags above " ..
-                "(e.g. \"sit down\", \"do a robot dance\", \"shrug\"), reply with ONLY this tag and NOTHING else:\n" ..
+                "(e.g. \"sit down\", \"do a robot dance\", \"shrug\"), reply with the tag at START followed by one short sentence (like dance replies):\n" ..
                 "[DO:searchanim <english query>]\n" ..
-                "Example: player says \"сядь\" → you reply exactly: [DO:searchanim sit]\n" ..
-                "Do NOT write any other text in that message. You will then be given a list of matching " ..
+                "Example: player says \"сядь\" → you reply: [DO:searchanim sit] plus one short sentence\n" ..
+                "You will then be given a list of matching " ..
                 "animations as a system message. In your NEXT reply, pick exactly ONE result and reply with:\n" ..
                 "[DO:playanim <ref>] followed by your normal short chat reply to the player.\n" ..
                 "The <ref> must be copied EXACTLY as shown in the search results (e.g. \"sit\" or \"stadium\") — " ..
@@ -3844,6 +3844,13 @@ local function handleQueuedChat(item)
     local searchQuery = text:match("%[%s*[Dd][Oo]:%s*[Ss]earchanim%s+([^%]\n]+)%]?")
     if searchQuery and EmoteAPI and ClientSettings.UseCustomAnimSearch then
         searchQuery = searchQuery:gsub("%s+$", "")
+        -- v20 Beta 2: first-step text out immediately (like built-in dances)
+        do
+            local first = text:gsub("%[%s*[Dd][Oo]:%s*[Ss]earchanim%s+[^%]\n]+%]?", "")
+            first = first:gsub("%[LANG:[^%]]*%]", ""):gsub("%[NAME:[^%]]*%]", "")
+            first = first:match("^%s*(.-)%s*$") or ""
+            if first ~= "" and (not item.isWorld or settings.AutoReply) then sendBotMessage(first) end
+        end
         print("[EmoteAPI] Запрос поиска от ИИ (игрок " .. tostring(item.name or item.userId) .. "): \"" .. searchQuery .. "\"")
 
         local searchOk, searchResults = pcall(function()
