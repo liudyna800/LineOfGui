@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v20 Beta 1  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
+-- ║         LINEOFBOTS v20 Beta 2  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -214,7 +214,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v20 Beta 1 LOADED")
+print("LOB VERSION: v20 Beta 2 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -5830,6 +5830,26 @@ local function createInterface()
     window.ClipsDescendants = false
     window.Parent = windowHolder
     makeCorner(window, 18)
+    -- [Beta2-Ultra] ediny diagonal kak Intel: podlozhka szadi, tekst sverkhu (bez plenki)
+    window.BackgroundTransparency = 1
+    do
+        local bg = Instance.new("Frame")
+        bg.Name = "UltraBG"
+        bg.Size = UDim2.new(1, 0, 1, 0)
+        bg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        bg.BorderSizePixel = 0
+        bg.ZIndex = 0
+        bg.Parent = window
+        makeCorner(bg, 18)
+        local g = Instance.new("UIGradient")
+        g.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 90, 210)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(64, 92, 225)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(148, 88, 240)),
+        })
+        g.Rotation = 40
+        g.Parent = bg
+    end
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
 
 
@@ -5838,20 +5858,11 @@ local function createInterface()
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
     sidebar.BackgroundColor3 = THEME.Sidebar
-    sidebar.BackgroundTransparency = THEME.SidebarTransparency or 0.20
+    sidebar.BackgroundTransparency = 0.30
+    sidebar.ZIndex = 1
     sidebar.BorderSizePixel = 0
     sidebar.Parent = window
     makeCorner(sidebar, 18)
-    -- [Beta2] gradient TOLKO na sidebar Frame (bezopasno)
-    do
-        local gS = Instance.new("UIGradient")
-        gS.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(38, 28, 86)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(88, 62, 178)),
-        })
-        gS.Rotation = 135
-        gS.Parent = sidebar
-    end
 
     -- Тонкий разделитель (статичный, не перекрывает)
     local sidebarDivider = Instance.new("Frame")
@@ -5913,7 +5924,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v20 beta 1", 10, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v20 beta 2", 10, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
@@ -6506,16 +6517,6 @@ local function makeSectionCard(parent, titleText, subtitleText)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
     makeCorner(card, 22)
-    -- [Beta2] gradient TOLKO na section card (bezopasno)
-    do
-        local gC = Instance.new("UIGradient")
-        gC.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 110, 240)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 85, 220)),
-        })
-        gC.Rotation = 135
-        gC.Parent = card
-    end
     -- Белая рамка — ключ к эффекту стекла
     makeStroke(card, 1, Color3.fromRGB(255, 255, 255), 0.72)
 
@@ -7025,16 +7026,6 @@ local function makeVisualizerCard(parent)
     card.Size = UDim2.new(1, 0, 0, 180)
     card.Parent = parent
     makeCorner(card, 22)
-    -- [Beta2] gradient TOLKO na section card (bezopasno)
-    do
-        local gC = Instance.new("UIGradient")
-        gC.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 110, 240)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 85, 220)),
-        })
-        gC.Rotation = 135
-        gC.Parent = card
-    end
     makeStroke(card, 1, THEME.Stroke, THEME.StrokeTransparency or 0.8)
     
     -- Minimap Grid Background
@@ -9666,16 +9657,6 @@ local function mod2_makeCard(parent)
     card.BorderSizePixel = 0
     card.Parent = parent
     makeCorner(card, 22)
-    -- [Beta2] gradient TOLKO na section card (bezopasno)
-    do
-        local gC = Instance.new("UIGradient")
-        gC.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 110, 240)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 85, 220)),
-        })
-        gC.Rotation = 135
-        gC.Parent = card
-    end
     makeStroke(card, 1, THEME.Stroke, 0.25)
 
     local grad = Instance.new("UIGradient")
@@ -10372,16 +10353,6 @@ local function makeModCard(parent, title, subtitle)
     card.BorderSizePixel = 0
     card.Parent = parent
     makeCorner(card, 22)
-    -- [Beta2] gradient TOLKO na section card (bezopasno)
-    do
-        local gC = Instance.new("UIGradient")
-        gC.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 110, 240)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 85, 220)),
-        })
-        gC.Rotation = 135
-        gC.Parent = card
-    end
     makeStroke(card, 1, THEME.Stroke, 0.25)
 
     local header = Instance.new("Frame")
