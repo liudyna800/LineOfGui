@@ -3405,14 +3405,17 @@ function describeAvatar(player) -- global: chunk register limit 200
             local hn = aid and ClientSettings._headNames[aid]
             if hn then table.insert(bits, "head: " .. hn)
             else
-                if aid and not ClientSettings._headNames[aid .. "_q"] then
+                if aid and not ClientSettings._headNames[aid] then
                     ClientSettings._headNames[aid .. "_q"] = true
                     task.spawn(function()
                         local ok, info = pcall(function() return game:GetService("MarketplaceService"):GetProductInfo(tonumber(aid)) end)
                         if ok and info and info.Name then ClientSettings._headNames[aid] = tostring(info.Name):sub(1, 50) end
                     end)
+                    local wt = 0
+                    while not ClientSettings._headNames[aid] and wt < 15 do task.wait(0.2) wt = wt + 1 end
+                    hn = ClientSettings._headNames[aid]
                 end
-                table.insert(bits, "custom-shaped head (not classic)")
+                table.insert(bits, hn and ("head: " .. hn) or "custom-shaped head (not classic)")
             end
         end
     end
