@@ -3728,6 +3728,17 @@ local function handleQueuedChat(item)
         end
     end
 
+    -- v20 Beta 2: AvatarAwareness - look of speaker, no face
+    if settings.AvatarAwareness and item.player then
+        local avDesc = describeAvatar(item.player)
+        if avDesc ~= "" then
+            table.insert(apiMessages, {
+                role    = "system",
+                content = "[AVATAR of " .. tostring(item.displayName or item.name or "?") .. ": " .. avDesc .. ". Never describe face, smile or mood.]"
+            })
+        end
+    end
+
     -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
     -- Таймаут 8 сек на поиск — если источники медленные, не ждём вечно
     if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
@@ -11082,6 +11093,12 @@ local function ctDoSend()
             end
         end
         table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
+        if ClientSettings.AvatarAwareness then
+            local selfDesc = describeAvatar(Players.LocalPlayer)
+            if selfDesc ~= "" then
+                table.insert(apiMsgs, { role = "system", content = "[YOUR AVATAR: " .. selfDesc .. ". Never describe face, smile or mood.]" })
+            end
+        end
 
         -- directMaxTokens: берём настройку пользователя, минимум 512 для директ-чата
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 512, 512)
