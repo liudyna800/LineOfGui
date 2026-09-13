@@ -11158,13 +11158,13 @@ end)
 local minimizeBtn = Instance.new("TextButton")
 minimizeBtn.Size = UDim2.new(0, 36, 0, 36)
 minimizeBtn.Position = UDim2.new(1, -48, 0, 8)
-minimizeBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 96)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
 minimizeBtn.BackgroundTransparency = 0.2
 minimizeBtn.Text = ""
 minimizeBtn.AutoButtonColor = false
 minimizeBtn.ZIndex = 5
 minimizeBtn.Parent = window
-makeCorner(minimizeBtn, 18)
+makeCorner(minimizeBtn, 8)
 
 -- Stroke: тонкая рамка цвета темы
 local minStroke = Instance.new("UIStroke")
@@ -11195,7 +11195,7 @@ end)
 minimizeBtn.MouseLeave:Connect(function()
     tween(minimizeBtn, TWEEN_FAST, {
         BackgroundTransparency = 0.2,
-        BackgroundColor3 = Color3.fromRGB(28, 42, 96),
+        BackgroundColor3 = Color3.fromRGB(40, 40, 55),
     })
     tween(minStroke, TWEEN_FAST, { Transparency = 0.6, Color = THEME.Accent or Color3.fromRGB(120, 120, 200) })
     tween(minIcon, TWEEN_FAST, { TextColor3 = Color3.fromRGB(200, 200, 220) })
