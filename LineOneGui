@@ -5843,9 +5843,9 @@ local function createInterface()
         makeCorner(bg, 18)
         local g = Instance.new("UIGradient")
         g.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 90, 210)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(64, 92, 225)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(148, 88, 240)),
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 32, 72)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(45, 55, 130)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(95, 70, 170)),
         })
         g.Rotation = 40
         g.Parent = bg
@@ -11114,6 +11114,16 @@ circleBtn.ZIndex = 50
 circleBtn.Visible = false
 circleBtn.Parent = gui
 makeCorner(circleBtn, 999)
+    -- [Beta2] circle: Intel gradient
+    do
+        local cg = Instance.new("UIGradient")
+        cg.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(45, 60, 140)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(110, 80, 190)),
+        })
+        cg.Rotation = 40
+        cg.Parent = circleBtn
+    end
 
 local circleBorder = Instance.new("UIStroke")
 circleBorder.Color = Color3.fromRGB(255, 255, 255)
