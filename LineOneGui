@@ -5825,11 +5825,22 @@ local function createInterface()
     local window = Instance.new("CanvasGroup")
     window.Size = UDim2.new(0, winW, 0, winH)
     window.Position = UDim2.fromOffset(0, 0)
-    window.BackgroundColor3 = THEME.Window
+    window.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     window.BackgroundTransparency = THEME.WindowTransparency or 0.05
     window.ClipsDescendants = false
     window.Parent = windowHolder
     makeCorner(window, 18)
+    -- [v20 Beta 2] Intel Core Ultra okras: siniy niz-levo -> fioletovy verkh-pravo
+    do
+        local ultraGrad = Instance.new("UIGradient")
+        ultraGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 104, 181)),
+            ColorSequenceKeypoint.new(0.55, Color3.fromRGB(46, 92, 220)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(123, 97, 255)),
+        })
+        ultraGrad.Rotation = 45
+        ultraGrad.Parent = window
+    end
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
 
 
