@@ -1958,9 +1958,9 @@ local function makeSystemPrompt(settings)
             table.insert(parts,
                 "ANIMATION SEARCH (separate from DO-tags above, use INSTEAD of a DO-tag when it fits better):\n" ..
                 "If the player asks for a specific pose/animation not covered by the DO-tags above " ..
-                "(e.g. \"sit down\", \"do a robot dance\", \"shrug\"), reply with the tag at START followed by one short sentence (like dance replies):\n" ..
+                "(e.g. \"sit down\", \"do a robot dance\", \"shrug\"), reply EXACTLY like a dance reply: tag at START + one short playful sentence as if you are ALREADY doing it (never say wait/searching/second):\n" ..
                 "[DO:searchanim <english query>]\n" ..
-                "Example: player says \"сядь\" → you reply: [DO:searchanim sit] plus one short sentence\n" ..
+                "Example: player says \"сядь\" → you reply: [DO:searchanim sit] Держи, сажусь!\n" ..
                 "You will then be given a list of matching " ..
                 "animations as a system message. In your NEXT reply, pick exactly ONE result and reply with:\n" ..
                 "[DO:playanim <ref>] followed by your normal short chat reply to the player.\n" ..
