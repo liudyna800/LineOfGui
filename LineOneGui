@@ -5830,15 +5830,15 @@ local function createInterface()
     window.ClipsDescendants = false
     window.Parent = windowHolder
     makeCorner(window, 18)
-    -- [v20 Beta 2] Intel Core Ultra okras: siniy niz-levo -> fioletovy verkh-pravo
+    -- [v20 Beta 2.1] Intel Ultra fix: temnee, diagonal 135, chitaemy tekst
     do
         local ultraGrad = Instance.new("UIGradient")
         ultraGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 104, 181)),
-            ColorSequenceKeypoint.new(0.55, Color3.fromRGB(46, 92, 220)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(123, 97, 255)),
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(13, 28, 72)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(28, 48, 120)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(86, 62, 178)),
         })
-        ultraGrad.Rotation = 45
+        ultraGrad.Rotation = 135
         ultraGrad.Parent = window
     end
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
