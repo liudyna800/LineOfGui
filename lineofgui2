@@ -3608,6 +3608,7 @@ end
 
 -- §HANDLE_CHAT
 local function handleQueuedChat(item)
+    local _t0 = os.clock()
     local settings = ClientSettings
     -- world reactions (item.isWorld) работают даже без AutoReply — только Enabled нужен
     if not settings.Enabled then return end
@@ -3973,6 +3974,7 @@ local function handleQueuedChat(item)
     end
 
     if cleanText and cleanText ~= "" then
+        print("[LOB] reply time: " .. string.format("%.1fs", os.clock() - _t0) .. " for: " .. tostring(item.cleaned):sub(1, 40))
         sendBotMessage(cleanText)
     end
 end
