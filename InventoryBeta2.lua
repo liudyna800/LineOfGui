@@ -286,14 +286,33 @@ function InventoryBeta2.DoTake(name)
 	return true, "взял " .. tool.Name .. " в руки"
 end
 
-function InventoryBeta2.DoUse()
+-- Использовать: если предмет назван — взять (даже из рюкзака) и сразу применить.
+-- Без названия — применить то, что уже в руках.
+function InventoryBeta2.DoUse(name)
+	if name and name ~= "" then
+		local tool, where = InventoryBeta2.FindTool(name)
+		if not tool then
+			print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
+			InventoryBeta2.lastScore = nil
+			return false, InventoryBeta2.SayInventory(name)
+		end
+		print("[INV] use-matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "'")
+		if where == "gui" then
+			return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
+		end
+		if where == "backpack" then
+			local hum0 = getHumanoid()
+			if hum0 then pcall(function() hum0:EquipTool(tool) end) end
+			task.wait(0.5)
+		end
+	end
 	local ch = getChar()
-	local tool = ch and ch:FindFirstChildOfClass("Tool")
-	if not tool then
+	local held = ch and ch:FindFirstChildOfClass("Tool")
+	if not held then
 		return false, InventoryBeta2.SayInventory()
 	end
-	pcall(function() tool:Activate() end)
-	return true, "использую " .. tool.Name
+	pcall(function() held:Activate() end)
+	return true, "использую " .. held.Name
 end
 
 function InventoryBeta2.DoPutaway()
