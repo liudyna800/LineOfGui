@@ -1925,6 +1925,7 @@ local function makeSystemPrompt(settings)
             table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
                 "Когда просят предмет: найди его в CURRENT INVENTORY ниже и скопируй ТОЧНОЕ название в тег: просят «бутылку» а там Bottle — тег [DO:take Bottle]; просят «биту» а там Bat — тег [DO:take Bat]. Название в теге всегда буква в букву как в списке" ..
                 "[DO:take <точное название>] взять в руки.\n" ..
+                "«Возьми» = ТОЛЬКО [DO:take]: взял и держишь, ничего не активируешь. [DO:eat] только когда просят съесть или «возьми используй и убери».\n" ..
                 "[DO:use <точное название>] взять (если не в руках) и сразу использовать: «используй биту» — [DO:use Bat].\n" ..
                 "[DO:use] без названия — использовать то, что уже в руках.\n" ..
                 "[DO:putaway] убрать из рук.\n" ..
@@ -3113,7 +3114,7 @@ local ACTION_HANDLERS = {
 -- v20 Beta 2 p.3: Inventory (any Tools, no hardcode)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 13 loaded")
+print("[LineOfBots] Beta2-inv build 14 loaded")
 pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
 end)
