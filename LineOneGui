@@ -1928,7 +1928,7 @@ local function makeSystemPrompt(settings)
                 "[DO:use] использовать то, что уже в руках.\n" ..
                 "[DO:putaway] убрать из рук.\n" ..
                 "[DO:eat <точное название>] съесть: взять, использовать, убрать.\n" ..
-                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы. Текст без тега ничего не делает: написал что сделал, ставь тег, иначе так и скажи что не сделал.")
+                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы. Текст без тега ничего не делает: написал что сделал, ставь тег, иначе так и скажи что не сделал.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.")
         end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -3112,7 +3112,7 @@ local ACTION_HANDLERS = {
 -- v20 Beta 2 p.3: Inventory (any Tools, no hardcode)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 7 loaded")
+print("[LineOfBots] Beta2-inv build 9 loaded")
 pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
 end)
