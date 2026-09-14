@@ -3112,14 +3112,38 @@ local ACTION_HANDLERS = {
 -- v20 Beta 2 p.3: Inventory (any Tools, no hardcode)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
+print("[LineOfBots] Beta2-inv build 7 loaded")
 pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
 end)
 if InventoryBeta2 and ACTION_HANDLERS then
-    ACTION_HANDLERS.take = function(_, arg) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoTake((arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.eat = function(_, arg) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoEat((arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.use = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoUse())) end
-    ACTION_HANDLERS.putaway = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoPutaway())) end
+    ACTION_HANDLERS.take = function(_, arg)
+        if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
+        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
+        local iok, isay = InventoryBeta2.DoTake(iname)
+        print("[INV] take [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
+        if not iok then pcall(sendBotMessage, isay) end
+        return isay
+    end
+    ACTION_HANDLERS.eat = function(_, arg)
+        if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
+        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
+        local iok, isay = InventoryBeta2.DoEat(iname)
+        print("[INV] eat [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
+        if not iok then pcall(sendBotMessage, isay) end
+        return isay
+    end
+    ACTION_HANDLERS.use = function(_)
+        local iok, isay = InventoryBeta2.DoUse()
+        print("[INV] use -> " .. tostring(iok) .. " : " .. tostring(isay))
+        if not iok then pcall(sendBotMessage, isay) end
+        return isay
+    end
+    ACTION_HANDLERS.putaway = function(_)
+        local iok, isay = InventoryBeta2.DoPutaway()
+        print("[INV] putaway -> " .. tostring(iok))
+        return isay
+    end
     ACTION_HANDLERS.inventory = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен" end return InventoryBeta2.SayInventory() end
 end
 
