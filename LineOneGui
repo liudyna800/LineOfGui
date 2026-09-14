@@ -1919,6 +1919,20 @@ local function makeSystemPrompt(settings)
 
     -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
+        if settings.InventoryEnabled ~= false then
+            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
+                "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.
+" ..
+                "[DO:take] — взять предмет в руки (название бери из просьбы: «съешь сэндвич» — сэндвич)
+" ..
+                "[DO:use] — использовать то, что уже в руках
+" ..
+                "[DO:putaway] — убрать предмет из рук
+" ..
+                "[DO:eat] — съесть: взять, использовать, убрать
+" ..
+                "ПРАВИЛА: смотри снимок CURRENT INVENTORY ниже; если нужного предмета нет — скажи «у меня нет этого предмета» и перечисли, что есть; никогда не выдумывай предметы.")
+        end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
                 "DO-TAGS (place at START of reply, 1 per message):\n" ..
@@ -3105,11 +3119,11 @@ pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
 end)
 if InventoryBeta2 and ACTION_HANDLERS then
-    ACTION_HANDLERS.take = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoTake(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.eat = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoEat(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.use = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoUse())) end
-    ACTION_HANDLERS.putaway = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoPutaway())) end
-    ACTION_HANDLERS.inventory = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen" end return InventoryBeta2.SayInventory() end
+    ACTION_HANDLERS.take = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoTake(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.eat = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoEat(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.use = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoUse())) end
+    ACTION_HANDLERS.putaway = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoPutaway())) end
+    ACTION_HANDLERS.inventory = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен" end return InventoryBeta2.SayInventory() end
 end
 
 local function parseActionTag(text)
@@ -3782,6 +3796,18 @@ local function handleQueuedChat(item)
             table.insert(apiMessages, {
                 role    = "system",
                 content = "[AVATAR of " .. tostring(item.displayName or item.name or "?") .. ": " .. avDesc .. ". Describe ONLY listed items, never invent hoods/hats/clothes.]"
+            })
+        end
+
+    end
+
+    -- v20 Beta 2: Inventory snapshot (take/use/putaway/eat)
+    if settings.ActionsEnabled and settings.InventoryEnabled ~= false and InventoryBeta2 then
+        local okInv, invLine = pcall(InventoryBeta2.InventoryLine)
+        if okInv and invLine and invLine ~= "" then
+            table.insert(apiMessages, {
+                role    = "system",
+                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай."
             })
         end
     end
@@ -7384,8 +7410,8 @@ makeToggleRow(
 -- v20 Beta 2: inventar (take/use/putaway/eat)
 makeToggleRow(
     automation,
-    "Inventar: brat i ispolzovat predmety",
-    "Razreshit II brat predmety v ruki ([DO:take]), ispolzovat ([DO:use]), ubirat ([DO:putaway]) i sjedat tsepochkoy ([DO:eat]). Esli predmeta net, bot chestno skazhet i predlozhit drugie.",
+    "🎒 Предметы из инвентаря",
+    "Бот берёт предметы в руки ([DO:take]), использует ([DO:use]), убирает ([DO:putaway]) и съедает цепочкой ([DO:eat]). Если предмета нет — честно скажет и предложит другие.",
     ClientSettings.InventoryEnabled ~= false,
     function(state)
         ClientSettings.InventoryEnabled = state
