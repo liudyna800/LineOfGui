@@ -1,6 +1,6 @@
 -- LineOfBots v20 Beta 2 -- Inventory module (p.3)
--- Любые предметы (Tools), без хардкода названий.
--- Состояния: рюкзак -> руки -> используется -> убрано.
+-- Умный поиск: окончания, транслит, нечёткое сравнение.
+-- бутылки->Бутылка, биту->Bat, бутылку->Bottle.
 
 local InventoryBeta2 = {}
 
@@ -37,7 +37,132 @@ local function norm(s)
 	return s
 end
 
--- Все места где могут лежать Tools: руки, рюкзак, PlayerGui (кастомные инвентари).
+-- Транслит RU->EN.
+local TR = {
+	["а"]="a",["б"]="b",["в"]="v",["г"]="g",["д"]="d",["е"]="e",["ё"]="yo",
+	["ж"]="zh",["з"]="z",["и"]="i",["й"]="y",["к"]="k",["л"]="l",["м"]="m",
+	["н"]="n",["о"]="o",["п"]="p",["р"]="r",["с"]="s",["т"]="t",["у"]="u",
+	["ф"]="f",["х"]="kh",["ц"]="ts",["ч"]="ch",["ш"]="sh",["щ"]="shch",
+	["ъ"]="",["ы"]="y",["ь"]="",["э"]="e",["ю"]="yu",["я"]="ya",
+}
+local function translit(s)
+	local out = {}
+	for _, cp in utf8.codes(s) do
+		local ch = utf8.char(cp)
+		local r = TR[ch]
+		if r ~= nil then table.insert(out, r) else table.insert(out, ch) end
+	end
+	return table.concat(out)
+end
+
+-- Стемминг: срезать русские окончания и английские хвосты.
+local RU_ENDS = { "ами", "ями", "ов", "ев", "ей", "ой", "ем", "ом", "ам", "ям", "ах", "ях", "ую", "юю", "ая", "яя", "ое", "ее", "ые", "ие", "ого", "его", "ому", "ему", "а", "я", "у", "ю", "о", "е", "ы", "и", "й", "ь" }
+local function stem(s)
+	s = norm(s)
+	for _, e in ipairs(RU_ENDS) do
+		if #s > #e + 2 and s:sub(-#e) == e then
+			s = s:sub(1, -#e - 1)
+			break
+		end
+	end
+	if not s:find("[\128-\255]") then
+		if #s > 4 and s:sub(-3) == "ing" then s = s:sub(1, -4)
+		elseif #s > 3 and s:sub(-2) == "es" then s = s:sub(1, -3)
+		elseif #s > 3 and s:sub(-1) == "s" then s = s:sub(1, -2) end
+	end
+	return s
+end
+
+local function consonants(s)
+	return (s:gsub("[aeiouyаеёиоуыэюя]", ""))
+end
+
+-- Левенштейн с ранним выходом.
+local function lev(a, b, lim)
+	lim = lim or 99
+	local la, lb = #a, #b
+	if math.abs(la - lb) > lim then return lim + 1 end
+	if la == 0 then return lb end
+	if lb == 0 then return la end
+	local prev, cur = {}, {}
+	for j = 0, lb do prev[j] = j end
+	for i = 1, la do
+		cur[0] = i
+		local ai = a:sub(i, i)
+		local rowMin = i
+		for j = 1, lb do
+			local cost = (ai == b:sub(j, j)) and 0 or 1
+			local v = math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + cost)
+			cur[j] = v
+			if v < rowMin then rowMin = v end
+		end
+		if rowMin > lim then return lim + 1 end
+		prev, cur = cur, prev
+	end
+	return prev[lb]
+end
+
+-- Мини-словарь: стем RU -> варианты EN (ключи уже в стем-форме).
+local DICT_RU = {
+	["бутылк"] = {"bottle"},
+	["бит"] = {"bat"},
+	["медвед"] = {"teddy", "bear"},
+	["меч"] = {"sword"},
+	["нож"] = {"knife"},
+	["пистолет"] = {"pistol", "gun"},
+	["яблок"] = {"apple"},
+	["сэндвич"] = {"sandwich"},
+	["ед"] = {"food"},
+	["ключ"] = {"key"},
+	["мяч"] = {"ball"},
+	["аптечк"] = {"medkit"},
+	["топор"] = {"axe"},
+	["молот"] = {"hammer"},
+	["фонарик"] = {"flashlight"},
+	["веревк"] = {"rope"},
+	["лопат"] = {"shovel"},
+}
+
+-- Все ключи имени: стем, транслит стема, словарные варианты.
+local function keysOf(raw)
+	local s = stem(raw)
+	local k = { [s] = true }
+	local ts = translit(s)
+	k[ts] = true
+	local d = DICT_RU[s]
+	if d then
+		for _, alt in ipairs(d) do k[alt] = true end
+	end
+	return k
+end
+
+-- Оценка пары: 0 = совпало, 1 = почти (опечатка), 99 = мимо.
+local function pairScore(wantRaw, toolRaw)
+	local w, t = norm(wantRaw), norm(toolRaw)
+	if w == "" or t == "" then return 99 end
+	if w == t then return 0 end
+	if t:find(w, 1, true) or w:find(t, 1, true) then return 0 end
+	local kw, kt = keysOf(wantRaw), keysOf(toolRaw)
+	for k in pairs(kw) do
+		if kt[k] then return 0 end
+	end
+	for k1 in pairs(kw) do
+		for k2 in pairs(kt) do
+			if #k1 >= 3 and #k2 >= 3 and (k1:find(k2, 1, true) or k2:find(k1, 1, true)) then
+				return 0
+			end
+		end
+	end
+	local tw, tt = translit(stem(wantRaw)), translit(stem(toolRaw))
+	if tw ~= "" and tt ~= "" and lev(tw, tt, 1) <= 1 then return 1 end
+	return 99
+end
+
+local function acceptScore(d)
+	return d <= 1
+end
+
+-- Все места где могут лежать Tools: руки, рюкзак, PlayerGui.
 local function scanSources()
 	local out = {}
 	local ch = getChar()
@@ -61,7 +186,6 @@ local function scanSources()
 	return out
 end
 
--- Дамп для консоли (F9): что реально есть и где лежит.
 function InventoryBeta2.DumpAll()
 	local lines = {}
 	local p = getPlayer()
@@ -78,21 +202,22 @@ function InventoryBeta2.DumpAll()
 	return table.concat(lines, "\n")
 end
 
--- Найти Tool по части имени (без учёта регистра). Руки -> рюкзак -> gui.
+-- Найти Tool: лучший по оценке, с приоритетом руки -> рюкзак -> gui.
 function InventoryBeta2.FindTool(name)
 	local want = norm(name)
 	if want == "" then return nil end
 	local order = { hands = 1, backpack = 2, gui = 3 }
-	local best, bestRank = nil, 99
+	local best, bestScore, bestRank = nil, 99, 99
 	for _, e in ipairs(scanSources()) do
-		if norm(e.tool.Name):find(want, 1, true) then
-			local r = order[e.where] or 50
-			if r < bestRank then best, bestRank = e.tool, r end
+		local d = pairScore(want, e.tool.Name)
+		local r = order[e.where] or 50
+		if d < bestScore or (d == bestScore and r < bestRank) then
+			best, bestScore, bestRank = e.tool, d, r
 		end
 	end
-	if best then
+	if best and acceptScore(bestScore) then
 		for _, e in ipairs(scanSources()) do
-			if e.tool == best then return best, e.where end
+			if e.tool == best then return best, e.where, bestScore end
 		end
 	end
 	return nil
@@ -139,18 +264,17 @@ function InventoryBeta2.SayInventory(wantName)
 	return "у меня есть: " .. table.concat(have, ", ")
 end
 
--- Взять в руки.
 function InventoryBeta2.DoTake(name)
-	local tool, where = InventoryBeta2.FindTool(name)
+	local tool, where, score = InventoryBeta2.FindTool(name)
 	if not tool then
 		print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
 		return false, InventoryBeta2.SayInventory(name)
 	end
+	print("[INV] matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "' score=" .. tostring(score))
 	if where == "hands" then
 		return true, "взял " .. tool.Name .. " (уже в руках)"
 	end
 	if where == "gui" then
-		print("[INV] dump gui-tool:\n" .. InventoryBeta2.DumpAll())
 		return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
 	end
 	local hum = getHumanoid()
@@ -160,7 +284,6 @@ function InventoryBeta2.DoTake(name)
 	return true, "взял " .. tool.Name .. " в руки"
 end
 
--- Использовать то, что в руках.
 function InventoryBeta2.DoUse()
 	local ch = getChar()
 	local tool = ch and ch:FindFirstChildOfClass("Tool")
@@ -171,7 +294,6 @@ function InventoryBeta2.DoUse()
 	return true, "использую " .. tool.Name
 end
 
--- Убрать из рук.
 function InventoryBeta2.DoPutaway()
 	local hum = getHumanoid()
 	if hum then
@@ -180,7 +302,6 @@ function InventoryBeta2.DoPutaway()
 	return true, "убрал"
 end
 
--- Съесть цепочкой: взять -> использовать -> убрать.
 function InventoryBeta2.DoEat(name)
 	local ok, msg = InventoryBeta2.DoTake(name)
 	if not ok then
@@ -193,7 +314,6 @@ function InventoryBeta2.DoEat(name)
 	return true, "съел " .. tostring(name) .. " и убрал"
 end
 
--- Вытащить название предмета из просьбы (последнее слово).
 function InventoryBeta2.ExtractName(msg)
 	msg = tostring(msg or "")
 	local m = msg:lower()
