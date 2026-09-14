@@ -1,4 +1,4 @@
--- ╔══════════════════════════════════════════════════════════════════════╗
+﻿-- ╔══════════════════════════════════════════════════════════════════════╗
 -- ║         LINEOFBOTS v20 Beta 2  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
@@ -3096,6 +3096,20 @@ local ACTION_HANDLERS = {
 -- Тег может быть В НАЧАЛЕ, В КОНЦЕ или В СЕРЕДИНЕ текста
 -- Возвращает: actionName | nil,  cleanText (без тега и лишних пробелов)
 -- §PARSE_ACTION
+-- v20 Beta 2 p.3: Inventory (any Tools, no hardcode)
+local InventoryBeta2 = nil
+local _lastUserMsgBeta2 = ''
+pcall(function()
+    InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
+end)
+if InventoryBeta2 and ACTION_HANDLERS then
+    ACTION_HANDLERS.take = function(_) return (select(2, InventoryBeta2.DoTake(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.eat = function(_) return (select(2, InventoryBeta2.DoEat(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.use = function(_) return (select(2, InventoryBeta2.DoUse())) end
+    ACTION_HANDLERS.putaway = function(_) return (select(2, InventoryBeta2.DoPutaway())) end
+    ACTION_HANDLERS.inventory = function(_) return InventoryBeta2.SayInventory() end
+end
+
 local function parseActionTag(text)
     if not text then return nil, "" end
 
@@ -3159,6 +3173,7 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
             end
         end
 
+        _lastUserMsgBeta2 = originalUserMsg or ''
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function()
