@@ -3114,9 +3114,9 @@ local ACTION_HANDLERS = {
 -- v20 Beta 2 p.3: Inventory (any Tools, no hardcode)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 14 loaded")
+print("[LineOfBots] Beta2-inv build 19 loaded")
 pcall(function()
-    InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
+    InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua?v=19'))()
 end)
 if InventoryBeta2 and ACTION_HANDLERS then
     ACTION_HANDLERS.take = function(_, arg)
