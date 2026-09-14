@@ -267,10 +267,12 @@ end
 function InventoryBeta2.DoTake(name)
 	local tool, where, score = InventoryBeta2.FindTool(name)
 	if not tool then
+        InventoryBeta2.lastScore = nil
 		print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
 		return false, InventoryBeta2.SayInventory(name)
 	end
 	print("[INV] matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "' score=" .. tostring(score))
+        InventoryBeta2.lastScore = score
 	if where == "hands" then
 		return true, "взял " .. tool.Name .. " (уже в руках)"
 	end
