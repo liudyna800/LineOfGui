@@ -3114,7 +3114,7 @@ local ACTION_HANDLERS = {
 -- v21 Beta 2 p.3: Inventory INLINE (no HttpGet, no cache skew)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 22 loaded")
+print("[LineOfBots] Beta2-inv build 23 loaded")
 do
 -- LineOfBots v20 Beta 2 -- Inventory module (p.3)
 -- Умный поиск: окончания, транслит, нечёткое сравнение.
@@ -3417,20 +3417,32 @@ function InventoryBeta2.DoTake(name)
 	if not hum then
 		return false, "нет персонажа"
 	end
+	local ch0 = getChar()
+	if ch0 then pcall(function() hum:UnequipTools() end) end
+	task.wait(0.25)
 	for attempt = 1, 3 do
 		pcall(function() hum:EquipTool(tool) end)
 		task.wait(0.4)
 		local chv = getChar()
 		local held = chv and chv:FindFirstChild(tool.Name)
 		if held and held:IsA("Tool") then
-			return true, "взял " .. tool.Name .. " в руки"
+			return true, "взял " .. tool.Name
+		end
+		pcall(function()
+			local chv2 = getChar()
+			if chv2 then tool.Parent = chv2 end
+		end)
+		task.wait(0.4)
+		local chv3 = getChar()
+		local held3 = chv3 and chv3:FindFirstChild(tool.Name)
+		if held3 and held3:IsA("Tool") then
+			return true, "взял " .. tool.Name
 		end
 		task.wait(0.3)
 	end
 	print("[INV] equip FAILED: " .. tool.Name)
 	return false, "не получилось взять " .. tool.Name
 end
-
 -- Использовать: если предмет назван — взять (даже из рюкзака) и сразу применить.
 -- Без названия — применить то, что уже в руках.
 function InventoryBeta2.DoUse(name)
