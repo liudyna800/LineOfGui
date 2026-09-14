@@ -109,69 +109,12 @@ local function lev(a, b, lim)
 	return prev[lb]
 end
 
--- Мини-словарь: стем RU -> варианты EN (ключи уже в стем-форме).
-local DICT_RU = {
-	["бутылк"] = {"bottle"},
-	["бит"] = {"bat"},
-	["медвед"] = {"teddy", "bear"},
-	["меч"] = {"sword"},
-	["нож"] = {"knife"},
-	["пистолет"] = {"pistol", "gun"},
-	["яблок"] = {"apple"},
-	["сэндвич"] = {"sandwich"},
-	["ед"] = {"food"},
-	["ключ"] = {"key"},
-	["аптечк"] = {"medkit"},
-	["топор"] = {"axe"},
-	["молот"] = {"hammer"},
-	["фонарик"] = {"flashlight"},
-	["веревк"] = {"rope"},
-	["лопат"] = {"shovel"},
-	["жел"] = {"jelly"},
-	["мел"] = {"chalk"},
-	["мелок"] = {"chalk"},
-	["молок"] = {"milk"},
-	["хлеб"] = {"bread"},
-	["ручк"] = {"pen"},
-	["карандаш"] = {"pencil"},
-	["бумаг"] = {"paper"},
-	["ластик"] = {"eraser"},
-	["ножниц"] = {"scissors"},
-	["кле"] = {"glue"},
-	["чашк"] = {"cup", "mug"},
-	["вод"] = {"water"},
-	["сок"] = {"juice"},
-	["банан"] = {"banana"},
-	["печень"] = {"cookie"},
-	["конфет"] = {"candy"},
-	["шоколад"] = {"chocolate"},
-	["сыр"] = {"cheese"},
-	["яйц"] = {"egg"},
-	["рыб"] = {"fish"},
-	["мяс"] = {"meat"},
-	["мяч"] = {"ball"},
-	["шар"] = {"balloon"},
-	["воздушн"] = {"balloon"},
-	["зонт"] = {"umbrella"},
-	["вертолет"] = {"helicopter"},
-	["машин"] = {"car", "vehicle"},
-	["самолет"] = {"plane"},
-	["лодк"] = {"boat"},
-	["велосипед"] = {"bike", "bicycle"},
-	["кукл"] = {"doll", "toy"},
-	["игрушк"] = {"toy"},
-}
-
 -- Все ключи имени: стем, транслит стема, словарные варианты.
 local function keysOf(raw)
 	local s = stem(raw)
 	local k = { [s] = true }
 	local ts = translit(s)
 	k[ts] = true
-	local d = DICT_RU[s]
-	if d then
-		for _, alt in ipairs(d) do k[alt] = true end
-	end
 	return k
 end
 
@@ -376,14 +319,25 @@ function InventoryBeta2.DoEat(name)
 	return true, "съел " .. tostring(name) .. " и убрал"
 end
 
+-- Вытащить название предмета из фразы: идёт с конца, пропуская глаголы,
+-- предлоги и слова-места (рюкзак, руки). "взял желе из рюкзака" -> "желе".
 function InventoryBeta2.ExtractName(msg)
 	msg = tostring(msg or "")
 	local m = msg:lower()
-	local last = m:match("%S+%s+(%S+)%s*$") or m:match("(%S+)%s*$") or ""
-	last = last:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
+	local words = {}
+	for w in m:gmatch("%S+") do table.insert(words, w) end
 	local stopVerbs = { ["это"]=1, ["it"]=1, ["меня"]=1, ["его"]=1, ["возьми"]=1, ["возьму"]=1, ["взять"]=1, ["используй"]=1, ["использую"]=1, ["использовать"]=1, ["убери"]=1, ["убрать"]=1, ["убираю"]=1, ["съешь"]=1, ["съесть"]=1, ["скушай"]=1, ["take"]=1, ["use"]=1, ["using"]=1, ["eat"]=1, ["put"]=1, ["away"]=1, ["equip"]=1, ["держи"]=1, ["покажи"]=1, ["дай"]=1 }
-	if last == "" or stopVerbs[last] then
-		return ""
+	local skipNouns = { ["рюкзак"]=1, ["рюкзака"]=1, ["рюкзаке"]=1, ["руки"]=1, ["рук"]=1, ["руку"]=1, ["рука"]=1, ["карман"]=1, ["кармана"]=1, ["меню"]=1, ["инвентарь"]=1, ["инвентаря"]=1 }
+	local preps = { ["из"]=1, ["в"]=1, ["во"]=1, ["на"]=1, ["с"]=1, ["со"]=1, ["к"]=1, ["у"]=1, ["для"]=1, ["про"]=1, ["о"]=1, ["об"]=1, ["от"]=1, ["до"]=1, ["без"]=1, ["через"]=1, ["под"]=1, ["над"]=1 }
+	local last = ""
+	for _ = 1, 5 do
+		if #words == 0 then break end
+		local cand = words[#words]:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
+		if cand ~= "" and not stopVerbs[cand] and not skipNouns[cand] and not preps[cand] then
+			last = cand
+			break
+		end
+		table.remove(words)
 	end
 	return last
 end
