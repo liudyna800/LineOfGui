@@ -249,6 +249,24 @@ function InventoryBeta2.SayInventory(wantName)
 end
 
 function InventoryBeta2.DoTake(name)
+	if name == "something" or name == "anything" or name == "thing" or name == "sth" or name == "что-нибудь" or name == "что-то" or name == "чего-нибудь" then name = "" end
+	if name == "" then
+		local ch0 = getChar()
+		local held0 = ch0 and ch0:FindFirstChildOfClass("Tool")
+		if held0 then InventoryBeta2.lastScore = 0 return true, "в руках уже есть " .. held0.Name end
+		local bp0 = getBackpack()
+		if bp0 then
+			for _, c in ipairs(bp0:GetChildren()) do
+				if c:IsA("Tool") then
+					local hum0 = getHumanoid()
+					if hum0 then pcall(function() hum0:EquipTool(c) end) end
+					InventoryBeta2.lastScore = 1
+					return true, "взял " .. c.Name .. " в руки"
+				end
+			end
+		end
+		return false, InventoryBeta2.SayInventory()
+	end
 	local tool, where, score = InventoryBeta2.FindTool(name)
 	if not tool then
         InventoryBeta2.lastScore = nil
