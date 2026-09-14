@@ -340,7 +340,8 @@ function InventoryBeta2.ExtractName(msg)
 	local m = msg:lower()
 	local last = m:match("%S+%s+(%S+)%s*$") or m:match("(%S+)%s*$") or ""
 	last = last:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
-	if last == "" or last == "это" or last == "it" or last == "меня" or last == "его" then
+	local stopVerbs = { ["это"]=1, ["it"]=1, ["меня"]=1, ["его"]=1, ["возьми"]=1, ["возьму"]=1, ["взять"]=1, ["используй"]=1, ["использую"]=1, ["использовать"]=1, ["убери"]=1, ["убрать"]=1, ["убираю"]=1, ["съешь"]=1, ["съесть"]=1, ["скушай"]=1, ["take"]=1, ["use"]=1, ["using"]=1, ["eat"]=1, ["put"]=1, ["away"]=1, ["equip"]=1, ["держи"]=1, ["покажи"]=1, ["дай"]=1 }
+	if last == "" or stopVerbs[last] then
 		return ""
 	end
 	return last
