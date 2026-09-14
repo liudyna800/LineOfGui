@@ -1923,7 +1923,7 @@ local function makeSystemPrompt(settings)
     if settings.ActionsEnabled then
         if settings.InventoryEnabled ~= false then
             table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
-                "Когда просят предмет: скопируй его ТОЧНОЕ название из CURRENT INVENTORY ниже прямо в тег: [DO:take Bottle]. Название не переводи и не меняй.\n" ..
+                "Когда просят предмет: найди его в CURRENT INVENTORY ниже и скопируй ТОЧНОЕ название в тег: просят «бутылку» а там Bottle — тег [DO:take Bottle]; просят «биту» а там Bat — тег [DO:take Bat]. Название в теге всегда буква в букву как в списке" ..
                 "[DO:take <точное название>] взять в руки.\n" ..
                 "[DO:use] использовать то, что уже в руках.\n" ..
                 "[DO:putaway] убрать из рук.\n" ..
@@ -4106,6 +4106,21 @@ local function handleQueuedChat(item)
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
     local actionName, cleanText, actionArg = parseActionTag(text)
+
+    -- v20 Beta 2: safety net: ИИ заявил действие текстом, но тег не поставил
+    if not actionName and ClientSettings.ActionsEnabled and ClientSettings.InventoryEnabled ~= false and InventoryBeta2 then
+        local lcLow = (cleanText or ""):lower()
+        if not lcLow:find("не взял") and not lcLow:find("не возьму") then
+            if lcLow:find("взял ") or lcLow:find("возьму ") or lcLow:find("положу ") or lcLow:find("использую ") or lcLow:find("съел ") then
+                local autoNm = InventoryBeta2.ExtractName(cleanText)
+                if autoNm ~= "" then
+                    local autoOk, autoSay = InventoryBeta2.DoTake(autoNm)
+                    print("[INV] autotake [" .. tostring(autoNm) .. "] -> " .. tostring(autoOk))
+                    if not autoOk then pcall(sendBotMessage, autoSay) end
+                end
+            end
+        end
+    end
     -- Не выполняем actions от isWorld событий если AutoReply выключен
     if not item.isWorld or settings.AutoReply then
         cleanText = executeAction(actionName, item.player, cleanText, item.cleaned, actionArg)
