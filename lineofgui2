@@ -3114,7 +3114,7 @@ local ACTION_HANDLERS = {
 -- v20 Beta 2 p.3: Inventory (any Tools, no hardcode)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 19 loaded")
+print("[LineOfBots] Beta2-inv build 20 loaded")
 pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua?v=19'))()
 end)
@@ -3125,7 +3125,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         local iok, isay = InventoryBeta2.DoTake(iname)
         if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
         print("[INV] take [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
-        if not iok then pcall(sendBotMessage, isay) end
+        
         return isay
     end
     ACTION_HANDLERS.eat = function(_, arg)
@@ -3134,7 +3134,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         local iok, isay = InventoryBeta2.DoEat(iname)
         if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
         print("[INV] eat [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
-        if not iok then pcall(sendBotMessage, isay) end
+        
         return isay
     end
     ACTION_HANDLERS.use = function(_, arg)
@@ -3142,7 +3142,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if iname == "" then iname = nil end
         local iok, isay = InventoryBeta2.DoUse(iname)
         print("[INV] use [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
-        if not iok then pcall(sendBotMessage, isay) end
+        
         if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
     end
     ACTION_HANDLERS.putaway = function(_)
@@ -4122,7 +4122,7 @@ local function handleQueuedChat(item)
                 if autoNm ~= "" then
                     local autoOk, autoSay = InventoryBeta2.DoTake(autoNm)
                     print("[INV] autotake [" .. tostring(autoNm) .. "] -> " .. tostring(autoOk))
-                    if not autoOk then pcall(sendBotMessage, autoSay) end
+                    
                 end
             end
         end
