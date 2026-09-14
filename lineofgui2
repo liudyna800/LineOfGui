@@ -648,7 +648,8 @@ ClientSettings = {
     MemoryEnabled = true,  -- Включена ли память вообще
     StripHash = true,      -- Убирать символ "#" из сообщений
     UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
-    ActionsEnabled = true,  -- v16: команды и эмоции
+    ActionsEnabled = true,  -- v16:
+    InventoryEnabled = true, -- v20 Beta 2: brat/ispolzovat predmety iz inventarya команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     PlayerAwareness = true, -- v17: ИИ видит кто рядом, с какой стороны, как себя ведёт
@@ -704,6 +705,7 @@ do
     local cs2 = ClientSettings
     if cs2.UsePlayerName   == nil then cs2.UsePlayerName   = true  end
     if cs2.ActionsEnabled  == nil then cs2.ActionsEnabled  = true  end
+    if cs2.InventoryEnabled == nil then cs2.InventoryEnabled = true  end
     if cs2.MemoryEnabled   == nil then cs2.MemoryEnabled   = true  end
     if cs2.AntiSpam        == nil then cs2.AntiSpam        = true  end
     if cs2.ReactToMention  == nil then cs2.ReactToMention  = true  end
@@ -3103,11 +3105,11 @@ pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
 end)
 if InventoryBeta2 and ACTION_HANDLERS then
-    ACTION_HANDLERS.take = function(_) return (select(2, InventoryBeta2.DoTake(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.eat = function(_) return (select(2, InventoryBeta2.DoEat(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.use = function(_) return (select(2, InventoryBeta2.DoUse())) end
-    ACTION_HANDLERS.putaway = function(_) return (select(2, InventoryBeta2.DoPutaway())) end
-    ACTION_HANDLERS.inventory = function(_) return InventoryBeta2.SayInventory() end
+    ACTION_HANDLERS.take = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoTake(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.eat = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoEat(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.use = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoUse())) end
+    ACTION_HANDLERS.putaway = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen (vklyuchi toggl v Osnovnom)" end return (select(2, InventoryBeta2.DoPutaway())) end
+    ACTION_HANDLERS.inventory = function(_) if ClientSettings.InventoryEnabled == false then return "inventar vyklyuchen" end return InventoryBeta2.SayInventory() end
 end
 
 local function parseActionTag(text)
@@ -7376,6 +7378,18 @@ makeToggleRow(
             stopFollowing()
             stopCurrentEmote()
         end
+    end
+)
+
+-- v20 Beta 2: inventar (take/use/putaway/eat)
+makeToggleRow(
+    automation,
+    "Inventar: brat i ispolzovat predmety",
+    "Razreshit II brat predmety v ruki ([DO:take]), ispolzovat ([DO:use]), ubirat ([DO:putaway]) i sjedat tsepochkoy ([DO:eat]). Esli predmeta net, bot chestno skazhet i predlozhit drugie.",
+    ClientSettings.InventoryEnabled ~= false,
+    function(state)
+        ClientSettings.InventoryEnabled = state
+        saveSettings()
     end
 )
 
