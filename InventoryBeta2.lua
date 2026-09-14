@@ -1,13 +1,6 @@
 -- LineOfBots v20 Beta 2 -- Inventory module (p.3)
--- Any Tools, no hardcode. States: backpack -> hands -> used -> put away.
--- Integrates with LineOneGui: ACTION_HANDLERS + system prompt (INVENTORY: ...).
--- Usage from LineOneGui (add after ACTION_HANDLERS table):
---   local InventoryBeta2 = loadstring(game:HttpGet("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua"))()
---   ACTION_HANDLERS.take = function(p, msg) return InventoryBeta2.DoTake(InventoryBeta2.ExtractName(msg)) end
---   ACTION_HANDLERS.use = function() return InventoryBeta2.DoUse() end
---   ACTION_HANDLERS.putaway = function() return InventoryBeta2.DoPutaway() end
---   ACTION_HANDLERS.eat = function(p, msg) return InventoryBeta2.DoEat(InventoryBeta2.ExtractName(msg)) end
---   ACTION_HANDLERS.inventory = function() return InventoryBeta2.SayInventory() end
+-- Любые предметы (Tools), без хардкода названий.
+-- Состояния: рюкзак -> руки -> используется -> убрано.
 
 local InventoryBeta2 = {}
 
@@ -39,7 +32,7 @@ local function norm(s)
 	return s
 end
 
--- Find Tool by (partial, case-insensitive) name. Checks hands first, then backpack.
+-- Найти Tool по части имени (без учёта регистра). Сначала руки, потом рюкзак.
 function InventoryBeta2.FindTool(name)
 	local want = norm(name)
 	if want == "" then return nil end
@@ -84,46 +77,45 @@ end
 function InventoryBeta2.InventoryLine()
 	local backpack, hands = InventoryBeta2.ListInventory()
 	if (not hands) and (#backpack == 0) then
-		return "INVENTORY: empty"
+		return "INVENTORY: пусто"
 	end
 	local parts = {}
-	if hands then table.insert(parts, "in hands: " .. hands) end
-	if #backpack > 0 then table.insert(parts, "backpack: " .. table.concat(backpack, ", ")) end
+	if hands then table.insert(parts, "в руках: " .. hands) end
+	if #backpack > 0 then table.insert(parts, "рюкзак: " .. table.concat(backpack, ", ")) end
 	return "INVENTORY: " .. table.concat(parts, " | ")
 end
 
--- "I don't have X, but I have: ..." answer helper. Returns text for bot to say.
 function InventoryBeta2.SayInventory(wantName)
 	local backpack, hands = InventoryBeta2.ListInventory()
 	local have = {}
 	if hands then table.insert(have, hands) end
 	for _, n in ipairs(backpack) do table.insert(have, n) end
 	if #have == 0 then
-		return "u menya net etogo predmeta"
+		return "у меня нет этого предмета"
 	end
 	if wantName and wantName ~= "" then
-		return "u menya net " .. tostring(wantName) .. ", no est: " .. table.concat(have, ", ") .. " - mogu ispolzovat ikh"
+		return "у меня нет " .. tostring(wantName) .. ", но есть: " .. table.concat(have, ", ") .. " — могу использовать их"
 	end
-	return "u menya est: " .. table.concat(have, ", ")
+	return "у меня есть: " .. table.concat(have, ", ")
 end
 
--- Take into hands (equip). If already in hands -> ok.
+-- Взять в руки.
 function InventoryBeta2.DoTake(name)
 	local tool, where = InventoryBeta2.FindTool(name)
 	if not tool then
 		return false, InventoryBeta2.SayInventory(name)
 	end
 	if where == "hands" then
-		return true, "vzyal " .. tool.Name .. " (uzhe v rukakh)"
+		return true, "взял " .. tool.Name .. " (уже в руках)"
 	end
 	local hum = getHumanoid()
 	if hum then
 		pcall(function() hum:EquipTool(tool) end)
 	end
-	return true, "vzyal " .. tool.Name .. " v ruki"
+	return true, "взял " .. tool.Name .. " в руки"
 end
 
--- Use what is in hands (activate). Extra Activate call works in Delta.
+-- Использовать то, что в руках.
 function InventoryBeta2.DoUse()
 	local ch = getChar()
 	local tool = ch and ch:FindFirstChildOfClass("Tool")
@@ -131,55 +123,41 @@ function InventoryBeta2.DoUse()
 		return false, InventoryBeta2.SayInventory()
 	end
 	pcall(function() tool:Activate() end)
-	return true, "ispolzuyu " .. tool.Name
+	return true, "использую " .. tool.Name
 end
 
--- Put away (unequip all).
+-- Убрать из рук.
 function InventoryBeta2.DoPutaway()
 	local hum = getHumanoid()
 	if hum then
 		pcall(function() hum:UnequipTools() end)
 	end
-	return true, "ubral"
+	return true, "убрал"
 end
 
--- Eat chain: take -> use -> put away. Example: "syesh sendvich".
+-- Съесть цепочкой: взять -> использовать -> убрать.
 function InventoryBeta2.DoEat(name)
 	local ok, msg = InventoryBeta2.DoTake(name)
 	if not ok then
-		return false, msg -- "u menya net ..."
+		return false, msg
 	end
 	task.wait(0.4)
 	InventoryBeta2.DoUse()
 	task.wait(0.8)
 	InventoryBeta2.DoPutaway()
-	return true, "syel " .. tostring(name) .. " i ubral"
+	return true, "съел " .. tostring(name) .. " и убрал"
 end
 
--- Pull item name from player message. Takes last word after take/eat/use verbs (RU+EN).
+-- Вытащить название предмета из просьбы (последнее слово).
 function InventoryBeta2.ExtractName(msg)
 	msg = tostring(msg or "")
 	local m = msg:lower()
-	-- "syesh sendvich" / "vozm sendvich" / "vzyal sendvich" / "take sandwich" / "eat sandwich"
-	local last = m:match("[%z\1-\127\128-\255]+%s+([%z\1-\127\128-\255]+)%s*$")
-	if last then
-		last = last:gsub("[%p%c]+$", "")
-		if last ~= "" and last ~= "eto" and last ~= "it" then
-			return last
-		end
+	local last = m:match("%S+%s+(%S+)%s*$") or m:match("(%S+)%s*$") or ""
+	last = last:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
+	if last == "" or last == "это" or last == "it" or last == "меня" or last == "его" then
+		return ""
 	end
-	return ""
+	return last
 end
-
--- System prompt block (honest inventory behavior, any items).
-InventoryBeta2.PROMPT_RU = [[
-INVESTORY RULES (strogo):
-- Pered otvetom smotri na stroku INVENTORY: (背包 + руки).
-- Lyubye predmety - po imeni Tool, bez hardkoda nazvaniy.
-- "vozmi X" = tolko v ruki ([DO:take]). "ispolzuy" = to chto v rukakh ([DO:use]). "uberi" = ubrat iz ruk ([DO:putaway]). "syesh X" = srazu tsepochka vzyal->ispolzoval->ubral ([DO:eat]).
-- Esli nuzhnogo net: skazhi "u menya net etogo predmeta". Esli est drugie: perechisli "no est: ..." i predlozhi ikh.
-- Nikogda ne vrid chto predmet est, esli ego net v INVENTORY.
-DO-tegi: [DO:take] [DO:use] [DO:putaway] [DO:eat] [DO:inventory].
-]]
 
 return InventoryBeta2
