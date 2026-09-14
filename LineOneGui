@@ -3114,7 +3114,7 @@ local ACTION_HANDLERS = {
 -- v21 Beta 2 p.3: Inventory INLINE (no HttpGet, no cache skew)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 21 loaded")
+print("[LineOfBots] Beta2-inv build 22 loaded")
 do
 -- LineOfBots v20 Beta 2 -- Inventory module (p.3)
 -- Умный поиск: окончания, транслит, нечёткое сравнение.
@@ -3377,7 +3377,21 @@ function InventoryBeta2.DoTake(name)
 			for _, c in ipairs(bp0:GetChildren()) do
 				if c:IsA("Tool") then
 					local hum0 = getHumanoid()
-					if hum0 then pcall(function() hum0:EquipTool(c) end) end
+					local took = false
+					if hum0 then
+						for att = 1, 3 do
+							pcall(function() hum0:EquipTool(c) end)
+							task.wait(0.4)
+							local chv0 = getChar()
+							local hd0 = chv0 and chv0:FindFirstChild(c.Name)
+							if hd0 and hd0:IsA("Tool") then took = true break end
+							task.wait(0.3)
+						end
+					end
+					if not took then
+						print("[INV] equip FAILED: " .. c.Name)
+						return false, "не получилось взять " .. c.Name
+					end
 					InventoryBeta2.lastScore = 1
 					return true, "взял " .. c.Name .. " в руки"
 				end
@@ -3400,10 +3414,21 @@ function InventoryBeta2.DoTake(name)
 		return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
 	end
 	local hum = getHumanoid()
-	if hum then
-		pcall(function() hum:EquipTool(tool) end)
+	if not hum then
+		return false, "нет персонажа"
 	end
-	return true, "взял " .. tool.Name .. " в руки"
+	for attempt = 1, 3 do
+		pcall(function() hum:EquipTool(tool) end)
+		task.wait(0.4)
+		local chv = getChar()
+		local held = chv and chv:FindFirstChild(tool.Name)
+		if held and held:IsA("Tool") then
+			return true, "взял " .. tool.Name .. " в руки"
+		end
+		task.wait(0.3)
+	end
+	print("[INV] equip FAILED: " .. tool.Name)
+	return false, "не получилось взять " .. tool.Name
 end
 
 -- Использовать: если предмет назван — взять (даже из рюкзака) и сразу применить.
@@ -3421,9 +3446,8 @@ function InventoryBeta2.DoUse(name)
 			return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
 		end
 		if where == "backpack" then
-			local hum0 = getHumanoid()
-			if hum0 then pcall(function() hum0:EquipTool(tool) end) end
-			task.wait(0.5)
+			local okT, msgT = InventoryBeta2.DoTake(name)
+			if not okT then return false, msgT end
 		end
 	end
 	local ch = getChar()
