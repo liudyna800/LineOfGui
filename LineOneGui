@@ -1928,7 +1928,7 @@ local function makeSystemPrompt(settings)
                 "[DO:use] использовать то, что уже в руках.\n" ..
                 "[DO:putaway] убрать из рук.\n" ..
                 "[DO:eat <точное название>] съесть: взять, использовать, убрать.\n" ..
-                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы. Текст без тега ничего не делает: написал что сделал, ставь тег, иначе так и скажи что не сделал.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.")
+                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы. Текст без тега ничего не делает: написал что сделал, ставь тег, иначе так и скажи что не сделал.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.\n" .. "Опечатка или обрезанное слово («бутылк», «биту») — тоже предмет: ищи самый похожий из CURRENT INVENTORY и ставь тег с ЕГО точным названием. «Нет» говоришь только если совсем ничего похожего нет.")
         end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -3121,6 +3121,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
         local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoTake(iname)
+        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
         print("[INV] take [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         if not iok then pcall(sendBotMessage, isay) end
         return isay
@@ -3129,6 +3130,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
         local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoEat(iname)
+        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
         print("[INV] eat [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         if not iok then pcall(sendBotMessage, isay) end
         return isay
