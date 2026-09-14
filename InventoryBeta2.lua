@@ -76,6 +76,13 @@ end
 local function consonants(s)
 	return (s:gsub("[aeiouyаеёиоуыэюя]", ""))
 end
+-- Skel
+local function skel(s)
+	local t = translit(stem(s))
+	t = t:gsub("(.)%1+", "%1")
+	t = consonants(t)
+	return t
+end
 
 -- Левенштейн с ранним выходом.
 local function lev(a, b, lim)
@@ -177,6 +184,8 @@ local function pairScore(wantRaw, toolRaw)
 	end
 	local tw, tt = translit(stem(wantRaw)), translit(stem(toolRaw))
 	if tw ~= "" and tt ~= "" and lev(tw, tt, 1) <= 1 then return 1 end
+	local sw2, st2 = skel(wantRaw), skel(toolRaw)
+	if sw2 ~= "" and st2 ~= "" and #sw2 >= 2 and #st2 >= 2 and lev(sw2, st2, 1) <= 1 then return 1 end
 	return 99
 end
 
