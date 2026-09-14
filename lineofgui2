@@ -1922,13 +1922,13 @@ local function makeSystemPrompt(settings)
     -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
         if settings.InventoryEnabled ~= false then
-            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
-                "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
-                "[DO:take] взять предмет в руки.\n" ..
+            table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
+                "Когда просят предмет: скопируй его ТОЧНОЕ название из CURRENT INVENTORY ниже прямо в тег: [DO:take Bottle]. Название не переводи и не меняй.\n" ..
+                "[DO:take <точное название>] взять в руки.\n" ..
                 "[DO:use] использовать то, что уже в руках.\n" ..
-                "[DO:putaway] убрать предмет из рук.\n" ..
-                "[DO:eat] съесть: взять, использовать, убрать.\n" ..
-                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы.")
+                "[DO:putaway] убрать из рук.\n" ..
+                "[DO:eat <точное название>] съесть: взять, использовать, убрать.\n" ..
+                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы. Текст без тега ничего не делает: написал что сделал, ставь тег, иначе так и скажи что не сделал.")
         end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -3116,8 +3116,8 @@ pcall(function()
     InventoryBeta2 = loadstring(game:HttpGet('https://raw.githubusercontent.com/liudyna800/LineOfGui/main/InventoryBeta2.lua'))()
 end)
 if InventoryBeta2 and ACTION_HANDLERS then
-    ACTION_HANDLERS.take = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoTake(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
-    ACTION_HANDLERS.eat = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoEat(InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.take = function(_, arg) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoTake((arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
+    ACTION_HANDLERS.eat = function(_, arg) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoEat((arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)))) end
     ACTION_HANDLERS.use = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoUse())) end
     ACTION_HANDLERS.putaway = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end return (select(2, InventoryBeta2.DoPutaway())) end
     ACTION_HANDLERS.inventory = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен" end return InventoryBeta2.SayInventory() end
@@ -3131,10 +3131,13 @@ local function parseActionTag(text)
 
     -- Ищем тег регистронезависимо напрямую в text
     -- Паттерн 1: закрытый тег [DO:xxx] или [do:xxx]
-    local tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)%s*%]")
+    local tagStart, tagEnd, captured, argRaw = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)%s*([^%]]-)%]")
     if tagStart then
+    local actionArg = nil
         action = captured:lower()
         cleanText = text:sub(1, tagStart - 1) .. text:sub(tagEnd + 1)
+        actionArg = argRaw and argRaw:match("^%s*(.-)%s*$") or ""
+        if actionArg == "" then actionArg = nil end
     else
         -- Паттерн 2: незакрытый тег — Gemini иногда забывает закрывающую скобку
         tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)")
@@ -3146,18 +3149,18 @@ local function parseActionTag(text)
     end
 
     -- Убираем ВСЕ оставшиеся DO-теги
-    cleanText = cleanText:gsub("%[%s*[Dd][Oo]:%s*[%w_]+%s*%]?", "")
+    cleanText = cleanText:gsub("%[%s*[Dd][Oo]:%s*[%w_]+[^%]]-%]?", "")
     -- Убираем случайные висячие скобки [  ] после чистки
     cleanText = cleanText:gsub("%[%s*%]", "")
     -- Trim
     cleanText = cleanText:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 
-    return action, cleanText
+    return action, cleanText, actionArg
 end
 
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
 -- originalUserMsg — оригинальное сообщение пользователя (для умного парсинга прыжков)
-local function executeAction(actionName, sourcePlayer, cleanText, originalUserMsg)
+local function executeAction(actionName, sourcePlayer, cleanText, originalUserMsg, actionArg)
     if actionName and ClientSettings.ActionsEnabled then
         -- Умный парсинг числа прыжков: если ИИ написал [DO:jump] но в сообщении было число
         -- Например: "прыгни 5 раз" → ИИ пишет [DO:jump] → мы видим 5 → вызываем doJump(5)
@@ -3190,7 +3193,7 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function()
-                local ok, err = pcall(handler, sourcePlayer)
+                local ok, err = pcall(handler, sourcePlayer, actionArg)
                 if not ok and ClientSettings.Debug then
                     print("[LOB] action error [" .. tostring(actionName) .. "]: " .. tostring(err))
                 end
@@ -4078,10 +4081,10 @@ local function handleQueuedChat(item)
 
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
-    local actionName, cleanText = parseActionTag(text)
+    local actionName, cleanText, actionArg = parseActionTag(text)
     -- Не выполняем actions от isWorld событий если AutoReply выключен
     if not item.isWorld or settings.AutoReply then
-        cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
+        cleanText = executeAction(actionName, item.player, cleanText, item.cleaned, actionArg)
     else
         -- Просто убираем тег из текста без выполнения
         cleanText = cleanText or text
