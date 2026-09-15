@@ -1922,7 +1922,7 @@ local function makeSystemPrompt(settings)
     -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
         if settings.InventoryEnabled ~= false then
-            table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
+            table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). На take/eat/use отвечай ТОЛЬКО тегом без текста (как searchanim): [DO:take Bottle]. Система выполнит действие и вернёт тебе результат — и только тогда ты напишешь ответ игроку.\n" ..
                 "Когда просят предмет: найди его в CURRENT INVENTORY ниже и скопируй ТОЧНОЕ название в тег: просят «бутылку» а там Bottle — тег [DO:take Bottle]; просят «биту» а там Bat — тег [DO:take Bat]. НЕПРАВИЛЬНО: [DO:take бутылку]. ПРАВИЛЬНО: [DO:take Bottle]. Название в теге всегда как в списке, перевод запрещён. Ищешь как анимации через searchanim: список выше = каталог, точное название из него = твой запрос" ..
                 "[DO:take <точное название>] взять в руки.\n" ..
                 "«Возьми» = ТОЛЬКО [DO:take]: взял и держишь, ничего не активируешь. [DO:eat] только когда просят съесть или «возьми используй и убери».\n" ..
@@ -3114,7 +3114,7 @@ local ACTION_HANDLERS = {
 -- v21 Beta 2 p.3: Inventory INLINE (no HttpGet, no cache skew)
 local InventoryBeta2 = nil
 local _lastUserMsgBeta2 = ''
-print("[LineOfBots] Beta2-inv build 23 loaded")
+print("[LineOfBots] Beta2-inv build 24 loaded")
 do
 -- LineOfBots v20 Beta 2 -- Inventory module (p.3)
 -- Умный поиск: окончания, транслит, нечёткое сравнение.
@@ -3519,7 +3519,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
         local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoTake(iname)
-        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
+        
         print("[INV] take [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         
         return isay
@@ -3528,7 +3528,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
         local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoEat(iname)
-        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
+        
         print("[INV] eat [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         
         return isay
@@ -3539,7 +3539,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         local iok, isay = InventoryBeta2.DoUse(iname)
         print("[INV] use [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         
-        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
+        
     end
     ACTION_HANDLERS.putaway = function(_)
         local iok, isay = InventoryBeta2.DoPutaway()
@@ -4508,6 +4508,72 @@ local function handleQueuedChat(item)
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
     local actionName, cleanText, actionArg = parseActionTag(text)
+    -- v21 Beta 2: INVENTORY ROUND-TRIP (mirror of EMOTE_SEARCH_ROUNDTRIP).
+    -- AI answers take/eat/use with tag ONLY; code executes for real, feeds the
+    -- true outcome back, and only the SECOND reply reaches the player chat.
+    -- This closes the "AI narrates results before execution" hole.
+    if (not item.isWorld or settings.AutoReply) and (actionName == "take" or actionName == "eat" or actionName == "use") and ClientSettings.ActionsEnabled and ClientSettings.InventoryEnabled ~= false and InventoryBeta2 then
+        local invName = (actionArg ~= "" and actionArg) or InventoryBeta2.ExtractName(item.cleaned)
+        local invOk, invSay = false, ""
+        if actionName == "take" then
+            invOk, invSay = InventoryBeta2.DoTake(invName)
+        elseif actionName == "eat" then
+            invOk, invSay = InventoryBeta2.DoEat(invName)
+        else
+            local useNm = invName
+            if useNm == "" then useNm = nil end
+            invOk, invSay = InventoryBeta2.DoUse(useNm)
+        end
+        print("[INV] roundtrip [" .. actionName .. " " .. tostring(invName) .. "] -> " .. tostring(invOk))
+        local invResult
+        if invOk then
+            invResult = "[INVENTORY RESULT for your [DO:" .. actionName .. " " .. tostring(invName) .. "] tag]: SUCCESS (" .. tostring(invSay) .. "). Now reply to the player in 1 short sentence confirming what you did. No [DO:] tags this time."
+        else
+            invResult = "[INVENTORY RESULT for your [DO:" .. actionName .. " " .. tostring(invName) .. "] tag]: FAILED (" .. tostring(invSay) .. "). Reply to the player in 1 short honest sentence about what happened. No [DO:] tags this time."
+        end
+        local secondMessagesInv = {}
+        for _, m in ipairs(apiMessages) do table.insert(secondMessagesInv, m) end
+        table.insert(secondMessagesInv, { role = "assistant", content = text })
+        table.insert(secondMessagesInv, { role = "system", content = invResult })
+        local secondPayloadInv = {
+            model       = model,
+            temperature = payload.temperature,
+            max_tokens  = maxTok,
+            messages    = secondMessagesInv,
+        }
+        if model:find("^qwen/") then
+            secondPayloadInv.reasoning_effort = "none"
+            secondPayloadInv.temperature = nil
+        end
+        local textInv, errInv
+        do
+            local doneInv = false
+            task.spawn(function()
+                textInv, errInv = providerRouter:chatCompletions(secondPayloadInv)
+                doneInv = true
+            end)
+            local waitedInv = 0
+            while not doneInv and waitedInv < timeoutSec do
+                task.wait(0.5)
+                waitedInv = waitedInv + 0.5
+            end
+            if not doneInv then
+                warn("[INV] roundtrip: second provider call timed out, falling back to first reply.")
+                textInv = nil
+            end
+        end
+        if textInv and textInv ~= "" then
+            textInv = textInv:match("^%s*(.-)%s*$") or textInv
+            textInv = textInv:gsub("%[NAME:[^%]]*%]%s*", "")
+            textInv = textInv:gsub("%[%s*[Dd][Oo]:%s*[Tt]ake[^%]]-%]%s*", "")
+            textInv = textInv:gsub("%[%s*[Dd][Oo]:%s*[Ee]at[^%]]-%]%s*", "")
+            textInv = textInv:gsub("%[%s*[Dd][Oo]:%s*[Uu]se[^%]]-%]%s*", "")
+            textInv = textInv:gsub("%[%s*[Dd][Oo]:%s*[Pp]utaway[^%]]-%]%s*", "")
+            textInv = textInv:gsub("%[%s*[Dd][Oo]:%s*[Ii]nventory[^%]]-%]%s*", "")
+            text = textInv
+            actionName, cleanText, actionArg = parseActionTag(text)
+        end
+    end
 
     -- v20 Beta 2: safety net: ИИ заявил действие текстом, но тег не поставил
     if not actionName and ClientSettings.ActionsEnabled and ClientSettings.InventoryEnabled ~= false and InventoryBeta2 then
