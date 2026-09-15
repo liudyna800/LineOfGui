@@ -64,11 +64,12 @@ local GENERIC = {
 	it=true, this=true, that=true,
 }
 
--- RU word (translitted) -> EN tool name. butylka finds Bottle.
+-- RU word (translitted) -> EN tool name. butylka finds Bottle, bita finds Bat.
 local RU_ALIASES_T = {
-	butylka="bottle", butylku="bottle", butylki="bottle",
+	butylka="bottle", butylku="bottle", butylki="bottle", butylkoi="bottle",
+	bita="bat", bitu="bat", bity="bat", bitoy="bat",
 	myach="ball", myachik="ball",
-	mech="sword", nozh="knife", pistolet="gun", oruzhie="gun",
+	mech="sword", nozh="knife", nozhi="knife", pistolet="gun", oruzhie="gun",
 	eda="food", yabloko="apple", khleb="bread", voda="water",
 	fonar="flashlight", fonarik="flashlight", lampa="flashlight",
 	lopata="shovel", kirka="pickaxe", topor="axe", molot="hammer",
@@ -301,7 +302,7 @@ function InventoryBeta2.InventoryLine()
 		if #bp > 0 then table.insert(parts, "backpack: " .. table.concat(bp, ", ")) end
 		inv = "INVENTORY: " .. table.concat(parts, " | ")
 	end
-	return inv .. " | Take ONLY from this list. RU->EN: butylka=bottle, myach=ball, mech=sword. If user says vozmi butylku and list has Bottle reply [DO:take Bottle]."
+	return inv .. " | Take ONLY from this list. RU->EN: butylka=bottle, bita=bat, myach=ball, mech=sword. If user says vozmi butylku and list has Bottle reply [DO:take Bottle]."
 end
 
 function InventoryBeta2.SayInventory(wantName)
