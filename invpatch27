@@ -1,0 +1,532 @@
+-- invpatch27: UNIVERSAL inventory + world pickup, from scratch. Pure ASCII.
+-- Hands+Backpack (Tool) + Workspace pickup (Tool / ProximityPrompt / ClickDetector / touch).
+local InventoryBeta2 = nil
+local _lastUserMsgBeta2 = ''
+
+do
+InventoryBeta2 = {}
+InventoryBeta2.lastScore = nil
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local _busy = false
+
+local function getPlayer() return Players.LocalPlayer end
+local function getChar()
+	local p = getPlayer()
+	return p and p.Character
+end
+local function getHum()
+	local ch = getChar()
+	if not ch then return nil end
+	local h = ch:FindFirstChildOfClass("Humanoid")
+	if not h or h.Health <= 0 then return nil end
+	return h
+end
+local function getRoot()
+	local ch = getChar()
+	return ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso"))
+end
+local function getBackpack()
+	local p = getPlayer()
+	return p and p:FindFirstChildOfClass("Backpack")
+end
+
+local function norm(s)
+	s = tostring(s or ""):lower()
+	s = s:gsub("\226\128\166", " "):gsub("%s+", " ")
+	s = s:match("^%s*(.-)%s*$") or ""
+	s = s:gsub("\208([\144-\175])", function(b) return "\208" .. string.char(b:byte() + 32) end)
+	s = s:gsub("\208\129", "\209\145")
+	s = s:gsub("\209\145", "\208\181")
+	return s
+end
+
+local RU2EN = {
+	["\208\176"]="a",["\208\177"]="b",["\208\178"]="v",["\208\179"]="g",["\208\180"]="d",["\208\181"]="e",["\208\182"]="zh",
+	["\208\183"]="z",["\208\184"]="i",["\208\185"]="y",["\208\186"]="k",["\208\187"]="l",["\208\188"]="m",["\208\189"]="n",
+	["\208\190"]="o",["\208\191"]="p",["\209\128"]="r",["\209\129"]="s",["\209\130"]="t",["\209\131"]="u",["\209\132"]="f",
+	["\209\133"]="kh",["\209\134"]="ts",["\209\135"]="ch",["\209\136"]="sh",["\209\137"]="shch",["\209\138"]="",
+	["\209\139"]="y",["\209\140"]="",["\209\141"]="e",["\209\142"]="yu",["\209\143"]="ya",
+}
+local function translit(s)
+	local out = {}
+	for u in tostring(s or ""):gmatch("([%z\1-\127\194-\244][\128-\191]*)") do
+		local low = u:lower()
+		local r = RU2EN[low]
+		if r ~= nil then table.insert(out, r) else table.insert(out, low) end
+	end
+	return table.concat(out)
+end
+
+local GENERIC = {
+	something=true, anything=true, thing=true, sth=true, item=true,
+	it=true, this=true, that=true,
+}
+
+-- RU word (translitted) -> EN tool name. butylka finds Bottle.
+local RU_ALIASES_T = {
+	butylka="bottle", butylku="bottle", butylki="bottle",
+	myach="ball", myachik="ball",
+	mech="sword", nozh="knife", pistolet="gun", oruzhie="gun",
+	eda="food", yabloko="apple", khleb="bread", voda="water",
+	fonar="flashlight", fonarik="flashlight", lampa="flashlight",
+	lopata="shovel", kirka="pickaxe", topor="axe", molot="hammer",
+	verevka="rope", klyuch="key", karta="map", kniga="book",
+	stul="chair", yashchik="crate", korobka="box", palka="stick",
+	kamen="stone", derevo="wood", tsvetok="flower",
+	mashina="car", mashinka="car",
+}
+local function alias(s)
+	local t = translit(norm(s))
+	if RU_ALIASES_T[t] then return RU_ALIASES_T[t] end
+	return norm(s)
+end
+
+-- 0 exact, 1 prefix, 2 substring (raw + translit), 99 miss.
+local function matchScore(want, toolName)
+	local w, t = norm(want), norm(toolName)
+	if w == "" or t == "" then return 99 end
+	w = alias(w)
+	t = alias(t)
+	if w == t then return 0 end
+	if t:sub(1, #w) == w then return 1 end
+	if t:find(w, 1, true) then return 2 end
+	local wt, tt = translit(w), translit(t)
+	if wt ~= "" and tt ~= "" then
+		if wt == tt then return 0 end
+		if tt:sub(1, #wt) == wt then return 1 end
+		if tt:find(wt, 1, true) or wt:find(tt, 1, true) then return 2 end
+	end
+	return 99
+end
+
+local function listOwned()
+	local out = {}
+	local ch = getChar()
+	if ch then
+		for _, c in ipairs(ch:GetChildren()) do
+			if c:IsA("Tool") then table.insert(out, {tool=c, where="hands"}) end
+		end
+	end
+	local bp = getBackpack()
+	if bp then
+		for _, c in ipairs(bp:GetChildren()) do
+			if c:IsA("Tool") then table.insert(out, {tool=c, where="backpack"}) end
+		end
+	end
+	return out
+end
+
+local function heldTool()
+	local ch = getChar()
+	return ch and ch:FindFirstChildOfClass("Tool") or nil
+end
+
+function InventoryBeta2.FindTool(name)
+	local want = norm(name)
+	if want == "" or GENERIC[want] then return nil end
+	local best, bw, bs, bl = nil, nil, 99, math.huge
+	for _, e in ipairs(listOwned()) do
+		if e.tool and e.tool.Parent then
+			local d = matchScore(want, e.tool.Name)
+			if d < bs or (d == bs and #e.tool.Name < bl) then
+				best, bw, bs, bl = e.tool, e.where, d, #e.tool.Name
+			end
+		end
+	end
+	if best and bs <= 2 then return best, bw, bs end
+	return nil
+end
+
+local function getPickPos(inst)
+	if inst:IsA("Tool") then
+		local h = inst:FindFirstChild("Handle", true) or inst:FindFirstChildWhichIsA("BasePart", true)
+		if h then return h.Position, h end
+	end
+	if inst:IsA("BasePart") then return inst.Position, inst end
+	if inst:IsA("Model") then
+		local pp = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
+		if pp then return pp.Position, pp end
+	end
+	return nil, nil
+end
+
+local function findInWorld(name, maxDist)
+	local want = norm(name)
+	if want == "" or GENERIC[want] then return nil end
+	local root = getRoot()
+	if not root then return nil end
+	maxDist = maxDist or 80
+	local best, bestPos, bestPart, bestScore, bestDist = nil, nil, nil, 99, math.huge
+	local checked = 0
+	for _, d in ipairs(Workspace:GetDescendants()) do
+		checked = checked + 1
+		if checked > 4000 then break end
+		local pickable = false
+		if d:IsA("Tool") then pickable = true
+		elseif d:IsA("ProximityPrompt") then pickable = true
+		elseif d:IsA("ClickDetector") then pickable = true
+		end
+		local cand = nil
+		if pickable then
+			cand = (d:IsA("ProximityPrompt") or d:IsA("ClickDetector")) and d.Parent or d
+		elseif d:IsA("Tool") then
+			cand = d
+		elseif (d:IsA("BasePart") or d:IsA("Model")) and matchScore(want, d.Name) <= 2 then
+			cand = d
+		end
+		if cand then
+			local holderName = cand.Name or ""
+			local dName = matchScore(want, holderName)
+			local parentScore = 99
+			if cand.Parent then parentScore = matchScore(want, cand.Parent.Name or "") end
+			local s = math.min(dName, parentScore)
+			if s <= 2 then
+				local pos, part = getPickPos(cand)
+				if pos then
+					local dist = (root.Position - pos).Magnitude
+					if dist <= maxDist and (s < bestScore or (s == bestScore and dist < bestDist)) then
+						best, bestPos, bestPart, bestScore, bestDist = cand, pos, part, s, dist
+					end
+				end
+			end
+		end
+	end
+	if best then return best, bestPos, bestPart, bestScore end
+	return nil
+end
+
+local function walkTo(pos, timeout)
+	local hum = getHum()
+	local root = getRoot()
+	if not hum or not root or not pos then return false end
+	if (root.Position - pos).Magnitude < 4 then return true end
+	timeout = timeout or 8
+	pcall(function() hum:MoveTo(pos) end)
+	local t0 = os.clock()
+	local done = false
+	local conn
+	conn = hum.MoveToFinished:Connect(function(r) done = r end)
+	while os.clock() - t0 < timeout do
+		if not getHum() then break end
+		local r = getRoot()
+		if r and (r.Position - pos).Magnitude <= 6 then done = true break end
+		task.wait(0.15)
+	end
+	pcall(function() if conn then conn:Disconnect() end end)
+	pcall(function() hum:MoveTo(getRoot().Position) end)
+	return done
+end
+
+local function firePrompt(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then return false end
+	local ok = pcall(function()
+		if fireproximityprompt then fireproximityprompt(prompt)
+		else
+			prompt:InputHoldBegin()
+			task.wait(prompt.HoldDuration + 0.2)
+			prompt:InputHoldEnd()
+		end
+	end)
+	return ok
+end
+
+local function fireClick(det)
+	if not det or not det:IsA("ClickDetector") then return false end
+	local ok = pcall(function()
+		if fireclickdetector then fireclickdetector(det) end
+	end)
+	return ok
+end
+
+local function touchPart(part)
+	local root = getRoot()
+	if not root or not part then return end
+	pcall(function()
+		if firetouchinterest then
+			firetouchinterest(root, part, 0)
+			task.wait(0.15)
+			firetouchinterest(root, part, 1)
+		end
+	end)
+end
+
+local function waitOwned(name, timeout)
+	timeout = timeout or 3
+	local t0 = os.clock()
+	while os.clock() - t0 < timeout do
+		local t = InventoryBeta2.FindTool(name)
+		if t then return t end
+		task.wait(0.2)
+	end
+	return nil
+end
+
+local function lock()
+	if _busy then return false end
+	_busy = true
+	return true
+end
+local function unlock() _busy = false end
+
+function InventoryBeta2.DumpAll()
+	local lines = {"player=" .. tostring(getPlayer() and getPlayer().Name or "?")}
+	for _, e in ipairs(listOwned()) do
+		table.insert(lines, "OWNED [" .. e.where .. "]: " .. e.tool.Name)
+	end
+	if #listOwned() == 0 then table.insert(lines, "OWNED: none") end
+	local bp = getBackpack()
+	table.insert(lines, "backpack=" .. tostring(bp ~= nil) .. " alive=" .. tostring(getHum() ~= nil))
+	return table.concat(lines, "\n")
+end
+
+function InventoryBeta2.ListInventory()
+	local bp, hands = {}, nil
+	for _, e in ipairs(listOwned()) do
+		if e.where == "hands" and not hands then hands = e.tool.Name end
+		if e.where == "backpack" then table.insert(bp, e.tool.Name) end
+	end
+	table.sort(bp)
+	return bp, hands, {}
+end
+
+function InventoryBeta2.InventoryLine()
+	local bp, hands = InventoryBeta2.ListInventory()
+	local inv
+	if not hands and #bp == 0 then inv = "INVENTORY: empty"
+	else
+		local parts = {}
+		if hands then table.insert(parts, "in hands: " .. hands) end
+		if #bp > 0 then table.insert(parts, "backpack: " .. table.concat(bp, ", ")) end
+		inv = "INVENTORY: " .. table.concat(parts, " | ")
+	end
+	return inv .. " | Take ONLY from this list. RU->EN: butylka=bottle, myach=ball, mech=sword. If user says vozmi butylku and list has Bottle reply [DO:take Bottle]."
+end
+
+function InventoryBeta2.SayInventory(wantName)
+	local bp, hands = InventoryBeta2.ListInventory()
+	local have = {}
+	if hands then table.insert(have, hands) end
+	for _, n in ipairs(bp) do table.insert(have, n) end
+	if #have == 0 then return "Inventory is empty" end
+	if wantName and norm(wantName) ~= "" then
+		return "No '" .. tostring(wantName) .. "'. I have: " .. table.concat(have, ", ")
+	end
+	return "I have: " .. table.concat(have, ", ")
+end
+
+function InventoryBeta2.NearbyLine(maxN)
+	maxN = maxN or 8
+	local root = getRoot()
+	if not root then return "NEARBY: unknown" end
+	local found = {}
+	local checked = 0
+	for _, d in ipairs(Workspace:GetDescendants()) do
+		checked = checked + 1
+		if checked > 4000 then break end
+		local cand = nil
+		if d:IsA("Tool") then cand = d
+		elseif d:IsA("ProximityPrompt") and d.Parent then cand = d.Parent
+		elseif d:IsA("ClickDetector") and d.Parent then cand = d.Parent
+		end
+		if cand and cand.Name then
+			local pos = nil
+			pcall(function()
+				if cand:IsA("Tool") then
+					local h = cand:FindFirstChild("Handle", true) or cand:FindFirstChildWhichIsA("BasePart", true)
+					if h then pos = h.Position end
+				elseif cand:IsA("BasePart") then pos = cand.Position
+				elseif cand:IsA("Model") then
+					local pp = cand.PrimaryPart or cand:FindFirstChildWhichIsA("BasePart", true)
+					if pp then pos = pp.Position end
+				end
+			end)
+			if pos then
+				local dist = (root.Position - pos).Magnitude
+				if dist <= 80 then
+					table.insert(found, {name=cand.Name, dist=dist})
+				end
+			end
+		end
+	end
+	if #found == 0 then return "NEARBY: nothing pickable within 80m" end
+	table.sort(found, function(a,b) return a.dist < b.dist end)
+	local parts = {}
+	for i = 1, math.min(maxN, #found) do
+		table.insert(parts, found[i].name .. "(" .. math.floor(found[i].dist) .. "m)")
+	end
+	return "NEARBY pickable: " .. table.concat(parts, ", ")
+end
+
+local function waitEquipped(tool, timeout)
+	timeout = timeout or 1.5
+	local t0 = os.clock()
+	while os.clock() - t0 < timeout do
+		local ch = getChar()
+		if ch and tool and tool.Parent == ch then return true end
+		task.wait(0.05)
+	end
+	local ch = getChar()
+	return ch and tool and tool.Parent == ch or false
+end
+
+function InventoryBeta2.DoTake(name)
+	name = norm(name or "")
+	if GENERIC[name] then name = "" end
+	if not lock() then return false, "Busy, try again" end
+	local function done(ok, msg, score)
+		InventoryBeta2.lastScore = score
+		unlock()
+		return ok, msg
+	end
+	local hum = getHum()
+	if not hum then return done(false, "Character not ready") end
+
+	if name == "" then
+		local h0 = heldTool()
+		if h0 then return done(true, "Holding " .. h0.Name, 0) end
+		local owned = {}
+		for _, e in ipairs(listOwned()) do
+			if e.where == "backpack" then table.insert(owned, e.tool) end
+		end
+		if #owned == 0 then return done(false, InventoryBeta2.SayInventory()) end
+		table.sort(owned, function(a,b) return a.Name < b.Name end)
+		pcall(function() hum:EquipTool(owned[1]) end)
+		if waitEquipped(owned[1]) then return done(true, "Took " .. owned[1].Name, 1) end
+		return done(false, "Failed to take " .. owned[1].Name)
+	end
+
+	local tool, where, score = InventoryBeta2.FindTool(name)
+	if tool then
+		if where == "hands" then return done(true, "Holding " .. tool.Name, score) end
+		local h = heldTool()
+		if h and h ~= tool then
+			pcall(function() hum:UnequipTools() end)
+			task.wait(0.15)
+			hum = getHum()
+			if not hum then return done(false, "Character not ready") end
+		end
+		if not tool.Parent then return done(false, InventoryBeta2.SayInventory(name)) end
+		pcall(function() hum:EquipTool(tool) end)
+		if waitEquipped(tool) then return done(true, "Took " .. tool.Name, score) end
+		return done(false, "Failed to take " .. tool.Name)
+	end
+
+	unlock()
+	local target, pos, part, wscore = findInWorld(name, 80)
+	if not target then
+		lock()
+		print("[INV] world: '" .. tostring(name) .. "' not found")
+		local r1, r2 = done(false, InventoryBeta2.SayInventory(name))
+		return r1, r2
+	end
+	print("[INV] world matched '" .. tostring(name) .. "' -> '" .. target:GetFullName() .. "'")
+	local okWalk = walkTo(pos, 10)
+	if not okWalk then
+		if not lock() then return false, "Busy, try again" end
+		local r1, r2 = done(false, "Can't reach " .. target.Name)
+		return r1, r2
+	end
+	local prompt = target:IsA("ProximityPrompt") and target or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+	local click = target:IsA("ClickDetector") and target or target:FindFirstChildWhichIsA("ClickDetector", true)
+	if prompt then firePrompt(prompt) task.wait(0.4) end
+	if click then fireClick(click) task.wait(0.4) end
+	if part and part:IsA("BasePart") then
+		touchPart(part)
+		task.wait(0.6)
+	end
+	local got = waitOwned(name, 3)
+	if not lock() then
+		if got then return true, "Took " .. got.Name end
+		return false, InventoryBeta2.SayInventory(name)
+	end
+	if got then
+		local h2 = getHum()
+		if h2 and got.Parent ~= getChar() then
+			pcall(function() h2:EquipTool(got) end)
+			waitEquipped(got, 1)
+		end
+		local r1, r2 = done(true, "Took " .. got.Name, wscore)
+		return r1, r2
+	end
+	local r1, r2 = done(false, "No '" .. tostring(name) .. "' nearby. " .. InventoryBeta2.SayInventory())
+	return r1, r2
+end
+
+function InventoryBeta2.DoUse(name)
+	local want = norm(name or "")
+	if GENERIC[want] then want = "" end
+	if want ~= "" then
+		local t = InventoryBeta2.FindTool(want)
+		if not t then
+			local okT, msgT = InventoryBeta2.DoTake(want)
+			if not okT then return false, msgT end
+		elseif t.Parent ~= getChar() then
+			local okT, msgT = InventoryBeta2.DoTake(want)
+			if not okT then return false, msgT end
+		end
+	end
+	if not lock() then return false, "Busy, try again" end
+	local function done(ok, msg) unlock() return ok, msg end
+	local held = heldTool()
+	if not held then return done(false, InventoryBeta2.SayInventory()) end
+	if want ~= "" and matchScore(want, held.Name) > 2 then
+		return done(false, "Holding " .. held.Name .. ", not " .. want)
+	end
+	if held.Enabled == false then return done(false, held.Name .. " is disabled") end
+	local okAct = pcall(function() held:Activate() end)
+	task.wait(0.25)
+	if not okAct then return done(false, "Failed to use " .. held.Name) end
+	return done(true, "Used " .. held.Name)
+end
+
+function InventoryBeta2.DoPutaway()
+	if not lock() then return false, "Busy, try again" end
+	local hum = getHum()
+	if hum then pcall(function() hum:UnequipTools() end) end
+	task.wait(0.15)
+	unlock()
+	if heldTool() then return false, "Failed to put away" end
+	return true, "Put away"
+end
+
+function InventoryBeta2.DoEat(name)
+	local want = norm(name or "")
+	local ok, msg = InventoryBeta2.DoTake(want)
+	if not ok then return false, msg end
+	local before = heldTool()
+	local okU, msgU = InventoryBeta2.DoUse()
+	if not okU then return false, msgU end
+	task.wait(0.5)
+	if not before or not before.Parent then
+		return true, "Ate " .. tostring(want ~= "" and want or (before and before.Name or "item"))
+	end
+	if heldTool() then InventoryBeta2.DoPutaway() end
+	return true, "Ate " .. tostring(want ~= "" and want or (before and before.Name or "item"))
+end
+
+function InventoryBeta2.ExtractName(msg)
+	msg = tostring(msg or ""):lower()
+	msg = msg:gsub("\208([\144-\175])", function(b) return "\208" .. string.char(b:byte() + 32) end)
+	msg = msg:gsub("\208\129", "\209\145")
+	local words = {}
+	for w in msg:gmatch("%S+") do table.insert(words, w) end
+	local stop = {
+		take=1,use=1,eat=1,equip=1,put=1,away=1,give=1,show=1,hold=1,get=1,
+		grab=1,drop=1,please=1,now=1,the=1,a=1,an=1,my=1,your=1,it=1,
+		vozmi=1,vozmy=1,vozmite=1,beri=1,day=1,daite=1,mne=1,pozhaluysta=1,
+		pokazhi=1,podnimi=1,podberi=1,vypei=1,sesh=1,skushay=1,ispolzuy=1,vklyuchi=1,
+		ego=1,ee=1,eto=1,etu=1,etot=1,
+	}
+	for i = #words, math.max(1, #words - 4), -1 do
+		local cand = words[i]:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
+		if cand ~= "" and not stop[translit(cand)] and not GENERIC[cand] then
+			local a = alias(cand)
+			if a ~= "" then return a end
+			return cand
+		end
+	end
+	return ""
+end
+end
