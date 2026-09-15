@@ -1,21 +1,25 @@
--- lineofgui2 build 27: cache-proof loader. No stale copy inside.
--- Always fetches fresh main file with unique URL, verifies build 27 marker.
-print("[LineOfBots] lineofgui2 loader build 27")
-local stamp = "b27_" .. tostring(os.time())
-local urls = {
-    "https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOfBotsBeta2.lua?build=27_" .. stamp,
-    "https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOneGui?build=27_" .. stamp,
-}
-local src = nil
-for _, u in ipairs(urls) do
-    local ok, res = pcall(function() return game:HttpGet(u) end)
-    if ok and type(res) == "string" and #res > 50000 and res:find("Beta2%-inv build 27") then
-        print("[LineOfBots] loader: fresh build 27 OK (" .. #res .. " bytes)")
-        src = res
-        break
-    else
-        print("[LineOfBots] loader: skip stale/short response")
-    end
+-- lineofgui2 build 27: patch-loader. Base + invpatch27 splice, no stale copy.
+print("[LineOfBots] lineofgui2 build 27 patch-loader")
+local stamp = tostring(os.time())
+local function get(url)
+	local ok, res = pcall(function() return game:HttpGet(url, true) end)
+	if not ok then ok, res = pcall(function() return game:HttpGet(url) end) end
+	if ok and type(res) == "string" then return res end
+	return nil
 end
-assert(src, "[LineOfBots] FAILED: fresh build 27 not on GitHub yet. Upload LineOfBotsBeta2.fixed.lua content to LineOfBotsBeta2.lua first.")
-loadstring(src)()
+local base = get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOfBotsBeta2.lua?b27=" .. stamp)
+	or get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOneGui?b27=" .. stamp)
+assert(base and #base > 400000, "[LineOfBots] FAILED: base not fetched")
+local patch = get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/invpatch27?b27=" .. stamp)
+assert(patch and #patch > 8000 and patch:find("UNIVERSAL inventory", 1, true), "[LineOfBots] FAILED: invpatch27 not fetched")
+local s = base:find("v21 Beta 2 p.3: Inventory INLINE", 1, true)
+local e = base:find("v25 INVENTORY wiring", 1, true)
+assert(s and e and e > s, "[LineOfBots] FAILED: markers missing")
+base = base:sub(1, s - 1) .. patch .. "\n" .. base:sub(e)
+base = base:gsub("build 26 LOADED", "build 27 LOADED")
+base = base:gsub("Beta2%-inv build 26 loaded", "Beta2-inv build 27 loaded")
+base = base:gsub("v20 beta 2, build 26", "v20 beta 2, build 27")
+print("[LineOfBots] patched OK (" .. #base .. " bytes), starting")
+local fn, err = loadstring(base)
+assert(fn, "[LineOfBots] FAILED loadstring: " .. tostring(err))
+fn()
