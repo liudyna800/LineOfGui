@@ -12,9 +12,13 @@ local base = get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/Li
 assert(base and #base > 400000, "[LineOfBots] FAILED: base not fetched")
 local patch = get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/invpatch27?b27=" .. stamp)
 assert(patch and #patch > 8000 and patch:find("UNIVERSAL inventory", 1, true), "[LineOfBots] FAILED: invpatch27 not fetched")
-local s = base:find("v21 Beta 2 p.3: Inventory INLINE", 1, true)
-local e = base:find("v25 INVENTORY wiring", 1, true)
-assert(s and e and e > s, "[LineOfBots] FAILED: markers missing")
+local s0 = base:find("v21 Beta 2 p.3: Inventory INLINE", 1, true)
+local e0 = base:find("v25 INVENTORY wiring", 1, true)
+assert(s0 and e0 and e0 > s0, "[LineOfBots] FAILED: markers missing")
+local s = s0
+while s > 1 and base:sub(s - 1, s - 1) ~= "\n" do s = s - 1 end
+local e = e0
+while e > 1 and base:sub(e - 1, e - 1) ~= "\n" do e = e - 1 end
 base = base:sub(1, s - 1) .. patch .. "\n" .. base:sub(e)
 base = base:gsub("build 26 LOADED", "build 27 LOADED")
 base = base:gsub("Beta2%-inv build 26 loaded", "Beta2-inv build 27 loaded")
