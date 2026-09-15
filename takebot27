@@ -1,0 +1,414 @@
+-- takebot27: standalone item bot. No AI, no keys, no base file.
+-- Hears chat commands and acts at once: take / use / eat / putaway / inventory. RU+EN.
+print("[TakeBot] build 27 start")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LP = Players.LocalPlayer
+assert(LP, "[TakeBot] no LocalPlayer")
+
+local function norm(s)
+	s = tostring(s or ""):lower()
+	s = s:gsub("%s+", " ")
+	s = s:match("^%s*(.-)%s*$") or ""
+	s = s:gsub("\208([\144-\175])", function(b) return "\208" .. string.char(b:byte() + 32) end)
+	s = s:gsub("\208\129", "\209\145")
+	s = s:gsub("\209\145", "\208\181")
+	return s
+end
+
+local RU2EN = {
+	["\208\176"]="a",["\208\177"]="b",["\208\178"]="v",["\208\179"]="g",["\208\180"]="d",["\208\181"]="e",["\208\182"]="zh",
+	["\208\183"]="z",["\208\184"]="i",["\208\185"]="y",["\208\186"]="k",["\208\187"]="l",["\208\188"]="m",["\208\189"]="n",
+	["\208\190"]="o",["\208\191"]="p",["\209\128"]="r",["\209\129"]="s",["\209\130"]="t",["\209\131"]="u",["\209\132"]="f",
+	["\209\133"]="kh",["\209\134"]="ts",["\209\135"]="ch",["\209\136"]="sh",["\209\137"]="shch",["\209\138"]="",
+	["\209\139"]="y",["\209\140"]="",["\209\141"]="e",["\209\142"]="yu",["\209\143"]="ya",
+}
+local function translit(s)
+	local out = {}
+	for u in tostring(s or ""):gmatch("([%z\1-\127\194-\244][\128-\191]*)") do
+		local low = u:lower()
+		local r = RU2EN[low]
+		if r ~= nil then table.insert(out, r) else table.insert(out, low) end
+	end
+	return table.concat(out)
+end
+
+local GENERIC = { something=true, anything=true, thing=true, sth=true, item=true, it=true, this=true, that=true }
+local RU_ALIASES_T = {
+	butylka="bottle", butylku="bottle", butylki="bottle", butylkoi="bottle",
+	bita="bat", bitu="bat", bity="bat", bitoy="bat",
+	myach="ball", myachik="ball",
+	mech="sword", nozh="knife", nozhi="knife", pistolet="gun", oruzhie="gun",
+	eda="food", yabloko="apple", khleb="bread", voda="water",
+	fonar="flashlight", fonarik="flashlight", lampa="flashlight",
+	lopata="shovel", kirka="pickaxe", topor="axe", molot="hammer",
+	verevka="rope", klyuch="key", karta="map", kniga="book",
+	stul="chair", yashchik="crate", korobka="box", palka="stick",
+	kamen="stone", derevo="wood", tsvetok="flower",
+	mashina="car", mashinka="car",
+}
+local function alias(s)
+	local t = translit(norm(s))
+	if RU_ALIASES_T[t] then return RU_ALIASES_T[t] end
+	return norm(s)
+end
+
+local function matchScore(want, toolName)
+	local w, t = norm(want), norm(toolName)
+	if w == "" or t == "" then return 99 end
+	w = alias(w)
+	t = alias(t)
+	if w == t then return 0 end
+	if t:sub(1, #w) == w then return 1 end
+	if t:find(w, 1, true) then return 2 end
+	local wt, tt = translit(w), translit(t)
+	if wt ~= "" and tt ~= "" then
+		if wt == tt then return 0 end
+		if tt:sub(1, #wt) == wt then return 1 end
+		if tt:find(wt, 1, true) or wt:find(tt, 1, true) then return 2 end
+	end
+	return 99
+end
+
+local function getChar()
+	return LP and LP.Character or nil
+end
+local function getHum()
+	local ch = getChar()
+	if not ch then return nil end
+	local h = ch:FindFirstChildOfClass("Humanoid")
+	if not h or h.Health <= 0 then return nil end
+	return h
+end
+local function getRoot()
+	local ch = getChar()
+	return ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso")) or nil
+end
+local function getBackpack()
+	return LP and LP:FindFirstChildOfClass("Backpack") or nil
+end
+
+local function listOwned()
+	local out = {}
+	local ch = getChar()
+	if ch then
+		for _, c in ipairs(ch:GetChildren()) do
+			if c:IsA("Tool") then table.insert(out, {tool=c, where="hands"}) end
+		end
+	end
+	local bp = getBackpack()
+	if bp then
+		for _, c in ipairs(bp:GetChildren()) do
+			if c:IsA("Tool") then table.insert(out, {tool=c, where="backpack"}) end
+		end
+	end
+	return out
+end
+local function heldTool()
+	local ch = getChar()
+	return ch and ch:FindFirstChildOfClass("Tool") or nil
+end
+local function findOwned(name)
+	local want = norm(name)
+	if want == "" or GENERIC[want] then return nil end
+	local best, bw, bs, bl = nil, nil, 99, math.huge
+	for _, e in ipairs(listOwned()) do
+		if e.tool and e.tool.Parent then
+			local d = matchScore(want, e.tool.Name)
+			if d < bs or (d == bs and #e.tool.Name < bl) then
+				best, bw, bs, bl = e.tool, e.where, d, #e.tool.Name
+			end
+		end
+	end
+	if best and bs <= 2 then return best, bw, bs end
+	return nil
+end
+
+local function say(text)
+	text = tostring(text or "")
+	if text == "" then return end
+	local sent = false
+	pcall(function()
+		local chs = TextChatService:FindFirstChild("TextChannels")
+		local c = chs and (chs:FindFirstChild("RBXGeneral") or chs:FindFirstChildWhichIsA("TextChannel"))
+		if c then c:SendAsync(text) sent = true end
+	end)
+	if not sent then pcall(function()
+		local ev = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+		local r = ev and ev:FindFirstChild("SayMessageRequest")
+		if r then r:FireServer(text, "All") end
+	end) end
+end
+
+local function getPickPos(inst)
+	if inst:IsA("Tool") then
+		local h = inst:FindFirstChild("Handle", true) or inst:FindFirstChildWhichIsA("BasePart", true)
+		if h then return h.Position, h end
+	end
+	if inst:IsA("BasePart") then return inst.Position, inst end
+	if inst:IsA("Model") then
+		local pp = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
+		if pp then return pp.Position, pp end
+	end
+	return nil, nil
+end
+
+local function findInWorld(name, maxDist)
+	local want = norm(name)
+	if want == "" or GENERIC[want] then return nil end
+	local root = getRoot()
+	if not root then return nil end
+	maxDist = maxDist or 80
+	local best, bestPos, bestPart, bestScore, bestDist = nil, nil, nil, 99, math.huge
+	local checked = 0
+	for _, d in ipairs(Workspace:GetDescendants()) do
+		checked = checked + 1
+		if checked > 4000 then break end
+		local pickable = d:IsA("Tool") or d:IsA("ProximityPrompt") or d:IsA("ClickDetector")
+		local cand = nil
+		if pickable then
+			cand = (d:IsA("ProximityPrompt") or d:IsA("ClickDetector")) and d.Parent or d
+		elseif (d:IsA("BasePart") or d:IsA("Model")) and matchScore(want, d.Name) <= 2 then
+			cand = d
+		end
+		if cand then
+			local s = matchScore(want, cand.Name or "")
+			if cand.Parent then s = math.min(s, matchScore(want, cand.Parent.Name or "")) end
+			if s <= 2 then
+				local pos, part = getPickPos(cand)
+				if pos then
+					local dist = (root.Position - pos).Magnitude
+					if dist <= maxDist and (s < bestScore or (s == bestScore and dist < bestDist)) then
+						best, bestPos, bestPart, bestScore, bestDist = cand, pos, part, s, dist
+					end
+				end
+			end
+		end
+	end
+	if best then return best, bestPos, bestPart, bestScore end
+	return nil
+end
+
+local function walkTo(pos, timeout)
+	local hum = getHum()
+	local root = getRoot()
+	if not hum or not root or not pos then return false end
+	if (root.Position - pos).Magnitude < 4 then return true end
+	timeout = timeout or 8
+	pcall(function() hum:MoveTo(pos) end)
+	local t0 = os.clock()
+	local done = false
+	local conn = hum.MoveToFinished:Connect(function(r) done = r end)
+	while os.clock() - t0 < timeout do
+		if not getHum() then break end
+		local r = getRoot()
+		if r and (r.Position - pos).Magnitude <= 6 then done = true break end
+		task.wait(0.15)
+	end
+	pcall(function() if conn then conn:Disconnect() end end)
+	local rr = getRoot()
+	if rr then pcall(function() hum:MoveTo(rr.Position) end) end
+	return done
+end
+
+local function waitOwned(name, timeout)
+	timeout = timeout or 3
+	local t0 = os.clock()
+	while os.clock() - t0 < timeout do
+		local t = findOwned(name)
+		if t then return t end
+		task.wait(0.2)
+	end
+	return nil
+end
+local function waitEquipped(tool, timeout)
+	timeout = timeout or 1.5
+	local t0 = os.clock()
+	while os.clock() - t0 < timeout do
+		local ch = getChar()
+		if ch and tool and tool.Parent == ch then return true end
+		task.wait(0.05)
+	end
+	local ch = getChar()
+	return ch and tool and tool.Parent == ch or false
+end
+
+local function invText()
+	local bp, hands, have = {}, nil, {}
+	for _, e in ipairs(listOwned()) do
+		if e.where == "hands" and not hands then hands = e.tool.Name end
+		if e.where == "backpack" then table.insert(bp, e.tool.Name) end
+	end
+	if hands then table.insert(have, hands) end
+	for _, n in ipairs(bp) do table.insert(have, n) end
+	if #have == 0 then return "inventory pustoi" end
+	return "u menya: " .. table.concat(have, ", ")
+end
+
+local function doTake(name)
+	name = norm(name or "")
+	local hum = getHum()
+	if not hum then return false, "personazh ne gotov" end
+	if name ~= "" then
+		local tool, where = findOwned(name)
+		if tool then
+			if where ~= "hands" then
+				local h = heldTool()
+				if h and h ~= tool then pcall(function() hum:UnequipTools() end) task.wait(0.15) hum = getHum() end
+				if not hum then return false, "personazh ne gotov" end
+				if tool.Parent then pcall(function() hum:EquipTool(tool) end) end
+				if waitEquipped(tool) then return true, tool.Name end
+				return false, "ne poluchilos vzyat " .. tool.Name
+			end
+			return true, tool.Name
+		end
+		local target, pos, part = findInWorld(name, 80)
+		if not target then return false, "net ryadom, " .. invText() end
+		say("idu k " .. target.Name)
+		if not walkTo(pos, 10) then return false, "ne doshel do " .. target.Name end
+		local prompt = target:IsA("ProximityPrompt") and target or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+		local click = target:IsA("ClickDetector") and target or target:FindFirstChildWhichIsA("ClickDetector", true)
+		if prompt then pcall(function() if fireproximityprompt then fireproximityprompt(prompt) else prompt:InputHoldBegin() task.wait(prompt.HoldDuration + 0.2) prompt:InputHoldEnd() end end) task.wait(0.4) end
+		if click then pcall(function() if fireclickdetector then fireclickdetector(click) end end) task.wait(0.4) end
+		if part and part:IsA("BasePart") then
+			local root = getRoot()
+			if root then pcall(function() if firetouchinterest then firetouchinterest(root, part, 0) task.wait(0.15) firetouchinterest(root, part, 1) end end) end
+			task.wait(0.6)
+		end
+		local got = waitOwned(name, 3)
+		if got then
+			local h2 = getHum()
+			if h2 and got.Parent ~= getChar() then pcall(function() h2:EquipTool(got) end) waitEquipped(got, 1) end
+			return true, got.Name
+		end
+		return false, "net ryadom, " .. invText()
+	end
+	local h0 = heldTool()
+	if h0 then return true, h0.Name end
+	return false, invText()
+end
+
+local function doUse(name)
+	local want = norm(name or "")
+	if want ~= "" then
+		local t = findOwned(want)
+		if not t or t.Parent ~= getChar() then
+			local ok, msg = doTake(want)
+			if not ok then return false, msg end
+		end
+	end
+	local held = heldTool()
+	if not held then return false, invText() end
+	if want ~= "" and matchScore(want, held.Name) > 2 then
+		return false, "derzhu " .. held.Name
+	end
+	if held.Enabled == false then return false, held.Name .. " vyklyuchen" end
+	pcall(function() held:Activate() end)
+	task.wait(0.25)
+	return true, held.Name
+end
+
+local V_TAKE = { vozmi=1, vozmite=1, beri=1, derzhi=1, na=1, podnimi=1, podberi=1, take=1, grab=1, get=1, equip=1 }
+local V_USE = { ispolzuy=1, vklyuchi=1, yuzai=1, use=1, using=1 }
+local V_EAT = { sesh=1, skushay=1, vypei=1, eat=1 }
+local V_PUT = { uberi=1, polozhi=1, vykin=1, put=1, away=1 }
+local V_INV = { inventory=1, inventar=1, pokazhi=1 }
+local V_STOP = { pozhaluysta=1, mne=1, ego=1, ee=1, eto=1, etu=1, etot=1, seychas=1, suda=1, vot=1, etot=1 }
+
+local function parse(text)
+	local msg = norm(text)
+	local words = {}
+	for w in msg:gmatch("%S+") do table.insert(words, w) end
+	if #words == 0 then return nil, "" end
+	local tw = {}
+	for _, w in ipairs(words) do table.insert(tw, translit(w)) end
+	local cmd = nil
+	for _, w in ipairs(tw) do
+		if V_TAKE[w] then cmd = "take" break end
+		if V_USE[w] then cmd = "use" break end
+		if V_EAT[w] then cmd = "eat" break end
+		if V_PUT[w] then cmd = "put" break end
+		if V_INV[w] then cmd = "inv" break end
+	end
+	if not cmd then return nil, "" end
+	if cmd == "inv" or cmd == "put" then return cmd, "" end
+	for i = #words, 1, -1 do
+		local c = words[i]:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
+		local t = translit(c)
+		if c ~= "" and not V_TAKE[t] and not V_USE[t] and not V_EAT[t] and not V_PUT[t] and not V_INV[t] and not V_STOP[t] and not GENERIC[c] then
+			return cmd, c
+		end
+	end
+	return cmd, ""
+end
+
+local cool = {}
+local seen = {}
+local function onMsg(plr, text)
+	if not plr or plr == LP then return end
+	text = tostring(text or "")
+	if text == "" then return end
+	local key = plr.UserId .. "|" .. text
+	if seen[key] and os.clock() - seen[key] < 5 then return end
+	seen[key] = os.clock()
+	if os.clock() - (cool[plr.UserId] or -99) < 3 then return end
+	local cmd, obj = parse(text)
+	if not cmd then return end
+	cool[plr.UserId] = os.clock()
+	print("[TakeBot] cmd=" .. cmd .. " obj=" .. tostring(obj) .. " from=" .. plr.Name)
+	task.spawn(function()
+		if cmd == "inv" then say(invText()) return end
+		if cmd == "put" then
+			local hum = getHum()
+			if hum then pcall(function() hum:UnequipTools() end) end
+			task.wait(0.15)
+			say("ubral")
+			return
+		end
+		if cmd == "take" then
+			local ok, res = doTake(obj)
+			say((ok and "vzyal " or "") .. res)
+			return
+		end
+		if cmd == "use" then
+			local ok, res = doUse(obj)
+			say((ok and "ispolzuyu " or "") .. res)
+			return
+		end
+		if cmd == "eat" then
+			local ok, res = doTake(obj)
+			if not ok then say(res) return end
+			local before = heldTool()
+			local okU, resU = doUse()
+			if not okU then say(resU) return end
+			task.wait(0.5)
+			if before and before.Parent and heldTool() then
+				local hum = getHum()
+				if hum then pcall(function() hum:UnequipTools() end) end
+			end
+			say("syel " .. (before and before.Name or tostring(obj)))
+			return
+		end
+	end)
+end
+
+pcall(function()
+	TextChatService.MessageReceived:Connect(function(m)
+		local uid = m.TextSource and m.TextSource.UserId
+		local plr = uid and Players:GetPlayerByUserId(uid) or nil
+		if plr then onMsg(plr, m.Text) end
+	end)
+end)
+pcall(function()
+	local ev = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+	local r = ev and ev:FindFirstChild("OnMessageDoneFiltering")
+	if r then r.OnClientEvent:Connect(function(d)
+		d = d or {}
+		local plr = (d.SpeakerUserId and Players:GetPlayerByUserId(d.SpeakerUserId))
+			or (d.FromSpeaker and Players:FindFirstChild(d.FromSpeaker)) or nil
+		if plr then onMsg(plr, d.Message) end
+	end) end
+end)
+print("[TakeBot] build 27 listening")
