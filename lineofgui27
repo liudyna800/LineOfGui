@@ -1,0 +1,20 @@
+-- lineofgui27 build 27: fresh file, zero cache history. Cache-proof loader.
+print("[LineOfBots] lineofgui27 loader build 27")
+local stamp = "b27_" .. tostring(os.time())
+local urls = {
+    "https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOfBotsBeta2.lua?build=27_" .. stamp,
+    "https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOneGui?build=27_" .. stamp,
+}
+local src = nil
+for _, u in ipairs(urls) do
+    local ok, res = pcall(function() return game:HttpGet(u) end)
+    if ok and type(res) == "string" and #res > 50000 and res:find("Beta2%-inv build 27") then
+        print("[LineOfBots] loader: fresh build 27 OK (" .. #res .. " bytes)")
+        src = res
+        break
+    else
+        print("[LineOfBots] loader: skip stale/short response")
+    end
+end
+assert(src, "[LineOfBots] FAILED: fresh build 27 not on GitHub yet. Upload LineOfBotsBeta2.fixed.lua content to LineOfBotsBeta2.lua first.")
+loadstring(src)()
