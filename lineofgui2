@@ -176,13 +176,26 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "GiantRaidHop"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999
+gui.Enabled = true
+pcall(function() gui.IgnoreGuiInset = true end)
+-- PlayerGui ПЕРВЫМ: в нём тапы работают всегда. gethui/CoreGui на части
+-- Delta глотают ввод - кнопки видно, но нажатия не доходят.
 local parentOk = false
 pcall(function()
-    local h = nil
-    if gethui then h = gethui() end
-    if h then gui.Parent = h parentOk = true end
+    local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
+    if pg then gui.Parent = pg parentOk = true end
 end)
-if not parentOk then pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end) end
+if not parentOk then
+    pcall(function()
+        local h = nil
+        if gethui then h = gethui() end
+        if h then gui.Parent = h parentOk = true end
+    end)
+end
+if not parentOk or not gui.Parent then
+    pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
+end
 if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 if getgenv then getgenv()._GiantRaidGui = gui end
 
@@ -191,8 +204,9 @@ Main.Size = UDim2.new(0, 280, 0, 366)
 Main.Position = UDim2.new(0.5, -140, 0.15, 0)
 Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 Main.BorderSizePixel = 0
-Main.Active = true
-Main.Draggable = true
+Main.Active = false
+Main.Draggable = false
+Main.ClipsDescendants = false
 Main.Parent = gui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
 local st = Instance.new("UIStroke", Main)
@@ -208,7 +222,29 @@ Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Active = true
 Title.Parent = Main
+-- Ручной драг за заголовок: штатный Draggable фрейма на части устройств глотает тапы
+do
+    local dragging = false
+    local dragStart, frameStart = nil, nil
+    Title.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            frameStart = Main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            Main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + d.X, frameStart.Y.Scale, frameStart.Y.Offset + d.Y)
+        end
+    end)
+end
 
 local Status = Instance.new("TextLabel")
 Status.Size = UDim2.new(1, -16, 0, 60)
@@ -219,6 +255,7 @@ Status.TextSize = 12
 Status.TextColor3 = Color3.new(1, 1, 1)
 Status.TextWrapped = true
 Status.Text = "Сканирую..."
+Status.Active = false
 Status.Parent = Main
 Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
 
@@ -231,19 +268,38 @@ local function Btn(txt, y, cb)
     b.Font = Enum.Font.GothamBold
     b.TextSize = 13
     b.TextColor3 = Color3.new(1, 1, 1)
+    b.AutoButtonColor = true
+    b.Active = true
+    b.BorderSizePixel = 0
+    b.ClipsDescendants = false
+    b.ZIndex = 5
     b.Parent = Main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Оба сигнала сразу: на части executor'ов глохнет один из них.
+    -- Три сигнала + сырой ввод: хоть один да дойдёт на любом executor'е.
     -- tick-дебаунс гасит двойное срабатывание за один тап.
+    -- Зелёная вспышка = тап дошёл (диагностика).
+    local baseColor = b.BackgroundColor3
     local last = 0
     local function fire()
         local now = tick()
         if now - last < 0.4 then return end
         last = now
+        pcall(function()
+            b.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
+            task.delay(0.15, function()
+                pcall(function() b.BackgroundColor3 = baseColor end)
+            end)
+        end)
         pcall(cb)
     end
     b.Activated:Connect(fire)
     b.MouseButton1Click:Connect(fire)
+    b.TouchTap:Connect(fire)
+    b.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            fire()
+        end
+    end)
     return b
 end
 
@@ -262,6 +318,26 @@ Btn("Стоп / Старт", 164, function()
     Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
 end)
 
+-- Запасное управление через чат (если тапы по кнопкам не доходят):
+-- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
+LocalPlayer.Chatted:Connect(function(msg)
+    local m = string.lower(tostring(msg))
+    if m == "/hop off" or m == "/ahop off" then
+        AUTO_HOP = false
+        hopTimer = 0
+        hopBtn.Text = "Авто-хоп: ВЫКЛ"
+        Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
+    elseif m == "/hop on" or m == "/ahop on" then
+        AUTO_HOP = true
+        hopTimer = 0
+        hopBtn.Text = "Авто-хоп: ВКЛ (5с)"
+        Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
+    elseif m == "/hop now" or m == "/ghop" then
+        hopNow = true
+        Notify("Giant Raid", "Хопаю сейчас (чат)")
+    end
+end)
+
 local ListTitle = Instance.new("TextLabel")
 ListTitle.Size = UDim2.new(1, -16, 0, 20)
 ListTitle.Position = UDim2.new(0, 8, 0, 198)
@@ -273,18 +349,20 @@ ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
 ListTitle.TextXAlignment = Enum.TextXAlignment.Left
 ListTitle.Parent = Main
 
-local GiantsList = Instance.new("ScrollingFrame")
+-- Обычный Frame вместо ScrollingFrame: скролл на телефоне конфликтовал с тапами
+local GiantsList = Instance.new("Frame")
 GiantsList.Size = UDim2.new(1, -16, 0, 136)
 GiantsList.Position = UDim2.new(0, 8, 0, 222)
 GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-GiantsList.ScrollBarThickness = 4
-GiantsList.CanvasSize = UDim2.new(0, 0, 0, 0)
-GiantsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+GiantsList.BorderSizePixel = 0
+GiantsList.Active = false
+GiantsList.ClipsDescendants = true
 GiantsList.Parent = Main
 Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
 local ListLayout = Instance.new("UIListLayout", GiantsList)
 ListLayout.Padding = UDim.new(0, 4)
 ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local function RefreshGiantsList(giants)
     pcall(function()
@@ -292,17 +370,33 @@ local function RefreshGiantsList(giants)
             if ch:IsA("TextLabel") then ch:Destroy() end
         end
         ListTitle.Text = "Гиганты на сервере: " .. #giants
-        for i, g in ipairs(giants) do
+        local maxRows = 4 -- 4x30 + отступы влезают в 136px
+        for i = 1, math.min(#giants, maxRows) do
+            local g = giants[i]
             local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, -8, 0, 34)
+            l.Size = UDim2.new(1, -8, 0, 30)
             l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
+            l.BorderSizePixel = 0
+            l.Active = false
             l.Font = Enum.Font.Gotham
             l.TextSize = 11
             l.TextColor3 = Color3.new(1, 1, 1)
             l.TextWrapped = true
-            l.Text = i .. ". " .. g.name .. "\n" .. g.hp .. "/" .. g.maxHp .. " HP (" .. g.reason .. ")"
+            l.TextTruncate = Enum.TextTruncate.AtEnd
+            l.Text = i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp .. " HP"
             l.Parent = GiantsList
             Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+        end
+        if #giants > maxRows then
+            local more = Instance.new("TextLabel")
+            more.Size = UDim2.new(1, -8, 0, 16)
+            more.BackgroundTransparency = 1
+            more.Active = false
+            more.Font = Enum.Font.Gotham
+            more.TextSize = 11
+            more.TextColor3 = Color3.fromRGB(220, 170, 255)
+            more.Text = "+" .. (#giants - maxRows) .. " ещё"
+            more.Parent = GiantsList
         end
     end)
 end
@@ -365,7 +459,7 @@ task.spawn(function()
     while gui.Parent and IsCurrentGen() do
         task.wait(1)
         if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
+            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
         else
             if hopNow then hopNow = false hopTimer = 999 end
             local giants = {}
@@ -394,7 +488,7 @@ task.spawn(function()
                 hopTimer = hopTimer + 1
                 RefreshGiantsList({})
                 local left = math.max(0, HOP_DELAY - hopTimer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "]"
+                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
                 if AUTO_HOP and hopTimer >= HOP_DELAY then
                     hopTimer = 0
                     ServerHop()
@@ -586,13 +680,26 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "GiantRaidHop"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999
+gui.Enabled = true
+pcall(function() gui.IgnoreGuiInset = true end)
+-- PlayerGui ПЕРВЫМ: в нём тапы работают всегда. gethui/CoreGui на части
+-- Delta глотают ввод - кнопки видно, но нажатия не доходят.
 local parentOk = false
 pcall(function()
-    local h = nil
-    if gethui then h = gethui() end
-    if h then gui.Parent = h parentOk = true end
+    local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
+    if pg then gui.Parent = pg parentOk = true end
 end)
-if not parentOk then pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end) end
+if not parentOk then
+    pcall(function()
+        local h = nil
+        if gethui then h = gethui() end
+        if h then gui.Parent = h parentOk = true end
+    end)
+end
+if not parentOk or not gui.Parent then
+    pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
+end
 if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 if getgenv then getgenv()._GiantRaidGui = gui end
 
@@ -601,8 +708,9 @@ Main.Size = UDim2.new(0, 280, 0, 366)
 Main.Position = UDim2.new(0.5, -140, 0.15, 0)
 Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 Main.BorderSizePixel = 0
-Main.Active = true
-Main.Draggable = true
+Main.Active = false
+Main.Draggable = false
+Main.ClipsDescendants = false
 Main.Parent = gui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
 local st = Instance.new("UIStroke", Main)
@@ -618,7 +726,29 @@ Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Active = true
 Title.Parent = Main
+-- Ручной драг за заголовок: штатный Draggable фрейма на части устройств глотает тапы
+do
+    local dragging = false
+    local dragStart, frameStart = nil, nil
+    Title.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            frameStart = Main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            Main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + d.X, frameStart.Y.Scale, frameStart.Y.Offset + d.Y)
+        end
+    end)
+end
 
 local Status = Instance.new("TextLabel")
 Status.Size = UDim2.new(1, -16, 0, 60)
@@ -629,6 +759,7 @@ Status.TextSize = 12
 Status.TextColor3 = Color3.new(1, 1, 1)
 Status.TextWrapped = true
 Status.Text = "Сканирую..."
+Status.Active = false
 Status.Parent = Main
 Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
 
@@ -641,19 +772,38 @@ local function Btn(txt, y, cb)
     b.Font = Enum.Font.GothamBold
     b.TextSize = 13
     b.TextColor3 = Color3.new(1, 1, 1)
+    b.AutoButtonColor = true
+    b.Active = true
+    b.BorderSizePixel = 0
+    b.ClipsDescendants = false
+    b.ZIndex = 5
     b.Parent = Main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Оба сигнала сразу: на части executor'ов глохнет один из них.
+    -- Три сигнала + сырой ввод: хоть один да дойдёт на любом executor'е.
     -- tick-дебаунс гасит двойное срабатывание за один тап.
+    -- Зелёная вспышка = тап дошёл (диагностика).
+    local baseColor = b.BackgroundColor3
     local last = 0
     local function fire()
         local now = tick()
         if now - last < 0.4 then return end
         last = now
+        pcall(function()
+            b.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
+            task.delay(0.15, function()
+                pcall(function() b.BackgroundColor3 = baseColor end)
+            end)
+        end)
         pcall(cb)
     end
     b.Activated:Connect(fire)
     b.MouseButton1Click:Connect(fire)
+    b.TouchTap:Connect(fire)
+    b.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            fire()
+        end
+    end)
     return b
 end
 
@@ -672,6 +822,26 @@ Btn("Стоп / Старт", 164, function()
     Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
 end)
 
+-- Запасное управление через чат (если тапы по кнопкам не доходят):
+-- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
+LocalPlayer.Chatted:Connect(function(msg)
+    local m = string.lower(tostring(msg))
+    if m == "/hop off" or m == "/ahop off" then
+        AUTO_HOP = false
+        hopTimer = 0
+        hopBtn.Text = "Авто-хоп: ВЫКЛ"
+        Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
+    elseif m == "/hop on" or m == "/ahop on" then
+        AUTO_HOP = true
+        hopTimer = 0
+        hopBtn.Text = "Авто-хоп: ВКЛ (5с)"
+        Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
+    elseif m == "/hop now" or m == "/ghop" then
+        hopNow = true
+        Notify("Giant Raid", "Хопаю сейчас (чат)")
+    end
+end)
+
 local ListTitle = Instance.new("TextLabel")
 ListTitle.Size = UDim2.new(1, -16, 0, 20)
 ListTitle.Position = UDim2.new(0, 8, 0, 198)
@@ -683,18 +853,20 @@ ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
 ListTitle.TextXAlignment = Enum.TextXAlignment.Left
 ListTitle.Parent = Main
 
-local GiantsList = Instance.new("ScrollingFrame")
+-- Обычный Frame вместо ScrollingFrame: скролл на телефоне конфликтовал с тапами
+local GiantsList = Instance.new("Frame")
 GiantsList.Size = UDim2.new(1, -16, 0, 136)
 GiantsList.Position = UDim2.new(0, 8, 0, 222)
 GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-GiantsList.ScrollBarThickness = 4
-GiantsList.CanvasSize = UDim2.new(0, 0, 0, 0)
-GiantsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+GiantsList.BorderSizePixel = 0
+GiantsList.Active = false
+GiantsList.ClipsDescendants = true
 GiantsList.Parent = Main
 Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
 local ListLayout = Instance.new("UIListLayout", GiantsList)
 ListLayout.Padding = UDim.new(0, 4)
 ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local function RefreshGiantsList(giants)
     pcall(function()
@@ -702,17 +874,33 @@ local function RefreshGiantsList(giants)
             if ch:IsA("TextLabel") then ch:Destroy() end
         end
         ListTitle.Text = "Гиганты на сервере: " .. #giants
-        for i, g in ipairs(giants) do
+        local maxRows = 4 -- 4x30 + отступы влезают в 136px
+        for i = 1, math.min(#giants, maxRows) do
+            local g = giants[i]
             local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, -8, 0, 34)
+            l.Size = UDim2.new(1, -8, 0, 30)
             l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
+            l.BorderSizePixel = 0
+            l.Active = false
             l.Font = Enum.Font.Gotham
             l.TextSize = 11
             l.TextColor3 = Color3.new(1, 1, 1)
             l.TextWrapped = true
-            l.Text = i .. ". " .. g.name .. "\n" .. g.hp .. "/" .. g.maxHp .. " HP (" .. g.reason .. ")"
+            l.TextTruncate = Enum.TextTruncate.AtEnd
+            l.Text = i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp .. " HP"
             l.Parent = GiantsList
             Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+        end
+        if #giants > maxRows then
+            local more = Instance.new("TextLabel")
+            more.Size = UDim2.new(1, -8, 0, 16)
+            more.BackgroundTransparency = 1
+            more.Active = false
+            more.Font = Enum.Font.Gotham
+            more.TextSize = 11
+            more.TextColor3 = Color3.fromRGB(220, 170, 255)
+            more.Text = "+" .. (#giants - maxRows) .. " ещё"
+            more.Parent = GiantsList
         end
     end)
 end
@@ -775,7 +963,7 @@ task.spawn(function()
     while gui.Parent and IsCurrentGen() do
         task.wait(1)
         if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
+            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
         else
             if hopNow then hopNow = false hopTimer = 999 end
             local giants = {}
@@ -804,7 +992,7 @@ task.spawn(function()
                 hopTimer = hopTimer + 1
                 RefreshGiantsList({})
                 local left = math.max(0, HOP_DELAY - hopTimer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "]"
+                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
                 if AUTO_HOP and hopTimer >= HOP_DELAY then
                     hopTimer = 0
                     ServerHop()
