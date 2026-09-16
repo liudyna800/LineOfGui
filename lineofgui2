@@ -143,6 +143,116 @@ local function FindGiants()
     return found
 end
 
+-- ============ ФЛИНГ ПО ТАПУ НА НИК (кастом, в торс) ============
+-- Тап по строке = вкл/выкл флинг этой цели. Контакт держится каждый кадр,
+-- т.к. хитбокс гиганта капризный и с одного касания не флингает.
+local RunService = game:GetService("RunService")
+local FLING_SPIN = 50 -- средняя мощность, чуть ниже (рад/с). Больше = жёстче.
+local flingTarget = nil
+local flinging = false
+local flingConns = {}
+local flingSavedCF = nil
+
+local function GetTorso(char)
+    if not char then return nil end
+    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function StopFling(silent, noRestore)
+    flinging = false
+    flingTarget = nil
+    for _, c in ipairs(flingConns) do pcall(function() c:Disconnect() end) end
+    flingConns = {}
+    pcall(function()
+        local c = LocalPlayer.Character
+        if c then
+            for _, v in ipairs(c:GetDescendants()) do
+                if (v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity")) and v.Name == "_GFling" then
+                    v:Destroy()
+                end
+            end
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            local hrp = c:FindFirstChild("HumanoidRootPart")
+            if hum then
+                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+                hum.PlatformStand = false
+                hum.Sit = false
+            end
+            if hrp and flingSavedCF and not noRestore then
+                hrp.CFrame = flingSavedCF
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end)
+    flingSavedCF = nil
+    if not silent then Notify("Fling", "Флинг остановлен") end
+end
+
+local function StartFling(plr)
+    if plr == nil then return end
+    if flinging and flingTarget == plr then StopFling(false) return end
+    StopFling(true)
+    local c = LocalPlayer.Character
+    local hrp = c and c:FindFirstChild("HumanoidRootPart")
+    local hum = c and c:FindFirstChildOfClass("Humanoid")
+    if hrp == nil or hum == nil or hum.Health <= 0 then
+        Notify("Fling", "Нет живого персонажа")
+        return
+    end
+    flingSavedCF = hrp.CFrame
+    flingTarget = plr
+    flinging = true
+    pcall(function()
+        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+        hum.PlatformStand = false
+        hum.Sit = false
+    end)
+    local ang = Instance.new("BodyAngularVelocity")
+    ang.Name = "_GFling"
+    ang.MaxTorque = Vector3.new(0, math.huge, 0)
+    ang.AngularVelocity = Vector3.new(0, FLING_SPIN, 0)
+    ang.P = 1250
+    ang.Parent = hrp
+    local vel = Instance.new("BodyVelocity")
+    vel.Name = "_GFling"
+    vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    vel.Velocity = Vector3.new(0, 0, 0)
+    vel.Parent = hrp
+    Notify("Fling", "Флингаю: " .. plr.DisplayName .. " (тап снова = стоп)")
+    local hb = RunService.Heartbeat:Connect(function()
+        if not flinging then return end
+        if flingTarget == nil or flingTarget.Parent == nil then
+            StopFling(false)
+            Notify("Fling", "Цель ушла с сервера")
+            return
+        end
+        local my = LocalPlayer.Character
+        local myHRP = my and my:FindFirstChild("HumanoidRootPart")
+        local myHum = my and my:FindFirstChildOfClass("Humanoid")
+        if myHRP == nil or myHum == nil or myHum.Health <= 0 then return end
+        local tchar = flingTarget.Character
+        local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
+        local torso = GetTorso(tchar)
+        if torso == nil or thum == nil or thum.Health <= 0 then return end
+        pcall(function()
+            for _, v in ipairs(my:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = false end
+            end
+            myHum.Sit = false
+            myHum.PlatformStand = false
+            myHRP.CFrame = torso.CFrame * CFrame.new(0, 0.5, 0)
+            myHRP.Velocity = torso.Velocity + Vector3.new(0, 5, 0)
+            myHRP.RotVelocity = Vector3.new(0, FLING_SPIN, 0)
+        end)
+    end)
+    table.insert(flingConns, hb)
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    StopFling(true, true)
+end)
+
 -- ============ GUI ============
 -- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
 -- хопать и кнопки нового "не работают"). Работает даже без getgenv.
@@ -306,13 +416,8 @@ end
 local running = true
 local hopNow = false
 local hopTimer = 0
-Btn("Хоп сейчас", 96, function() hopNow = true end)
-local hopBtn = Btn("Авто-хоп: ВКЛ (5с)", 130, function()
-    AUTO_HOP = not AUTO_HOP
-    hopTimer = 0
-    hopBtn.Text = "Авто-хоп: " .. (AUTO_HOP and "ВКЛ (5с)" or "ВЫКЛ")
-    Notify("Giant Raid", "Авто-хоп " .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ"))
-end)
+Btn("Автохоп сейчас", 96, function() hopNow = true end)
+Btn("Стоп флинг", 130, function() StopFling(false) end)
 Btn("Стоп / Старт", 164, function()
     running = not running
     Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
@@ -325,12 +430,10 @@ LocalPlayer.Chatted:Connect(function(msg)
     if m == "/hop off" or m == "/ahop off" then
         AUTO_HOP = false
         hopTimer = 0
-        hopBtn.Text = "Авто-хоп: ВЫКЛ"
         Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
     elseif m == "/hop on" or m == "/ahop on" then
         AUTO_HOP = true
         hopTimer = 0
-        hopBtn.Text = "Авто-хоп: ВКЛ (5с)"
         Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
     elseif m == "/hop now" or m == "/ghop" then
         hopNow = true
@@ -373,19 +476,37 @@ local function RefreshGiantsList(giants)
         local maxRows = 4 -- 4x30 + отступы влезают в 136px
         for i = 1, math.min(#giants, maxRows) do
             local g = giants[i]
-            local l = Instance.new("TextLabel")
+            local l = Instance.new("TextButton")
             l.Size = UDim2.new(1, -8, 0, 30)
             l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
             l.BorderSizePixel = 0
-            l.Active = false
-            l.Font = Enum.Font.Gotham
+            l.Active = true
+            l.AutoButtonColor = true
+            l.Font = Enum.Font.GothamBold
             l.TextSize = 11
             l.TextColor3 = Color3.new(1, 1, 1)
             l.TextWrapped = true
             l.TextTruncate = Enum.TextTruncate.AtEnd
-            l.Text = i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp .. " HP"
+            local mark = (flinging and flingTarget == g.player) and "> " or ""
+            l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
             l.Parent = GiantsList
             Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+            local target = g.player
+            local t0 = 0
+            local function onTap()
+                local now = tick()
+                if now - t0 < 0.4 then return end
+                t0 = now
+                if target == nil then return end
+                if flinging and flingTarget == target then
+                    StopFling(false)
+                else
+                    StartFling(target)
+                end
+            end
+            l.Activated:Connect(onTap)
+            l.MouseButton1Click:Connect(onTap)
+            l.TouchTap:Connect(onTap)
         end
         if #giants > maxRows then
             local more = Instance.new("TextLabel")
@@ -405,6 +526,7 @@ end
 local function ServerHop()
     QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
     if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
+    StopFling(true) -- снять флинг перед хопом
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
@@ -647,6 +769,116 @@ local function FindGiants()
     return found
 end
 
+-- ============ ФЛИНГ ПО ТАПУ НА НИК (кастом, в торс) ============
+-- Тап по строке = вкл/выкл флинг этой цели. Контакт держится каждый кадр,
+-- т.к. хитбокс гиганта капризный и с одного касания не флингает.
+local RunService = game:GetService("RunService")
+local FLING_SPIN = 50 -- средняя мощность, чуть ниже (рад/с). Больше = жёстче.
+local flingTarget = nil
+local flinging = false
+local flingConns = {}
+local flingSavedCF = nil
+
+local function GetTorso(char)
+    if not char then return nil end
+    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function StopFling(silent, noRestore)
+    flinging = false
+    flingTarget = nil
+    for _, c in ipairs(flingConns) do pcall(function() c:Disconnect() end) end
+    flingConns = {}
+    pcall(function()
+        local c = LocalPlayer.Character
+        if c then
+            for _, v in ipairs(c:GetDescendants()) do
+                if (v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity")) and v.Name == "_GFling" then
+                    v:Destroy()
+                end
+            end
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            local hrp = c:FindFirstChild("HumanoidRootPart")
+            if hum then
+                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+                hum.PlatformStand = false
+                hum.Sit = false
+            end
+            if hrp and flingSavedCF and not noRestore then
+                hrp.CFrame = flingSavedCF
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end)
+    flingSavedCF = nil
+    if not silent then Notify("Fling", "Флинг остановлен") end
+end
+
+local function StartFling(plr)
+    if plr == nil then return end
+    if flinging and flingTarget == plr then StopFling(false) return end
+    StopFling(true)
+    local c = LocalPlayer.Character
+    local hrp = c and c:FindFirstChild("HumanoidRootPart")
+    local hum = c and c:FindFirstChildOfClass("Humanoid")
+    if hrp == nil or hum == nil or hum.Health <= 0 then
+        Notify("Fling", "Нет живого персонажа")
+        return
+    end
+    flingSavedCF = hrp.CFrame
+    flingTarget = plr
+    flinging = true
+    pcall(function()
+        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+        hum.PlatformStand = false
+        hum.Sit = false
+    end)
+    local ang = Instance.new("BodyAngularVelocity")
+    ang.Name = "_GFling"
+    ang.MaxTorque = Vector3.new(0, math.huge, 0)
+    ang.AngularVelocity = Vector3.new(0, FLING_SPIN, 0)
+    ang.P = 1250
+    ang.Parent = hrp
+    local vel = Instance.new("BodyVelocity")
+    vel.Name = "_GFling"
+    vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    vel.Velocity = Vector3.new(0, 0, 0)
+    vel.Parent = hrp
+    Notify("Fling", "Флингаю: " .. plr.DisplayName .. " (тап снова = стоп)")
+    local hb = RunService.Heartbeat:Connect(function()
+        if not flinging then return end
+        if flingTarget == nil or flingTarget.Parent == nil then
+            StopFling(false)
+            Notify("Fling", "Цель ушла с сервера")
+            return
+        end
+        local my = LocalPlayer.Character
+        local myHRP = my and my:FindFirstChild("HumanoidRootPart")
+        local myHum = my and my:FindFirstChildOfClass("Humanoid")
+        if myHRP == nil or myHum == nil or myHum.Health <= 0 then return end
+        local tchar = flingTarget.Character
+        local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
+        local torso = GetTorso(tchar)
+        if torso == nil or thum == nil or thum.Health <= 0 then return end
+        pcall(function()
+            for _, v in ipairs(my:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = false end
+            end
+            myHum.Sit = false
+            myHum.PlatformStand = false
+            myHRP.CFrame = torso.CFrame * CFrame.new(0, 0.5, 0)
+            myHRP.Velocity = torso.Velocity + Vector3.new(0, 5, 0)
+            myHRP.RotVelocity = Vector3.new(0, FLING_SPIN, 0)
+        end)
+    end)
+    table.insert(flingConns, hb)
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    StopFling(true, true)
+end)
+
 -- ============ GUI ============
 -- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
 -- хопать и кнопки нового "не работают"). Работает даже без getgenv.
@@ -810,13 +1042,8 @@ end
 local running = true
 local hopNow = false
 local hopTimer = 0
-Btn("Хоп сейчас", 96, function() hopNow = true end)
-local hopBtn = Btn("Авто-хоп: ВКЛ (5с)", 130, function()
-    AUTO_HOP = not AUTO_HOP
-    hopTimer = 0
-    hopBtn.Text = "Авто-хоп: " .. (AUTO_HOP and "ВКЛ (5с)" or "ВЫКЛ")
-    Notify("Giant Raid", "Авто-хоп " .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ"))
-end)
+Btn("Автохоп сейчас", 96, function() hopNow = true end)
+Btn("Стоп флинг", 130, function() StopFling(false) end)
 Btn("Стоп / Старт", 164, function()
     running = not running
     Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
@@ -829,12 +1056,10 @@ LocalPlayer.Chatted:Connect(function(msg)
     if m == "/hop off" or m == "/ahop off" then
         AUTO_HOP = false
         hopTimer = 0
-        hopBtn.Text = "Авто-хоп: ВЫКЛ"
         Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
     elseif m == "/hop on" or m == "/ahop on" then
         AUTO_HOP = true
         hopTimer = 0
-        hopBtn.Text = "Авто-хоп: ВКЛ (5с)"
         Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
     elseif m == "/hop now" or m == "/ghop" then
         hopNow = true
@@ -877,19 +1102,37 @@ local function RefreshGiantsList(giants)
         local maxRows = 4 -- 4x30 + отступы влезают в 136px
         for i = 1, math.min(#giants, maxRows) do
             local g = giants[i]
-            local l = Instance.new("TextLabel")
+            local l = Instance.new("TextButton")
             l.Size = UDim2.new(1, -8, 0, 30)
             l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
             l.BorderSizePixel = 0
-            l.Active = false
-            l.Font = Enum.Font.Gotham
+            l.Active = true
+            l.AutoButtonColor = true
+            l.Font = Enum.Font.GothamBold
             l.TextSize = 11
             l.TextColor3 = Color3.new(1, 1, 1)
             l.TextWrapped = true
             l.TextTruncate = Enum.TextTruncate.AtEnd
-            l.Text = i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp .. " HP"
+            local mark = (flinging and flingTarget == g.player) and "> " or ""
+            l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
             l.Parent = GiantsList
             Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+            local target = g.player
+            local t0 = 0
+            local function onTap()
+                local now = tick()
+                if now - t0 < 0.4 then return end
+                t0 = now
+                if target == nil then return end
+                if flinging and flingTarget == target then
+                    StopFling(false)
+                else
+                    StartFling(target)
+                end
+            end
+            l.Activated:Connect(onTap)
+            l.MouseButton1Click:Connect(onTap)
+            l.TouchTap:Connect(onTap)
         end
         if #giants > maxRows then
             local more = Instance.new("TextLabel")
@@ -909,6 +1152,7 @@ end
 local function ServerHop()
     QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
     if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
+    StopFling(true) -- снять флинг перед хопом
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
