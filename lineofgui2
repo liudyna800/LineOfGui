@@ -10,6 +10,7 @@ local SCRIPT_URL = "" -- оставить пустым: работает без 
 local PLACE_ID = 5985232436
 local HOP_DELAY = 5
 local AUTO_HOP = true
+local MIN_PLAYERS = 8 -- хопать только на сервера с 8+ игроками (полные/средние)
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -138,6 +139,34 @@ local function FindGiants()
 end
 
 -- ============ GUI ============
+-- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
+-- хопать и кнопки нового "не работают"). Работает даже без getgenv.
+pcall(function()
+    local targets = {}
+    if gethui then local h = gethui() if h then table.insert(targets, h) end end
+    pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then table.insert(targets, pg) end
+    for _, par in ipairs(targets) do
+        for _, g in ipairs(par:GetChildren()) do
+            if g:IsA("ScreenGui") and g.Name == "GiantRaidHop" then
+                g:Destroy()
+            end
+        end
+    end
+end)
+-- Поколение запуска: старые циклы увидят чужой номер и выйдут (общая память через Workspace)
+local myGen = 0
+pcall(function()
+    local g = (workspace:GetAttribute("GiantRaidGen") or 0) + 1
+    workspace:SetAttribute("GiantRaidGen", g)
+    myGen = g
+end)
+local function IsCurrentGen()
+    if myGen == 0 then return true end
+    local ok, v = pcall(function() return workspace:GetAttribute("GiantRaidGen") end)
+    return ok and v == myGen
+end
 local gui = Instance.new("ScreenGui")
 gui.Name = "GiantRaidHop"
 gui.ResetOnSpawn = false
@@ -199,7 +228,14 @@ local function Btn(txt, y, cb)
     b.TextColor3 = Color3.new(1, 1, 1)
     b.Parent = Main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    b.MouseButton1Click:Connect(function() pcall(cb) end)
+    -- Activated вместо MouseButton1Click: на телефоне тапы ловит надёжнее
+    local deb = false
+    b.Activated:Connect(function()
+        if deb then return end
+        deb = true
+        pcall(cb)
+        task.delay(0.3, function() deb = false end)
+    end)
     return b
 end
 
@@ -263,32 +299,45 @@ end
 -- ============ SERVER HOP (как Infinite Yield) ============
 local function ServerHop()
     QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
+    if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
     local myJob = game.JobId
     visited[myJob] = true
-    Notify("Giant Raid", "Гигантов нет, хопаю...")
+    Notify("Giant Raid", "Гигантов нет, ищу сервер 8+ ...")
     task.wait(1)
     local ok, err = pcall(function()
+        -- Desc = сначала самые полные. Баг был: Asc брал мелкие 1-5.
         local tries = 0
-        while tries < 5 do
+        local bestMedium, bestMediumInfo, bestAny, bestAnyInfo = nil, nil, nil, nil
+        while tries < 5 and bestMedium == nil do
             tries = tries + 1
-            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
+            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
             local resp = game:HttpGet(url)
             local data = HttpService:JSONDecode(resp)
             cursor = data.nextPageCursor or ""
             if data.data then
                 for _, s in ipairs(data.data) do
                     if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
-                        visited[s.id] = true
-                        TeleportService:TeleportToPlaceInstance(placeId, s.id, LocalPlayer)
-                        task.wait(3)
-                        return
+                        if bestAny == nil then bestAny, bestAnyInfo = s.id, s.playing .. "/" .. s.maxPlayers end
+                        if s.playing >= MIN_PLAYERS then
+                            bestMedium, bestMediumInfo = s.id, s.playing .. "/" .. s.maxPlayers
+                            break
+                        end
                     end
                 end
             end
             if cursor == "" or cursor == nil then break end
+        end
+        local target, info = bestMedium, bestMediumInfo
+        if target == nil then target, info = bestAny, bestAnyInfo end
+        if target ~= nil then
+            visited[target] = true
+            Notify("Giant Raid", "Хоп на сервер (" .. tostring(info) .. ")")
+            TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer)
+            task.wait(3)
+            return
         end
         TeleportService:Teleport(placeId, LocalPlayer)
     end)
@@ -302,7 +351,7 @@ end
 task.spawn(function()
     local timer = 0
     QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
-    while gui.Parent do
+    while gui.Parent and IsCurrentGen() do
         task.wait(1)
         if not running then
             Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
@@ -360,6 +409,7 @@ local SCRIPT_URL = "" -- оставить пустым: работает без 
 local PLACE_ID = 5985232436
 local HOP_DELAY = 5
 local AUTO_HOP = true
+local MIN_PLAYERS = 8 -- хопать только на сервера с 8+ игроками (полные/средние)
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -488,6 +538,34 @@ local function FindGiants()
 end
 
 -- ============ GUI ============
+-- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
+-- хопать и кнопки нового "не работают"). Работает даже без getgenv.
+pcall(function()
+    local targets = {}
+    if gethui then local h = gethui() if h then table.insert(targets, h) end end
+    pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then table.insert(targets, pg) end
+    for _, par in ipairs(targets) do
+        for _, g in ipairs(par:GetChildren()) do
+            if g:IsA("ScreenGui") and g.Name == "GiantRaidHop" then
+                g:Destroy()
+            end
+        end
+    end
+end)
+-- Поколение запуска: старые циклы увидят чужой номер и выйдут (общая память через Workspace)
+local myGen = 0
+pcall(function()
+    local g = (workspace:GetAttribute("GiantRaidGen") or 0) + 1
+    workspace:SetAttribute("GiantRaidGen", g)
+    myGen = g
+end)
+local function IsCurrentGen()
+    if myGen == 0 then return true end
+    local ok, v = pcall(function() return workspace:GetAttribute("GiantRaidGen") end)
+    return ok and v == myGen
+end
 local gui = Instance.new("ScreenGui")
 gui.Name = "GiantRaidHop"
 gui.ResetOnSpawn = false
@@ -549,7 +627,14 @@ local function Btn(txt, y, cb)
     b.TextColor3 = Color3.new(1, 1, 1)
     b.Parent = Main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    b.MouseButton1Click:Connect(function() pcall(cb) end)
+    -- Activated вместо MouseButton1Click: на телефоне тапы ловит надёжнее
+    local deb = false
+    b.Activated:Connect(function()
+        if deb then return end
+        deb = true
+        pcall(cb)
+        task.delay(0.3, function() deb = false end)
+    end)
     return b
 end
 
@@ -613,32 +698,45 @@ end
 -- ============ SERVER HOP (как Infinite Yield) ============
 local function ServerHop()
     QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
+    if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
     local myJob = game.JobId
     visited[myJob] = true
-    Notify("Giant Raid", "Гигантов нет, хопаю...")
+    Notify("Giant Raid", "Гигантов нет, ищу сервер 8+ ...")
     task.wait(1)
     local ok, err = pcall(function()
+        -- Desc = сначала самые полные. Баг был: Asc брал мелкие 1-5.
         local tries = 0
-        while tries < 5 do
+        local bestMedium, bestMediumInfo, bestAny, bestAnyInfo = nil, nil, nil, nil
+        while tries < 5 and bestMedium == nil do
             tries = tries + 1
-            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
+            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
             local resp = game:HttpGet(url)
             local data = HttpService:JSONDecode(resp)
             cursor = data.nextPageCursor or ""
             if data.data then
                 for _, s in ipairs(data.data) do
                     if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
-                        visited[s.id] = true
-                        TeleportService:TeleportToPlaceInstance(placeId, s.id, LocalPlayer)
-                        task.wait(3)
-                        return
+                        if bestAny == nil then bestAny, bestAnyInfo = s.id, s.playing .. "/" .. s.maxPlayers end
+                        if s.playing >= MIN_PLAYERS then
+                            bestMedium, bestMediumInfo = s.id, s.playing .. "/" .. s.maxPlayers
+                            break
+                        end
                     end
                 end
             end
             if cursor == "" or cursor == nil then break end
+        end
+        local target, info = bestMedium, bestMediumInfo
+        if target == nil then target, info = bestAny, bestAnyInfo end
+        if target ~= nil then
+            visited[target] = true
+            Notify("Giant Raid", "Хоп на сервер (" .. tostring(info) .. ")")
+            TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer)
+            task.wait(3)
+            return
         end
         TeleportService:Teleport(placeId, LocalPlayer)
     end)
@@ -652,7 +750,7 @@ end
 task.spawn(function()
     local timer = 0
     QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
-    while gui.Parent do
+    while gui.Parent and IsCurrentGen() do
         task.wait(1)
         if not running then
             Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
