@@ -1,20 +1,20 @@
--- Daycare 💥 | Delta Hub (Keyless, Mobile Friendly)
--- Place: Daycare by CleanMeanBeans (6066404016) + CLASSROOMS
+-- Flee the Facility 🏃 | Delta Hub (Keyless, Mobile Friendly)
+-- Place: Flee the Facility by A.W. Apps (893973440)
 -- Executor: Delta (Android / iOS / PC), также Xeno / Codex / Fluxus
--- Функции: Good Noodle 100%, Auto Eat/Sleep, ESP, Speed/Fly/Noclip, Anti-Snatch/Test, Fullbright Anti-LightsOut, Телепорты комнат, Scientist-панель
+-- Функции: ESP Beast/Survivors/Computers/Exits/Pods, Auto-Hack, ТП, Speed/Fly/Noclip, Fullbright, Anti-AFK
 -- Использование: вставить в Delta -> Execute. Повторный Execute не дублирует GUI.
 
-if getgenv and getgenv()._DaycareHubLoaded then
-    pcall(function() getgenv()._DaycareHubGui:Destroy() end)
+if getgenv and getgenv()._FTFHubLoaded then
+    pcall(function() getgenv()._FTFHubGui:Destroy() end)
 end
 if getgenv then
-    getgenv()._DaycareHubLoaded = true
-    getgenv()._DaycareHubGen = (getgenv()._DaycareHubGen or 0) + 1
+    getgenv()._FTFHubLoaded = true
+    getgenv()._FTFHubGen = (getgenv()._FTFHubGen or 0) + 1
 end
-local MY_GEN = getgenv and getgenv()._DaycareHubGen or 1
+local MY_GEN = getgenv and getgenv()._FTFHubGen or 1
 local function IsCurrentGen()
     if not getgenv then return true end
-    return getgenv()._DaycareHubGen == MY_GEN
+    return getgenv()._FTFHubGen == MY_GEN
 end
 
 local Players = game:GetService("Players")
@@ -25,43 +25,34 @@ local UserInputService = game:GetService("UserInputService")
 local TeleportService = game:GetService("TeleportService")
 local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
+local VirtualUser = game:GetService("VirtualUser")
 
-local PLACE_IDS = { [6066404016] = true }
+local PLACE_ID = 893973440
 
 local Config = {
-    AutoStats = false,      -- держать все статы 100% (Good Noodle)
-    AutoEat = false,
-    AutoSleep = false,
-    AutoHygiene = false,
-    ESP_Scientist = true,
-    ESP_Patient = true,
-    ESP_Beds = false,
+    ESP_Beast = true,
+    ESP_Survivor = true,
+    ESP_Computer = true,
+    ESP_Exit = true,
+    ESP_Pod = true,
+    AutoHack = false,
+    HackDistance = 14,
+    AutoQTE = true,
+    AutoStruggle = false,
+    InfStamina = false,
     SpeedEnabled = false,
-    SpeedValue = 32,
+    SpeedValue = 20,
     JumpValue = 50,
     FlyEnabled = false,
     FlySpeed = 50,
     Noclip = false,
     InfJump = false,
-    AntiSnatch = false,     -- анти-захват scientist'ом (рвёт велды + отброс)
-    AntiTest = false,       -- попытка блочить тесты/убийство в лабе (CanTouch off + анти-сит)
-    AntiLightsOut = false,  -- светлая карта при Lights Out
+    AntiAFK = true,
     Fullbright = false,
-    GrabAura = false,       -- scientist: цеплять пациентов рядом
-    GrabDistance = 18,
-    FlingEnabled = false,
+    FPSBoost = false,
+    BeastSpeed = false,
 }
 
-local SavedCF = nil
-task.spawn(function()
-    pcall(function()
-        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local hrp = c:WaitForChild("HumanoidRootPart", 5)
-        if hrp then SavedCF = hrp.CFrame end
-    end)
-end)
-
--- ============ HELPERS ============
 local function GetChar(plr)
     plr = plr or LocalPlayer
     return plr.Character
@@ -80,205 +71,116 @@ local function Notify(title, text, dur)
     pcall(function()
         StarterGui:SetCore("SendNotification", {Title = tostring(title), Text = tostring(text), Duration = dur or 4})
     end)
-    print("[DaycareHub] " .. tostring(text))
+    print("[FTFHub] " .. tostring(text))
 end
 
--- Роль: Scientist = есть Snatch-tool / Team Scientist / атрибут
-local function IsScientist(plr)
-    local ok, res = pcall(function()
-        if not plr then return false end
-        if plr.Team and plr.Team.Name then
-            local t = string.lower(plr.Team.Name)
-            if string.find(t, "scien") or string.find(t, "doctor") or string.find(t, "staff") then return true end
-            if string.find(t, "patient") or string.find(t, "baby") or string.find(t, "noodle") then return false end
-        end
-        local c = plr.Character
-        if c then
-            if c:GetAttribute("Scientist") == true or c:GetAttribute("IsScientist") == true then return true end
-            if c:GetAttribute("Patient") == true then return false end
-            if c:FindFirstChild("IsScientist") or c:FindFirstChild("Scientist") then return true end
-            for _, tool in ipairs(c:GetChildren()) do
-                if tool:IsA("Tool") then
-                    local n = string.lower(tool.Name)
-                    if string.find(n, "snatch") or string.find(n, "grab") or string.find(n, "syringe")
-                    or string.find(n, "laser") or string.find(n, "test") or string.find(n, "scanner") then
-                        return true
-                    end
-                end
-            end
-        end
-        local bp = plr:FindFirstChild("Backpack")
-        if bp then
-            for _, tool in ipairs(bp:GetChildren()) do
-                if tool:IsA("Tool") then
-                    local n = string.lower(tool.Name)
-                    if string.find(n, "snatch") or string.find(n, "grab") or string.find(n, "syringe")
-                    or string.find(n, "laser") or string.find(n, "test") or string.find(n, "scanner") then
-                        return true
-                    end
-                end
-            end
-        end
-        if plr:GetAttribute("Scientist") == true or plr:GetAttribute("IsScientist") == true then return true end
-        return false
-    end)
-    if not ok then return false end
-    return res == true
-end
-
--- Статы пациента: ищем Hunger/Energy/Hygiene/Happiness/Health/Weight и т.п.
-local STAT_KEYS = {"hunger","energy","hygiene","clean","happy","happiness","mood","health","food","sleep","stamina","thirst","fun","comfort","weight"}
-local function IsStatName(n)
-    n = string.lower(tostring(n))
-    for _, k in ipairs(STAT_KEYS) do
-        if string.find(n, k) then return true end
-    end
-    return false
-end
-
-local function GetStatHolders()
-    -- возвращает список Number/IntValue похожих на статы
-    local out = {}
+-- ============ REMOTES SCAN ============
+local HackRemotes, ExitRemotes, PodRemotes, StaminaVals = {}, {}, {}, {}
+local function ScanRemotes()
+    table.clear(HackRemotes) table.clear(ExitRemotes) table.clear(PodRemotes)
     pcall(function()
-        local function scan(parent)
-            for _, d in ipairs(parent:GetChildren()) do
-                if d:IsA("NumberValue") or d:IsA("IntValue") then
-                    if IsStatName(d.Name) then table.insert(out, d) end
-                elseif d:IsA("Folder") or d.Name == "leaderstats" or d.Name == "Stats" or d.Name == "Needs" then
-                    for _, v in ipairs(d:GetChildren()) do
-                        if (v:IsA("NumberValue") or v:IsA("IntValue")) and IsStatName(v.Name) then
-                            table.insert(out, v)
-                        end
+        for _, d in ipairs(game:GetDescendants()) do
+            if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+                local n = string.lower(d.Name)
+                local full = string.lower(d:GetFullName())
+                local function has(list)
+                    for _, k in ipairs(list) do
+                        if string.find(n, k, 1, true) or string.find(full, k, 1, true) then return true end
                     end
+                    return false
                 end
-            end
-        end
-        scan(LocalPlayer)
-        local c = GetChar()
-        if c then scan(c) end
-        local pg = LocalPlayer:FindFirstChild("PlayerGui")
-        if pg then
-            -- плюс-кнопка статов: значения часто дублируются в GUI, только читаем
-        end
-    end)
-    return out
-end
-
-local function ReadStats()
-    -- {name=..., value=..., max=...}
-    local res = {}
-    pcall(function()
-        for _, v in ipairs(GetStatHolders()) do
-            local max = 100
-            pcall(function()
-                local m = v:FindFirstChild("Max") or v.Parent:FindFirstChild(v.Name .. "Max")
-                if m and m.Value then max = m.Value end
-            end)
-            if v.MaxValue and v.MaxValue > 0 then max = v.MaxValue end
-            table.insert(res, {obj = v, name = v.Name, value = v.Value, max = max})
-        end
-        -- атрибуты
-        for _, k in ipairs(STAT_KEYS) do
-            -- точные имена атрибутов неизвестны, пробуем капитализации
-            for _, cand in ipairs({k, k:gsub("^%l", string.upper)}) do
-                local ok, val = pcall(function() return LocalPlayer:GetAttribute(cand) end)
-                if ok and type(val) == "number" then
-                    table.insert(res, {attr = cand, holder = LocalPlayer, name = cand, value = val, max = 100})
-                end
-                local c = GetChar()
-                if c then
-                    local ok2, val2 = pcall(function() return c:GetAttribute(cand) end)
-                    if ok2 and type(val2) == "number" then
-                        table.insert(res, {attr = cand, holder = c, name = cand, value = val2, max = 100})
-                    end
-                end
+                if has({"hack", "computer", "pc", "terminal", "qte", "skill", "type"}) then table.insert(HackRemotes, d) end
+                if has({"exit", "door", "escape", "open"}) then table.insert(ExitRemotes, d) end
+                if has({"pod", "capsule", "freeze", "capture", "chamber", "rescue", "struggle", "hammer", "beast"}) then table.insert(PodRemotes, d) end
             end
         end
     end)
-    return res
 end
-
-local function IsGoodNoodle()
-    local stats = ReadStats()
-    if #stats == 0 then return nil end
-    for _, s in ipairs(stats) do
-        if s.value < 95 then return false end
-    end
-    return true
-end
-
--- Поиск ремоутов еды/сна/лаборатории
-local EatRemotes, SleepRemotes, StatRemotes, TestRemotes, GrabRemotes = {}, {}, {}, {}, {}
+ScanRemotes()
 pcall(function()
-    for _, d in ipairs(game:GetDescendants()) do
-        if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
-            local n = string.lower(d.Name)
-            local function has(...) for _, k in ipairs({...}) do if string.find(n, k) then return true end end return false end
-            if has("eat","food","jelly","hunger","feed","meal","snack","cafeteria") then table.insert(EatRemotes, d) end
-            if has("sleep","bed","energy","rest","nap","tired") then table.insert(SleepRemotes, d) end
-            if has("stat","need","noodle","hygiene","wash","shower","clean","happy","mood") then table.insert(StatRemotes, d) end
-            if has("test","laser","experiment","lab","kill","scan","morph","transform") then table.insert(TestRemotes, d) end
-            if has("snatch","grab","carry","hold","drag","pickup","arrest") then table.insert(GrabRemotes, d) end
-        end
-    end
+    game.DescendantAdded:Connect(function(d)
+        if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then task.delay(1, ScanRemotes) end
+    end)
 end)
 
 local function FireList(list, ...)
     local args = {...}
     for _, r in ipairs(list) do
         pcall(function()
-            if r:IsA("RemoteEvent") then r:FireServer(unpack(args)) end
+            if r:IsA("RemoteEvent") then
+                if #args > 0 then r:FireServer(unpack(args)) else r:FireServer() end
+            end
         end)
     end
 end
 
-local function GetTool()
-    local c = GetChar()
-    if c then
-        local t = c:FindFirstChildOfClass("Tool")
-        if t then return t end
-    end
-    local bp = LocalPlayer:FindFirstChild("Backpack")
-    if bp then
-        for _, tool in ipairs(bp:GetChildren()) do
-            if tool:IsA("Tool") then return tool end
+-- ============ FTF OBJECT FINDERS ============
+-- Beast: у зверя Hammer в руках / атрибут Beast / красная аура
+local function IsBeast(plr)
+    local ok, res = pcall(function()
+        if not plr or plr == LocalPlayer then
+            -- проверяем себя тоже
         end
-    end
-    return nil
-end
-local function EquipTool(tool)
-    if not tool then return end
-    pcall(function()
-        local hum = GetHum()
-        if hum and tool.Parent ~= GetChar() then hum:EquipTool(tool) end
+        local c = plr.Character
+        if c then
+            if c:GetAttribute("Beast") == true or c:GetAttribute("IsBeast") == true then return true end
+            for _, t in ipairs(c:GetChildren()) do
+                if t:IsA("Tool") then
+                    local n = string.lower(t.Name)
+                    if string.find(n, "hammer") or string.find(n, "beast") or string.find(n, "mallet") then return true end
+                end
+            end
+            -- рюкзак
+            local bp = plr:FindFirstChild("Backpack")
+            if bp then
+                for _, t in ipairs(bp:GetChildren()) do
+                    if t:IsA("Tool") then
+                        local n = string.lower(t.Name)
+                        if string.find(n, "hammer") or string.find(n, "beast") then return true end
+                    end
+                end
+            end
+        end
+        if plr:GetAttribute("Beast") == true or plr:GetAttribute("IsBeast") == true then return true end
+        -- по leaderstats / team
+        if plr.Team and plr.Team.Name then
+            local tn = string.lower(plr.Team.Name)
+            if string.find(tn, "beast") then return true end
+        end
+        return false
     end)
+    return ok and res == true
 end
 
--- Поиск еды/кроватей/комнат по именам в Workspace
-local function FindPartsByKeys(keys, maxN)
+local function AmIBeast()
+    return IsBeast(LocalPlayer)
+end
+
+-- Компьютеры: ищем по именам в Workspace
+local function GetComputers()
     local out = {}
     pcall(function()
         for _, d in ipairs(Workspace:GetDescendants()) do
-            if #out >= (maxN or 25) then break end
-            if d:IsA("BasePart") or d:IsA("Model") then
+            if d:IsA("Model") then
                 local n = string.lower(d.Name)
-                for _, k in ipairs(keys) do
-                    if string.find(n, k) then
-                        local pos = nil
-                        if d:IsA("BasePart") then pos = d.Position
-                        else
-                            local p = d:FindFirstChild("HumanoidRootPart") or d:FindFirstChild("Handle") or d:FindFirstChildWhichIsA("BasePart", true)
-                            if p then pos = p.Position end
-                        end
-                        if pos then table.insert(out, {name = d.Name, pos = pos}) break end
-                    end
-                end
-            elseif d:IsA("Tool") then
-                local n = string.lower(d.Name)
-                for _, k in ipairs(keys) do
-                    if string.find(n, k) then
-                        local h = d:FindFirstChild("Handle")
-                        if h then table.insert(out, {name = d.Name, pos = h.Position}) break end
+                if string.find(n, "computer") or string.find(n, "pc_") or n == "pc" then
+                    local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
+                    if main then
+                        -- hacked? экран зелёный / атрибут
+                        local hacked = false
+                        pcall(function()
+                            if d:GetAttribute("Hacked") == true then hacked = true end
+                            for _, p in ipairs(d:GetDescendants()) do
+                                if p:IsA("BasePart") and string.find(string.lower(p.Name), "screen") then
+                                    if p.BrickColor == BrickColor.new("Lime green") or p.BrickColor == BrickColor.new("Bright green") then
+                                        hacked = true
+                                    end
+                                    -- Color3 check
+                                    if p.Color and p.Color.G > 0.7 and p.Color.R < 0.3 then hacked = true end
+                                end
+                            end
+                        end)
+                        table.insert(out, {model = d, pos = main.Position, hacked = hacked, name = d.Name})
                     end
                 end
             end
@@ -287,19 +189,44 @@ local function FindPartsByKeys(keys, maxN)
     return out
 end
 
-local ROOM_KEYS = {
-    ["Кафетерий 🍮"] = {"cafeteria","canteen","kitchen","jelly","dining"},
-    ["Класс 📚"] = {"classroom","class","school","desk"},
-    ["Душ 🚿"] = {"shower","bathroom","hygiene","wash"},
-    ["Кровати 🛏"] = {"bed","sleep","dorm","capsule","patient quarters","quarters"},
-    ["Площадка 🛝"] = {"playground","play","slide","park","outside"},
-    ["Солнечная ☀"] = {"sun room","sunroom","sun"},
-    ["Лаборатория 🧪"] = {"laboratory","lab","testing","experiment"},
-    ["Магазин 🛒"] = {"store","shop"},
-    ["Учёные 📋"] = {"scientist","board","button"},
-}
+local function GetExits()
+    local out = {}
+    pcall(function()
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("Model") then
+                local n = string.lower(d.Name)
+                if string.find(n, "exit") or string.find(n, "escape") or string.find(n, "door") and string.find(n, "exit") then
+                    local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
+                    if main then table.insert(out, {model = d, pos = main.Position, name = d.Name}) end
+                end
+            elseif d:IsA("BasePart") then
+                local n = string.lower(d.Name)
+                if n == "exitdoor" or n == "exit" then
+                    table.insert(out, {model = d, pos = d.Position, name = d.Name})
+                end
+            end
+        end
+    end)
+    return out
+end
 
--- ============ GUI (PlayerGui первым — тапы на Delta) ============
+local function GetPods()
+    local out = {}
+    pcall(function()
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("Model") then
+                local n = string.lower(d.Name)
+                if string.find(n, "pod") or string.find(n, "capsule") or string.find(n, "freeze") or string.find(n, "chamber") or string.find(n, "cryo") then
+                    local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
+                    if main then table.insert(out, {model = d, pos = main.Position, name = d.Name}) end
+                end
+            end
+        end
+    end)
+    return out
+end
+
+-- ============ GUI ============
 pcall(function()
     local targets = {}
     local pg0 = LocalPlayer:FindFirstChild("PlayerGui")
@@ -308,13 +235,13 @@ pcall(function()
     if gethui then local h = gethui() if h then table.insert(targets, h) end end
     for _, par in ipairs(targets) do
         for _, g in ipairs(par:GetChildren()) do
-            if g:IsA("ScreenGui") and g.Name == "DaycareHub" then g:Destroy() end
+            if g:IsA("ScreenGui") and g.Name == "FTFHub" then g:Destroy() end
         end
     end
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "DaycareHub"
+gui.Name = "FTFHub"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 999
@@ -334,25 +261,25 @@ end
 if not parentOk or not gui.Parent then
     pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
 end
-if getgenv then getgenv()._DaycareHubGui = gui end
+if getgenv then getgenv()._FTFHubGui = gui end
 
 local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 300, 0, 430)
-Main.Position = UDim2.new(0.5, -150, 0.5, -215)
-Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+Main.Size = UDim2.new(0, 300, 0, 440)
+Main.Position = UDim2.new(0.5, -150, 0.5, -220)
+Main.BackgroundColor3 = Color3.fromRGB(14, 18, 22)
 Main.BorderSizePixel = 0
 Main.Active = false
 Main.Parent = gui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
 local stroke = Instance.new("UIStroke", Main)
-stroke.Color = Color3.fromRGB(255, 190, 80)
+stroke.Color = Color3.fromRGB(80, 200, 120)
 stroke.Thickness = 2
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -70, 0, 34)
 Title.Position = UDim2.new(0, 12, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Daycare 💥 | Delta Hub"
+Title.Text = "FTF 🏃 | Delta Hub"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
 Title.TextColor3 = Color3.new(1,1,1)
@@ -379,7 +306,7 @@ local function MakeTopBtn(txt, x)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(0, 26, 0, 26)
     b.Position = UDim2.new(1, x, 0, 5)
-    b.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+    b.BackgroundColor3 = Color3.fromRGB(35, 45, 40)
     b.Text = txt b.Font = Enum.Font.GothamBold b.TextSize = 14
     b.TextColor3 = Color3.new(1,1,1)
     b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
@@ -406,13 +333,13 @@ local minimized = false
 local function setMin(m)
     minimized = m
     Scroll.Visible = not minimized
-    Main.Size = minimized and UDim2.new(0, 300, 0, 40) or UDim2.new(0, 300, 0, 430)
+    Main.Size = minimized and UDim2.new(0, 300, 0, 40) or UDim2.new(0, 300, 0, 440)
     MinBtn.Text = minimized and "+" or "-"
 end
 MinBtn.Activated:Connect(function() setMin(not minimized) end)
 MinBtn.MouseButton1Click:Connect(function() setMin(not minimized) end)
-CloseBtn.Activated:Connect(function() gui:Destroy() if getgenv then getgenv()._DaycareHubLoaded = false getgenv()._DaycareHubGen = (getgenv()._DaycareHubGen or 1) + 1 end end)
-CloseBtn.MouseButton1Click:Connect(function() gui:Destroy() if getgenv then getgenv()._DaycareHubLoaded = false end end)
+CloseBtn.Activated:Connect(function() gui:Destroy() if getgenv then getgenv()._FTFHubLoaded = false getgenv()._FTFHubGen = (getgenv()._FTFHubGen or 1) + 1 end end)
+CloseBtn.MouseButton1Click:Connect(function() gui:Destroy() if getgenv then getgenv()._FTFHubLoaded = false end end)
 
 local function Section(name)
     local l = Instance.new("TextLabel")
@@ -420,7 +347,7 @@ local function Section(name)
     l.BackgroundTransparency = 1
     l.Text = "— " .. name .. " —"
     l.Font = Enum.Font.GothamBold l.TextSize = 12
-    l.TextColor3 = Color3.fromRGB(255, 200, 120)
+    l.TextColor3 = Color3.fromRGB(140, 255, 180)
     l.Parent = Scroll
     return l
 end
@@ -435,7 +362,7 @@ local function Toggle(name, default, cb)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
     local function refresh()
         b.Text = (state and "[ON] " or "[OFF] ") .. name
-        b.BackgroundColor3 = state and Color3.fromRGB(60,180,90) or Color3.fromRGB(45,45,58)
+        b.BackgroundColor3 = state and Color3.fromRGB(45,160,90) or Color3.fromRGB(40,45,48)
     end
     refresh()
     local last = 0
@@ -449,7 +376,7 @@ end
 local function Button(name, cb)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(1, -4, 0, 32)
-    b.BackgroundColor3 = Color3.fromRGB(55, 55, 78)
+    b.BackgroundColor3 = Color3.fromRGB(50, 60, 58)
     b.Text = name b.Font = Enum.Font.GothamBold b.TextSize = 13
     b.TextColor3 = Color3.new(1,1,1)
     b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
@@ -459,7 +386,7 @@ local function Button(name, cb)
     local base = b.BackgroundColor3
     local function fire()
         local now = tick() if now - last < 0.3 then return end last = now
-        pcall(function() b.BackgroundColor3 = Color3.fromRGB(120,200,120) task.delay(0.15, function() pcall(function() b.BackgroundColor3 = base end) end) end)
+        pcall(function() b.BackgroundColor3 = Color3.fromRGB(120,200,140) task.delay(0.15, function() pcall(function() b.BackgroundColor3 = base end) end) end)
         pcall(cb)
     end
     b.Activated:Connect(fire) b.MouseButton1Click:Connect(fire) b.TouchTap:Connect(fire)
@@ -469,7 +396,7 @@ local function SliderBtn(name, min, max, step, default, cb)
     local val = default
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(1, -4, 0, 32)
-    b.BackgroundColor3 = Color3.fromRGB(50, 50, 72)
+    b.BackgroundColor3 = Color3.fromRGB(45, 55, 52)
     b.Font = Enum.Font.GothamBold b.TextSize = 13
     b.TextColor3 = Color3.new(1,1,1)
     b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
@@ -478,21 +405,18 @@ local function SliderBtn(name, min, max, step, default, cb)
     local function refresh() b.Text = name .. ": " .. tostring(val) .. " (тап = +)" end
     refresh()
     local last = 0
-    b.Activated:Connect(function()
+    local function fire()
         local now = tick() if now - last < 0.2 then return end last = now
         val = val + step if val > max then val = min end refresh() pcall(cb, val)
-    end)
-    b.MouseButton1Click:Connect(function()
-        local now = tick() if now - last < 0.2 then return end last = now
-        val = val + step if val > max then val = min end refresh() pcall(cb, val)
-    end)
+    end
+    b.Activated:Connect(fire) b.MouseButton1Click:Connect(fire)
     return b
 end
 
 Section("Статус")
 local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -4, 0, 44)
-Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+Status.Size = UDim2.new(1, -4, 0, 52)
+Status.BackgroundColor3 = Color3.fromRGB(26, 32, 30)
 Status.Font = Enum.Font.Gotham Status.TextSize = 12
 Status.TextColor3 = Color3.new(1,1,1)
 Status.TextWrapped = true
@@ -500,117 +424,46 @@ Status.Text = "Загрузка..."
 Status.Parent = Scroll
 Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
 
-Section("Good Noodle 🍜")
-Toggle("Auto 100% статы", false, function(s) Config.AutoStats = s Notify("Daycare", s and "Auto-статы ВКЛ" or "Auto-статы ВЫКЛ") end)
-Toggle("Auto Eat (кушать)", false, function(s) Config.AutoEat = s end)
-Toggle("Auto Sleep (спать)", false, function(s) Config.AutoSleep = s end)
-Toggle("Auto Hygiene (мыться)", false, function(s) Config.AutoHygiene = s end)
-Button("Покушать сейчас (ТП к еде)", function()
+Section("Выживший 💻")
+Toggle("Auto-Hack (рядом)", false, function(s) Config.AutoHack = s Notify("FTF", s and "Auto-Hack ВКЛ — встань у компа" or "ВЫКЛ") end)
+Toggle("Auto-QTE (не фейлить)", true, function(s) Config.AutoQTE = s end)
+SliderBtn("Hack Distance", 8, 30, 2, 14, function(v) Config.HackDistance = v end)
+Toggle("Inf Stamina (бег)", false, function(s) Config.InfStamina = s end)
+Toggle("Auto-Struggle (вырваться)", false, function(s) Config.AutoStruggle = s end)
+Button("ТП к ближ. НЕ взломанному ПК", function()
     local my = GetHRP() if not my then return end
-    local foods = FindPartsByKeys({"jelly","food","cafeteria","table","chair","eat","cake","dining"}, 20)
-    if #foods == 0 then Notify("Daycare", "Еда не найдена, иду в кафетерий") end
+    local comps = GetComputers()
     local best, bd = nil, 1e9
-    for _, f in ipairs(foods) do local d = (my.Position - f.pos).Magnitude if d < bd then bd = d best = f end end
-    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("Daycare", "ТП: " .. best.name) end
-    FireList(EatRemotes)
-    local tool = GetTool() if tool then EquipTool(tool) pcall(function() tool:Activate() end) end
-end)
-Button("Спать сейчас (ТП к кровати)", function()
-    local my = GetHRP() if not my then return end
-    local beds = FindPartsByKeys({"bed","capsule","sleep","dorm","quarters","mattress"}, 20)
-    local best, bd = nil, 1e9
-    for _, f in ipairs(beds) do local d = (my.Position - f.pos).Magnitude if d < bd then bd = d best = f end end
-    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("Daycare", "ТП: " .. best.name) else Notify("Daycare", "Кровати не найдены") end
-    FireList(SleepRemotes)
-end)
-
-Section("ESP")
-Toggle("ESP Scientists (красные)", true, function(s) Config.ESP_Scientist = s end)
-Toggle("ESP Patients (зелёные)", true, function(s) Config.ESP_Patient = s end)
-Button("Очистить ESP", function()
-    for _, p in ipairs(Players:GetPlayers()) do
-        local c = p.Character
-        if c then
-            local h = c:FindFirstChild("_DC_HL") if h then h:Destroy() end
-            local b = c:FindFirstChild("_DC_BB") if b then b:Destroy() end
-        end
+    for _, c in ipairs(comps) do
+        if not c.hacked then local d = (my.Position - c.pos).Magnitude if d < bd then bd = d best = c end end
     end
-end)
-
-Section("Движение")
-Toggle("Speed", false, function(s) Config.SpeedEnabled = s end)
-SliderBtn("WalkSpeed", 16, 150, 2, 32, function(v) Config.SpeedValue = v end)
-SliderBtn("JumpPower", 50, 200, 10, 50, function(v) Config.JumpValue = v pcall(function() local h = GetHum() if h then h.JumpPower = v h.UseJumpPower = true end end) end)
-Toggle("Fly (летит куда идёшь)", false, function(s) Config.FlyEnabled = s end)
-SliderBtn("FlySpeed", 20, 150, 5, 50, function(v) Config.FlySpeed = v end)
-Toggle("Noclip (сквозь стены)", false, function(s) Config.Noclip = s end)
-Toggle("Inf Jump", false, function(s) Config.InfJump = s end)
-
-Section("Защита")
-Toggle("Anti-Snatch (анти-захват)", false, function(s) Config.AntiSnatch = s Notify("Daycare", s and "Anti-Snatch ВКЛ" or "ВЫКЛ") end)
-Toggle("Anti-Test / Anti-Kill (лаб.)", false, function(s) Config.AntiTest = s end)
-Toggle("Anti Lights-Out (свет)", false, function(s)
-    Config.AntiLightsOut = s
-    if s then Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000 Lighting.GlobalShadows = false Lighting.Ambient = Color3.new(1,1,1) end
-end)
-Toggle("Fullbright", false, function(s)
-    Config.Fullbright = s
-    if s then Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000 Lighting.GlobalShadows = false
-    else Lighting.Brightness = 1 Lighting.GlobalShadows = true end
-end)
-
-Section("Телепорты комнат")
-for label, keys in pairs(ROOM_KEYS) do
-    Button("ТП: " .. label, function()
-        local my = GetHRP() if not my then return end
-        local pts = FindPartsByKeys(keys, 30)
-        if #pts == 0 then Notify("Daycare", "Не найдено: " .. label) return end
-        local best, bd = nil, 1e9
-        for _, f in ipairs(pts) do local d = (my.Position - f.pos).Magnitude if d < bd then bd = d best = f end end
-        if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("Daycare", "ТП: " .. label .. " (" .. best.name .. ")") end
-    end)
-end
-Button("Сохранить точку", function() local h = GetHRP() if h then SavedCF = h.CFrame Notify("Daycare", "Точка сохранена") end end)
-Button("ТП на сохранённую", function() local h = GetHRP() if h and SavedCF then h.CFrame = SavedCF + Vector3.new(0,3,0) end end)
-Button("ТП к ближайшему игроку", function()
-    local my = GetHRP() if not my then return end
-    local best, bd = nil, 1e9
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            local t = p.Character:FindFirstChild("HumanoidRootPart")
-            if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
-        end
+    if not best and #comps > 0 then -- все взломаны, идём к любому
+        for _, c in ipairs(comps) do local d = (my.Position - c.pos).Magnitude if d < bd then bd = d best = c end end
     end
-    if best then my.CFrame = best.CFrame + Vector3.new(0,2,3) end
+    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("FTF", "ТП: " .. best.name .. (best.hacked and " (взломан)" or "")) else Notify("FTF", "ПК не найдены") end
 end)
-
-Section("Scientist 🧪")
-Toggle("Grab Aura (цеплять рядом)", false, function(s) Config.GrabAura = s end)
-SliderBtn("Grab Distance", 8, 60, 2, 18, function(v) Config.GrabDistance = v end)
-Button("Взять Snatch-tool (если рядом)", function()
+Button("ТП к выходу (Exit)", function()
     local my = GetHRP() if not my then return end
+    local exits = GetExits()
+    if #exits == 0 then Notify("FTF", "Выходы закрыты / не найдены (взломай все ПК)") return end
     local best, bd = nil, 1e9
-    for _, d in ipairs(Workspace:GetDescendants()) do
-        if d:IsA("Tool") then
-            local n = string.lower(d.Name)
-            if string.find(n, "snatch") or string.find(n, "grab") then
-                local h = d:FindFirstChild("Handle")
-                if h then local dd = (my.Position - h.Position).Magnitude if dd < bd then bd = dd best = h end end
-            end
-        end
-    end
-    if best then my.CFrame = CFrame.new(best.Position + Vector3.new(0,3,0)) else Notify("Daycare", "Snatch не найден на полу — ищи у доски учёных") end
+    for _, e in ipairs(exits) do local d = (my.Position - e.pos).Magnitude if d < bd then bd = d best = e end end
+    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("FTF", "ТП: " .. best.name) end
 end)
-Button("Claim комнаты (тап рядом с дверью)", function()
-    Notify("Daycare", "Подойди к своей двери и нажми Claim вручную — авто-клейм ниже")
+Button("Спастись: открыть Exit", function()
+    FireList(ExitRemotes)
+    FireList(ExitRemotes, true)
     pcall(function()
         for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("ClickDetector") or d:IsA("ProximityPrompt") then
+            if (d:IsA("ProximityPrompt") or d:IsA("ClickDetector")) then
                 local n = string.lower(d.Parent and d.Parent.Name or d.Name)
-                if string.find(n, "claim") then
+                if string.find(n, "exit") or string.find(n, "escape") or string.find(n, "door") then
                     pcall(function()
-                        if d:IsA("ClickDetector") and fireclickdetector then fireclickdetector(d) end
-                        if d:IsA("ProximityPrompt") and fireproximityprompt then fireproximityprompt(d) end
+                        local my = GetHRP()
+                        if my and d.Parent and d.Parent:IsA("BasePart") and (my.Position - d.Parent.Position).Magnitude < 20 then
+                            if d:IsA("ProximityPrompt") and fireproximityprompt then fireproximityprompt(d) end
+                            if d:IsA("ClickDetector") and fireclickdetector then fireclickdetector(d) end
+                        end
                     end)
                 end
             end
@@ -618,9 +471,75 @@ Button("Claim комнаты (тап рядом с дверью)", function()
     end)
 end)
 
+Section("Зверь 👹")
+Button("ТП к ближ. выжившему", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and not IsBeast(p) and p.Character then
+            local t = p.Character:FindFirstChild("HumanoidRootPart")
+            if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
+        end
+    end
+    if best then my.CFrame = best.CFrame + Vector3.new(0,1,2) else Notify("FTF", "Выжившие не найдены") end
+end)
+Button("ТП к капсулам (Pods)", function()
+    local my = GetHRP() if not my then return end
+    local pods = GetPods()
+    if #pods == 0 then Notify("FTF", "Капсулы не найдены") return end
+    local best, bd = nil, 1e9
+    for _, e in ipairs(pods) do local d = (my.Position - e.pos).Magnitude if d < bd then bd = d best = e end end
+    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) end
+end)
+
+Section("ESP")
+Toggle("ESP Beast (красный)", true, function(s) Config.ESP_Beast = s end)
+Toggle("ESP Survivors (зелёные)", true, function(s) Config.ESP_Survivor = s end)
+Toggle("ESP Computers (синие)", true, function(s) Config.ESP_Computer = s end)
+Toggle("ESP Exit/Pods", true, function(s) Config.ESP_Exit = s Config.ESP_Pod = s end)
+Button("Очистить ESP", function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        local c = p.Character
+        if c then
+            local h = c:FindFirstChild("_FTF_HL") if h then h:Destroy() end
+            local b = c:FindFirstChild("_FTF_BB") if b then b:Destroy() end
+        end
+    end
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("Highlight") and (d.Name == "_FTF_C" or d.Name == "_FTF_E") then d:Destroy() end
+        if d:IsA("BillboardGui") and (d.Name == "_FTF_CB" or d.Name == "_FTF_EB") then d:Destroy() end
+    end
+end)
+
+Section("Движение")
+Toggle("Speed", false, function(s) Config.SpeedEnabled = s end)
+SliderBtn("WalkSpeed", 16, 40, 2, 20, function(v) Config.SpeedValue = v end)
+Toggle("Beast Speed (если зверь)", false, function(s) Config.BeastSpeed = s end)
+Toggle("Fly", false, function(s) Config.FlyEnabled = s end)
+SliderBtn("FlySpeed", 20, 150, 5, 50, function(v) Config.FlySpeed = v end)
+Toggle("Noclip", false, function(s) Config.Noclip = s end)
+Toggle("Inf Jump", false, function(s) Config.InfJump = s end)
+
 Section("Разное")
+Toggle("Anti-AFK", true, function(s) Config.AntiAFK = s end)
+Toggle("Fullbright (светлая карта)", false, function(s)
+    Config.Fullbright = s
+    if s then Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000 Lighting.GlobalShadows = false Lighting.Ambient = Color3.new(1,1,1)
+    else Lighting.Brightness = 1 Lighting.GlobalShadows = true end
+end)
+Toggle("FPS Boost", false, function(s)
+    Config.FPSBoost = s
+    pcall(function()
+        if s then
+            Lighting.GlobalShadows = false Lighting.FogEnd = 9e9
+            for _, v in ipairs(Workspace:GetDescendants()) do
+                if v:IsA("ParticleEmitter") or v:IsA("Trail") then v.Enabled = false end
+            end
+        end
+    end)
+end)
 Button("Rejoin", function() pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end) end)
-Button("ServerHop (малый онлайн)", function()
+Button("ServerHop", function()
     pcall(function()
         local cursor = ""
         local HttpService = game:GetService("HttpService")
@@ -644,7 +563,7 @@ Button("ServerHop (малый онлайн)", function()
     end)
 end)
 
--- ============ ESP LOOP ============
+-- ============ ESP PLAYERS ============
 local function ApplyESP(plr)
     if plr == LocalPlayer then return end
     local c = plr.Character
@@ -652,15 +571,15 @@ local function ApplyESP(plr)
     local hrp = c:FindFirstChild("HumanoidRootPart")
     local hum = c:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum or hum.Health <= 0 then return end
-    local sci = IsScientist(plr)
-    local show = (sci and Config.ESP_Scientist) or ((not sci) and Config.ESP_Patient)
-    local hl = c:FindFirstChild("_DC_HL")
-    local bb = c:FindFirstChild("_DC_BB")
+    local beast = IsBeast(plr)
+    local show = (beast and Config.ESP_Beast) or ((not beast) and Config.ESP_Survivor)
+    local hl = c:FindFirstChild("_FTF_HL")
+    local bb = c:FindFirstChild("_FTF_BB")
     if not show then if hl then hl:Destroy() end if bb then bb:Destroy() end return end
-    local col = sci and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(50, 255, 100)
+    local col = beast and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(60, 255, 120)
     if not hl then
         hl = Instance.new("Highlight")
-        hl.Name = "_DC_HL"
+        hl.Name = "_FTF_HL"
         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         hl.FillTransparency = 0.6 hl.OutlineTransparency = 0
         hl.Parent = c
@@ -668,8 +587,8 @@ local function ApplyESP(plr)
     hl.FillColor = col hl.OutlineColor = col
     if not bb then
         bb = Instance.new("BillboardGui")
-        bb.Name = "_DC_BB"
-        bb.Size = UDim2.new(0, 130, 0, 42)
+        bb.Name = "_FTF_BB"
+        bb.Size = UDim2.new(0, 140, 0, 42)
         bb.StudsOffset = Vector3.new(0, 3, 0)
         bb.AlwaysOnTop = true
         bb.Parent = c
@@ -684,17 +603,68 @@ local function ApplyESP(plr)
     local dist = my and math.floor((my.Position - hrp.Position).Magnitude) or 0
     local tl = bb:FindFirstChild("TL")
     if tl then
-        tl.Text = plr.DisplayName .. " (" .. dist .. "m)\n" .. (sci and "SCIENTIST" or "PATIENT") .. " | " .. math.floor(hum.Health) .. "HP"
+        tl.Text = plr.DisplayName .. " (" .. dist .. "m)\n" .. (beast and "BEAST 👹" or "SURVIVOR") .. " | " .. math.floor(hum.Health) .. "HP"
         tl.TextColor3 = col
     end
     local head = c:FindFirstChild("Head")
     if head then bb.Adornee = head end
 end
 
+local function ESPObject(model, hlName, bbName, text, color)
+    if not model or not model.Parent then return end
+    local main = model:IsA("BasePart") and model or (model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true))
+    if not main then return end
+    local hl = model:FindFirstChild(hlName)
+    if not hl then
+        hl = Instance.new("Highlight")
+        hl.Name = hlName
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.FillTransparency = 0.7 hl.OutlineTransparency = 0
+        hl.FillColor = color hl.OutlineColor = color
+        pcall(function() hl.Parent = model end)
+        if not hl.Parent then hl:Destroy() return end
+    end
+    local bb = model:FindFirstChild(bbName)
+    if not bb then
+        bb = Instance.new("BillboardGui")
+        bb.Name = bbName
+        bb.Size = UDim2.new(0, 120, 0, 28)
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        pcall(function() bb.Parent = model bb.Adornee = main end)
+        local tl = Instance.new("TextLabel")
+        tl.Name = "TL" tl.Size = UDim2.new(1,0,1,0)
+        tl.BackgroundTransparency = 1 tl.Font = Enum.Font.GothamBold tl.TextSize = 12
+        tl.TextStrokeTransparency = 0.2 tl.TextColor3 = color tl.Text = text
+        tl.Parent = bb
+    else
+        local tl = bb:FindFirstChild("TL")
+        if tl then tl.Text = text tl.TextColor3 = color end
+    end
+end
+
 task.spawn(function()
     while gui.Parent and IsCurrentGen() do
-        task.wait(0.5)
-        pcall(function() for _, p in ipairs(Players:GetPlayers()) do ApplyESP(p) end end)
+        task.wait(0.7)
+        pcall(function()
+            for _, p in ipairs(Players:GetPlayers()) do ApplyESP(p) end
+            if Config.ESP_Computer then
+                for _, c in ipairs(GetComputers()) do
+                    local col = c.hacked and Color3.fromRGB(80, 255, 120) or Color3.fromRGB(80, 160, 255)
+                    ESPObject(c.model, "_FTF_C", "_FTF_CB", (c.hacked and "✅ " or "💻 ") .. c.name, col)
+                end
+            end
+            if Config.ESP_Exit then
+                for _, e in ipairs(GetExits()) do
+                    ESPObject(e.model, "_FTF_E", "_FTF_EB", "🚪 EXIT", Color3.fromRGB(255, 220, 80))
+                end
+            end
+            if Config.ESP_Pod then
+                for _, e in ipairs(GetPods()) do
+                    ESPObject(e.model, "_FTF_E", "_FTF_EB", "❄ Pod", Color3.fromRGB(140, 220, 255))
+                end
+            end
+        end)
     end
 end)
 
@@ -703,8 +673,32 @@ RunService.Heartbeat:Connect(function()
     if not IsCurrentGen() then return end
     pcall(function()
         local hum = GetHum()
-        if hum and hum.Health > 0 and Config.SpeedEnabled then
-            hum.WalkSpeed = Config.SpeedValue
+        if hum and hum.Health > 0 then
+            if Config.SpeedEnabled then hum.WalkSpeed = Config.SpeedValue end
+            if Config.BeastSpeed and AmIBeast() then hum.WalkSpeed = math.max(hum.WalkSpeed, 22) end
+        end
+        -- Inf stamina: ищем NumberValue Stamina/Energy
+        if Config.InfStamina then
+            for _, d in ipairs(LocalPlayer:GetChildren()) do
+                if (d:IsA("NumberValue") or d:IsA("IntValue")) then
+                    local n = string.lower(d.Name)
+                    if string.find(n, "stamina") or string.find(n, "energy") or string.find(n, "sprint") then
+                        if d.MaxValue and d.MaxValue > 0 then d.Value = d.MaxValue else d.Value = 100 end
+                    end
+                end
+            end
+            local c = GetChar()
+            if c then
+                for _, d in ipairs(c:GetChildren()) do
+                    if (d:IsA("NumberValue") or d:IsA("IntValue")) then
+                        local n = string.lower(d.Name)
+                        if string.find(n, "stamina") or string.find(n, "energy") then d.Value = 100 end
+                    end
+                end
+                pcall(function()
+                    if c:GetAttribute("Stamina") ~= nil then c:SetAttribute("Stamina", 100) end
+                end)
+            end
         end
     end)
 end)
@@ -749,150 +743,110 @@ task.spawn(function()
     end
 end)
 
--- ============ AUTO STATS (Good Noodle) ============
+-- ============ AUTO-HACK ============
 task.spawn(function()
     while gui.Parent and IsCurrentGen() do
-        task.wait(0.5)
-        if Config.AutoStats or Config.AutoEat or Config.AutoSleep or Config.AutoHygiene then
+        task.wait(0.4)
+        if Config.AutoHack then
             pcall(function()
-                -- 1. прямое выставление Values
-                for _, v in ipairs(GetStatHolders()) do
-                    local n = string.lower(v.Name)
-                    local want = false
-                    if Config.AutoStats then want = true
-                    elseif Config.AutoEat and (string.find(n,"hunger") or string.find(n,"food") or string.find(n,"eat")) then want = true
-                    elseif Config.AutoSleep and (string.find(n,"energy") or string.find(n,"sleep")) then want = true
-                    elseif Config.AutoHygiene and (string.find(n,"hygiene") or string.find(n,"clean") or string.find(n,"wash")) then want = true
-                    end
-                    if want then
-                        if v:IsA("NumberValue") then v.Value = v.MaxValue > 0 and v.MaxValue or 100
-                        elseif v:IsA("IntValue") then v.Value = 100 end
-                    end
-                end
-                -- 2. атрибуты
-                local function setAttr(holder, names)
-                    for _, an in ipairs(names) do
-                        pcall(function() if holder:GetAttribute(an) ~= nil then holder:SetAttribute(an, 100) end end)
-                    end
-                end
-                if Config.AutoStats or Config.AutoEat or Config.AutoSleep or Config.AutoHygiene then
-                    setAttr(LocalPlayer, {"Hunger","Energy","Hygiene","Happiness","Mood","Food","Sleep"})
-                    local c = GetChar()
-                    if c then setAttr(c, {"Hunger","Energy","Hygiene","Happiness","Mood","Food","Sleep"}) end
-                end
-                -- 3. ремоуты
-                if Config.AutoStats or Config.AutoEat then FireList(EatRemotes) FireList(StatRemotes, "eat") end
-                if Config.AutoStats or Config.AutoSleep then FireList(SleepRemotes) FireList(StatRemotes, "sleep") end
-                if Config.AutoHygiene then FireList(StatRemotes) end
-                -- 4. touch еды/кровати рядом (best effort, без телепорта — не дёргаем камеру)
-                local myHRP = GetHRP()
-                if myHRP and firetouchinterest then
-                    if Config.AutoEat then
-                        for _, d in ipairs(Workspace:GetDescendants()) do
-                            if d:IsA("BasePart") then
-                                local n = string.lower(d.Name)
-                                if string.find(n, "jelly") or string.find(n, "food") then
-                                    if (myHRP.Position - d.Position).Magnitude < 12 then
-                                        firetouchinterest(myHRP, d, 0) task.wait() firetouchinterest(myHRP, d, 1)
+                local my = GetHRP() if not my then return end
+                -- 1) жмём ProximityPrompt компьютеров рядом
+                if fireproximityprompt then
+                    for _, d in ipairs(Workspace:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") then
+                            local par = d.Parent
+                            if par and par:IsA("BasePart") then
+                                local an = d.Parent.Parent
+                                local anName = an and string.lower(an.Name) or ""
+                                local pn = string.lower(par.Name)
+                                if string.find(anName, "computer") or string.find(anName, "pc") or string.find(pn, "screen") or string.find(pn, "keyboard") then
+                                    if (my.Position - par.Position).Magnitude <= Config.HackDistance and d.Enabled then
+                                        fireproximityprompt(d)
                                     end
                                 end
                             end
                         end
                     end
                 end
-            end)
-        end
-    end
-end)
-
--- ============ GRAB AURA (scientist) ============
-task.spawn(function()
-    while gui.Parent and IsCurrentGen() do
-        task.wait(0.3)
-        if Config.GrabAura then
-            pcall(function()
-                local myHRP = GetHRP()
-                if not myHRP then return end
-                local tool = GetTool() if tool then EquipTool(tool) end
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character and not IsScientist(p) then
-                        local thrp = p.Character:FindFirstChild("HumanoidRootPart")
-                        local thum = p.Character:FindFirstChildOfClass("Humanoid")
-                        if thrp and thum and thum.Health > 0 and (myHRP.Position - thrp.Position).Magnitude <= Config.GrabDistance then
-                            if tool then pcall(function() tool:Activate() end) end
-                            pcall(function()
-                                if tool and tool:FindFirstChild("Handle") and firetouchinterest then
-                                    firetouchinterest(tool.Handle, thrp, 0) task.wait() firetouchinterest(tool.Handle, thrp, 1)
+                -- 2) дожимаем ремоутами хака
+                FireList(HackRemotes)
+                -- 3) Auto-QTE: ищем GUI хака и жмём
+                if Config.AutoQTE then
+                    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+                    if pg then
+                        for _, g in ipairs(pg:GetDescendants()) do
+                            if g:IsA("TextButton") or g:IsA("ImageButton") then
+                                local n = string.lower(g.Name)
+                                if (string.find(n, "hack") or string.find(n, "qte") or string.find(n, "skill") or g.Text == "E") and g.Visible then
+                                    -- проверяем что это окно хака активно
+                                    local par = g.Parent
+                                    if par and par.Visible ~= false then
+                                        pcall(function()
+                                            for _, c in ipairs({g.Activated, g.MouseButton1Click}) do end
+                                            -- эмулируем клик через fire signal? проще: вызываем через clickdetector-фолбэк
+                                        end)
+                                        -- пробуем нажать через VirtualInput невозможен на Delta, поэтому жмём через firesignal если есть
+                                        pcall(function()
+                                            if firesignal then firesignal(g.MouseButton1Click) end
+                                        end)
+                                    end
                                 end
-                                if firetouchinterest then
-                                    firetouchinterest(myHRP, thrp, 0) task.wait() firetouchinterest(myHRP, thrp, 1)
-                                end
-                            end)
+                            end
                         end
                     end
                 end
-                FireList(GrabRemotes)
-            end)
-        end
-    end
-end)
-
--- ============ ANTI-SNATCH / ANTI-TEST ============
-task.spawn(function()
-    while gui.Parent and IsCurrentGen() do
-        task.wait(0.2)
-        if Config.AntiSnatch then
-            pcall(function()
-                local c = GetChar() local hrp = GetHRP() local hum = GetHum()
-                if not c or not hrp or not hum then return end
-                local grabbed = false
-                if hum.Seated then grabbed = true end
-                if c:GetAttribute("Grabbed") == true or c:GetAttribute("Carried") == true or c:GetAttribute("Held") == true then grabbed = true end
-                for _, v in ipairs(hrp:GetChildren()) do
-                    if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then grabbed = true v:Destroy() end
-                end
-                for _, v in ipairs(c:GetDescendants()) do
-                    if v:IsA("Weld") or v:IsA("WeldConstraint") then
-                        local n = string.lower(v.Name)
-                        if string.find(n,"grab") or string.find(n,"hold") or string.find(n,"carry") or string.find(n,"snatch") then grabbed = true v:Destroy() end
-                    end
-                end
-                if grabbed then
-                    hum.Sit = false hum.PlatformStand = false
-                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
-                    hrp.CFrame = hrp.CFrame + Vector3.new(0, 4, 0) + hrp.CFrame.LookVector * -5
-                    hrp.Velocity = Vector3.new(0, 50, 0)
+                -- 4) Anti-fail: не даём стамине упасть во время хака
+                if Config.InfStamina then
+                    local hum = GetHum()
+                    if hum then hum.WalkSpeed = Config.SpeedEnabled and Config.SpeedValue or hum.WalkSpeed end
                 end
             end)
         end
-        if Config.AntiTest then
+        if Config.AutoStruggle then
             pcall(function()
+                -- спам struggle-ремоутов + прыжки чтобы вырваться из лап/капсулы
+                FireList(PodRemotes)
                 local hum = GetHum()
-                if hum then hum.Sit = false hum.PlatformStand = false
-                    if hum:GetState() == Enum.HumanoidStateType.Physics or hum:GetState() == Enum.HumanoidStateType.Ragdoll then
-                        hum:ChangeState(Enum.HumanoidStateType.Running)
+                if hum and hum.Seated then
+                    hum.Jump = true
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+                -- кликаем кнопки Struggle/Escape в GUI
+                local pg = LocalPlayer:FindFirstChild("PlayerGui")
+                if pg and firesignal then
+                    for _, g in ipairs(pg:GetDescendants()) do
+                        if g:IsA("TextButton") and g.Visible then
+                            local t = string.lower(g.Text)
+                            if string.find(t, "struggle") or string.find(t, "escape") or string.find(t, "mash") or string.find(t, "free") then
+                                firesignal(g.MouseButton1Click)
+                            end
+                        end
                     end
                 end
             end)
+            task.wait(0.2)
         end
     end
 end)
 
--- Anti-LightsOut: гасим локальные тёмные эффекты
+-- ============ ANTI-AFK / FULLBRIGHT LOOP ============
+LocalPlayer.Idled:Connect(function()
+    if Config.AntiAFK and IsCurrentGen() then
+        pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end)
+    end
+end)
 task.spawn(function()
     while gui.Parent and IsCurrentGen() do
         task.wait(3)
-        if Config.AntiLightsOut or Config.Fullbright or Config.AntiTest then
+        if Config.Fullbright then
             pcall(function()
                 Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000
-                Lighting.GlobalShadows = false
-                if Config.AntiLightsOut then Lighting.Ambient = Color3.new(1,1,1) Lighting.OutdoorAmbient = Color3.new(1,1,1) end
+                Lighting.GlobalShadows = false Lighting.Ambient = Color3.new(1,1,1)
             end)
         end
     end
 end)
 
--- Респавн: вернуть скорость/прыжок
 LocalPlayer.CharacterAdded:Connect(function(c)
     task.wait(1)
     pcall(function()
@@ -904,26 +858,20 @@ LocalPlayer.CharacterAdded:Connect(function(c)
     end)
 end)
 
--- Статус-строка
+-- Статус
 task.spawn(function()
     while gui.Parent and IsCurrentGen() do
-        task.wait(1)
+        task.wait(1.5)
         pcall(function()
-            local role = IsScientist(LocalPlayer) and "SCIENTIST 🧪" or "PATIENT 🙂"
-            local gn = IsGoodNoodle()
-            local gnTxt = (gn == nil and "?") or (gn and "GOOD ✅" or "BAD ❌")
-            local stats = ReadStats()
-            local stTxt = ""
-            if #stats > 0 then
-                local parts = {}
-                for i = 1, math.min(#stats, 3) do table.insert(parts, stats[i].name .. ":" .. math.floor(stats[i].value)) end
-                stTxt = " | " .. table.concat(parts, " ")
-            end
-            local placeWarn = PLACE_IDS[game.PlaceId] and "" or " (не Daycare?)"
-            Status.Text = role .. " | " .. gnTxt .. stTxt .. "\nОнлайн: " .. #Players:GetPlayers() .. placeWarn .. " | " .. os.date("%H:%M:%S")
+            local role = AmIBeast() and "BEAST 👹" or "SURVIVOR 🙂"
+            local comps = GetComputers()
+            local left = 0
+            for _, c in ipairs(comps) do if not c.hacked then left = left + 1 end end
+            local placeWarn = (game.PlaceId == PLACE_ID) and "" or " (не FTF?)"
+            Status.Text = role .. " | ПК: " .. left .. "/" .. #comps .. " осталось" .. placeWarn .. "\nОнлайн: " .. #Players:GetPlayers() .. " | " .. os.date("%H:%M:%S")
         end)
     end
 end)
 
-Notify("Daycare Hub", "Загружено! Вставь еду/сон в Auto для Good Noodle 🍜", 5)
-print("[DaycareHub] loaded, place " .. tostring(game.PlaceId))
+Notify("FTF Hub", "Загружено! Встань у ПК и включи Auto-Hack 💻", 5)
+print("[FTFHub] loaded, place " .. tostring(game.PlaceId) .. " hack=" .. #HackRemotes)
