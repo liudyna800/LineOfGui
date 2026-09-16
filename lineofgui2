@@ -1,305 +1,324 @@
-local SELF = [=====[
--- GIANT RAID HOP | Infectious Smile | Delta (auto-queue, no URL needed)
--- Вставь весь файл в Delta -> Execute. Дальше хопы сами подхватываются.
--- S = self source (upvalue SELF set by header). Reconstructs full file, queues it (IY mechanic, no URL needed).
--- NB: closer built dynamically so source never contains the raw closer bytes.
-local _CLOSE = "]" .. "=====]"
-local FULL = "local SELF = [=====[\n" .. SELF .. "\n" .. _CLOSE .. "\n" .. SELF
+-- Daycare 💥 | Delta Hub (Keyless, Mobile Friendly)
+-- Place: Daycare by CleanMeanBeans (6066404016) + CLASSROOMS
+-- Executor: Delta (Android / iOS / PC), также Xeno / Codex / Fluxus
+-- Функции: Good Noodle 100%, Auto Eat/Sleep, ESP, Speed/Fly/Noclip, Anti-Snatch/Test, Fullbright Anti-LightsOut, Телепорты комнат, Scientist-панель
+-- Использование: вставить в Delta -> Execute. Повторный Execute не дублирует GUI.
 
-local SCRIPT_URL = "" -- оставить пустым: работает без pastebin за счёт SELF-очереди
-local PLACE_ID = 5985232436
-local HOP_DELAY = 5
-local AUTO_HOP = true
-local MIN_PLAYERS = 8 -- хопать только на сервера с 8+ игроками (полные/средние)
+if getgenv and getgenv()._DaycareHubLoaded then
+    pcall(function() getgenv()._DaycareHubGui:Destroy() end)
+end
+if getgenv then
+    getgenv()._DaycareHubLoaded = true
+    getgenv()._DaycareHubGen = (getgenv()._DaycareHubGen or 0) + 1
+end
+local MY_GEN = getgenv and getgenv()._DaycareHubGen or 1
+local function IsCurrentGen()
+    if not getgenv then return true end
+    return getgenv()._DaycareHubGen == MY_GEN
+end
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 
-if getgenv and getgenv()._GiantRaidRunning then
-    pcall(function() getgenv()._GiantRaidGui:Destroy() end)
-end
-if getgenv then
-    getgenv()._GiantRaidRunning = true
-    getgenv()._GiantRaidVisited = getgenv()._GiantRaidVisited or {}
-end
+local PLACE_IDS = { [6066404016] = true }
 
+local Config = {
+    AutoStats = false,      -- держать все статы 100% (Good Noodle)
+    AutoEat = false,
+    AutoSleep = false,
+    AutoHygiene = false,
+    ESP_Scientist = true,
+    ESP_Patient = true,
+    ESP_Beds = false,
+    SpeedEnabled = false,
+    SpeedValue = 32,
+    JumpValue = 50,
+    FlyEnabled = false,
+    FlySpeed = 50,
+    Noclip = false,
+    InfJump = false,
+    AntiSnatch = false,     -- анти-захват scientist'ом (рвёт велды + отброс)
+    AntiTest = false,       -- попытка блочить тесты/убийство в лабе (CanTouch off + анти-сит)
+    AntiLightsOut = false,  -- светлая карта при Lights Out
+    Fullbright = false,
+    GrabAura = false,       -- scientist: цеплять пациентов рядом
+    GrabDistance = 18,
+    FlingEnabled = false,
+}
+
+local SavedCF = nil
+task.spawn(function()
+    pcall(function()
+        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = c:WaitForChild("HumanoidRootPart", 5)
+        if hrp then SavedCF = hrp.CFrame end
+    end)
+end)
+
+-- ============ HELPERS ============
+local function GetChar(plr)
+    plr = plr or LocalPlayer
+    return plr.Character
+end
+local function GetHRP(plr)
+    local c = GetChar(plr)
+    if c then return c:FindFirstChild("HumanoidRootPart") end
+    return nil
+end
+local function GetHum(plr)
+    local c = GetChar(plr)
+    if c then return c:FindFirstChildOfClass("Humanoid") end
+    return nil
+end
 local function Notify(title, text, dur)
     pcall(function()
-        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 4})
+        StarterGui:SetCore("SendNotification", {Title = tostring(title), Text = tostring(text), Duration = dur or 4})
     end)
-    print("[GiantRaid] " .. tostring(text))
+    print("[DaycareHub] " .. tostring(text))
 end
 
--- ============ QUEUE ON TELEPORT (как Infinite Yield, но без ссылки) ============
-local QueueStatus = "?"
-local function TryQueue(src)
-    local variants = {}
-    pcall(function()
-        if queue_on_teleport then table.insert(variants, queue_on_teleport) end
+-- Роль: Scientist = есть Snatch-tool / Team Scientist / атрибут
+local function IsScientist(plr)
+    local ok, res = pcall(function()
+        if not plr then return false end
+        if plr.Team and plr.Team.Name then
+            local t = string.lower(plr.Team.Name)
+            if string.find(t, "scien") or string.find(t, "doctor") or string.find(t, "staff") then return true end
+            if string.find(t, "patient") or string.find(t, "baby") or string.find(t, "noodle") then return false end
+        end
+        local c = plr.Character
+        if c then
+            if c:GetAttribute("Scientist") == true or c:GetAttribute("IsScientist") == true then return true end
+            if c:GetAttribute("Patient") == true then return false end
+            if c:FindFirstChild("IsScientist") or c:FindFirstChild("Scientist") then return true end
+            for _, tool in ipairs(c:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local n = string.lower(tool.Name)
+                    if string.find(n, "snatch") or string.find(n, "grab") or string.find(n, "syringe")
+                    or string.find(n, "laser") or string.find(n, "test") or string.find(n, "scanner") then
+                        return true
+                    end
+                end
+            end
+        end
+        local bp = plr:FindFirstChild("Backpack")
+        if bp then
+            for _, tool in ipairs(bp:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local n = string.lower(tool.Name)
+                    if string.find(n, "snatch") or string.find(n, "grab") or string.find(n, "syringe")
+                    or string.find(n, "laser") or string.find(n, "test") or string.find(n, "scanner") then
+                        return true
+                    end
+                end
+            end
+        end
+        if plr:GetAttribute("Scientist") == true or plr:GetAttribute("IsScientist") == true then return true end
+        return false
     end)
-    pcall(function()
-        if queueonteleport then table.insert(variants, queueonteleport) end
-    end)
-    pcall(function()
-        if syn and syn.queue_on_teleport then table.insert(variants, syn.queue_on_teleport) end
-    end)
-    if getgenv then
-        pcall(function()
-            if getgenv().queue_on_teleport then table.insert(variants, getgenv().queue_on_teleport) end
-        end)
-        pcall(function()
-            if getgenv().queueonteleport then table.insert(variants, getgenv().queueonteleport) end
-        end)
-    end
-    for _, q in ipairs(variants) do
-        local ok = pcall(function() q(src) end)
-        if ok then return true end
+    if not ok then return false end
+    return res == true
+end
+
+-- Статы пациента: ищем Hunger/Energy/Hygiene/Happiness/Health/Weight и т.п.
+local STAT_KEYS = {"hunger","energy","hygiene","clean","happy","happiness","mood","health","food","sleep","stamina","thirst","fun","comfort","weight"}
+local function IsStatName(n)
+    n = string.lower(tostring(n))
+    for _, k in ipairs(STAT_KEYS) do
+        if string.find(n, k) then return true end
     end
     return false
 end
 
-local function QueueSelf()
-    local src = FULL
-    if SCRIPT_URL ~= "" then
-        src = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
-    end
-    if TryQueue(src) then
-        QueueStatus = "queue OK"
-        return true
-    else
-        QueueStatus = "queue НЕТ: executor не поддерживает queue_on_teleport. Положи файл в Delta > AutoExecute как запасной вариант."
-        Notify("Giant Raid", QueueStatus, 6)
-        return false
-    end
-end
-
--- ============ ДЕТЕКТ ГИГАНТА-ИГРОКА (NPC игнорим) ============
-local function IsPlayerGiant(plr)
-    if not plr or not plr.Character then return false, nil end
-    local c = plr.Character
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    local hrp = c:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return false, nil end
-    local info = {}
-    -- Гигант: 300 HP (endangered-гигант 400). Обычный endangered-смайл = 200 HP,
-    -- поэтому порог 250: отсекает endangered (200) и бигхедов (100).
-    if hum.MaxHealth and hum.MaxHealth >= 250 then
-        info.reason = "HP:" .. tostring(hum.MaxHealth)
-        return true, info
-    end
-    if c:GetAttribute("Giant") == true or c:GetAttribute("IsGiant") == true
-    or plr:GetAttribute("Giant") == true or plr:GetAttribute("IsGiant") == true then
-        info.reason = "attr"
-        return true, info
-    end
-    if c:FindFirstChild("Giant") or c:FindFirstChild("IsGiant") or c:FindFirstChild("GiantPotion") then
-        info.reason = "value"
-        return true, info
-    end
-    -- Тело x2 у гиганта (HRP ~4). Endangered +30% (~2.6) не проходит порог 3.0.
-    if hrp.Size.Y > 3.0 then
-        info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
-        return true, info
-    end
-    -- Детект по голове УБРАН: у обычных смайлов бывает шанс-бигхед (большая голова при 100 HP) - это не гигант.
-    local hasGlow = false
-    for _, d in ipairs(c:GetDescendants()) do
-        if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
-            hasGlow = true
-            break
-        end
-    end
-    -- Фиолетовое свечение гиганта + большое тело. У endangered красные партиклы
-    -- и мелкое тело (~2.6) - порог 3.0 их отсекает.
-    if hasGlow and hrp.Size.Y > 3.0 then
-        info.reason = "glow+size"
-        return true, info
-    end
-    return false, nil
-end
-
-local function FindGiants()
-    local found = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local ok, info = IsPlayerGiant(p)
-            if ok then
-                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-                local hum = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
-                table.insert(found, {
-                    name = p.DisplayName .. " (@" .. p.Name .. ")",
-                    player = p,
-                    hrp = hrp,
-                    hp = hum and math.floor(hum.Health) or 0,
-                    maxHp = hum and math.floor(hum.MaxHealth) or 0,
-                    reason = info and info.reason or "?",
-                })
-            end
-        end
-    end
-    return found
-end
-
--- ============ ФЛИНГ ПО ТАПУ НА НИК (кастом, в торс) ============
--- Тап по строке = вкл/выкл флинг этой цели. Контакт держится каждый кадр,
--- т.к. хитбокс гиганта капризный и с одного касания не флингает.
-local RunService = game:GetService("RunService")
-local FLING_SPIN = 50 -- средняя мощность, чуть ниже (рад/с). Больше = жёстче.
-local flingTarget = nil
-local flinging = false
-local flingConns = {}
-local flingSavedCF = nil
-local flingT = 0 -- счётчик кадров орбиты
-
-local function GetTorso(char)
-    if not char then return nil end
-    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-end
-
-local function StopFling(silent, noRestore)
-    flinging = false
-    flingTarget = nil
-    for _, c in ipairs(flingConns) do pcall(function() c:Disconnect() end) end
-    flingConns = {}
+local function GetStatHolders()
+    -- возвращает список Number/IntValue похожих на статы
+    local out = {}
     pcall(function()
-        local c = LocalPlayer.Character
-        if c then
-            for _, v in ipairs(c:GetDescendants()) do
-                if (v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity")) and v.Name == "_GFling" then
-                    v:Destroy()
+        local function scan(parent)
+            for _, d in ipairs(parent:GetChildren()) do
+                if d:IsA("NumberValue") or d:IsA("IntValue") then
+                    if IsStatName(d.Name) then table.insert(out, d) end
+                elseif d:IsA("Folder") or d.Name == "leaderstats" or d.Name == "Stats" or d.Name == "Needs" then
+                    for _, v in ipairs(d:GetChildren()) do
+                        if (v:IsA("NumberValue") or v:IsA("IntValue")) and IsStatName(v.Name) then
+                            table.insert(out, v)
+                        end
+                    end
                 end
             end
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            local hrp = c:FindFirstChild("HumanoidRootPart")
-            if hum then
-                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-                hum.PlatformStand = false
-                hum.Sit = false
-            end
-            if hrp and flingSavedCF and not noRestore then
-                hrp.CFrame = flingSavedCF
-                hrp.Velocity = Vector3.new(0, 0, 0)
-                hrp.RotVelocity = Vector3.new(0, 0, 0)
-            end
+        end
+        scan(LocalPlayer)
+        local c = GetChar()
+        if c then scan(c) end
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then
+            -- плюс-кнопка статов: значения часто дублируются в GUI, только читаем
         end
     end)
-    flingSavedCF = nil
-    if not silent then Notify("Fling", "Флинг остановлен") end
+    return out
 end
 
-local function StartFling(plr)
-    if plr == nil then return end
-    if flinging and flingTarget == plr then StopFling(false) return end
-    StopFling(true)
-    local c = LocalPlayer.Character
-    local hrp = c and c:FindFirstChild("HumanoidRootPart")
-    local hum = c and c:FindFirstChildOfClass("Humanoid")
-    if hrp == nil or hum == nil or hum.Health <= 0 then
-        Notify("Fling", "Нет живого персонажа")
-        return
-    end
-    flingSavedCF = hrp.CFrame
-    flingTarget = plr
-    flinging = true
-    flingT = 0
+local function ReadStats()
+    -- {name=..., value=..., max=...}
+    local res = {}
     pcall(function()
-        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-        hum.PlatformStand = false
-        hum.Sit = false
-    end)
-    local ang = Instance.new("BodyAngularVelocity")
-    ang.Name = "_GFling"
-    ang.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    ang.AngularVelocity = Vector3.new(15, FLING_SPIN, 0)
-    ang.P = 1250
-    ang.Parent = hrp
-    local vel = Instance.new("BodyVelocity")
-    vel.Name = "_GFling"
-    vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    vel.Velocity = Vector3.new(0, 0, 0)
-    vel.Parent = hrp
-    Notify("Fling", "Флингаю: " .. plr.DisplayName .. " (тап снова = стоп)")
-    local hb = RunService.Heartbeat:Connect(function()
-        if not flinging then return end
-        if flingTarget == nil or flingTarget.Parent == nil then
-            StopFling(false)
-            Notify("Fling", "Цель ушла с сервера")
-            return
+        for _, v in ipairs(GetStatHolders()) do
+            local max = 100
+            pcall(function()
+                local m = v:FindFirstChild("Max") or v.Parent:FindFirstChild(v.Name .. "Max")
+                if m and m.Value then max = m.Value end
+            end)
+            if v.MaxValue and v.MaxValue > 0 then max = v.MaxValue end
+            table.insert(res, {obj = v, name = v.Name, value = v.Value, max = max})
         end
-        local my = LocalPlayer.Character
-        local myHRP = my and my:FindFirstChild("HumanoidRootPart")
-        local myHum = my and my:FindFirstChildOfClass("Humanoid")
-        if myHRP == nil or myHum == nil or myHum.Health <= 0 then return end
-        local tchar = flingTarget.Character
-        local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
-        local torso = GetTorso(tchar)
-        if torso == nil or thum == nil or thum.Health <= 0 then return end
-        flingT = flingT + 1
-        pcall(function()
-            for _, v in ipairs(my:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = false end
+        -- атрибуты
+        for _, k in ipairs(STAT_KEYS) do
+            -- точные имена атрибутов неизвестны, пробуем капитализации
+            for _, cand in ipairs({k, k:gsub("^%l", string.upper)}) do
+                local ok, val = pcall(function() return LocalPlayer:GetAttribute(cand) end)
+                if ok and type(val) == "number" then
+                    table.insert(res, {attr = cand, holder = LocalPlayer, name = cand, value = val, max = 100})
+                end
+                local c = GetChar()
+                if c then
+                    local ok2, val2 = pcall(function() return c:GetAttribute(cand) end)
+                    if ok2 and type(val2) == "number" then
+                        table.insert(res, {attr = cand, holder = c, name = cand, value = val2, max = 100})
+                    end
+                end
             end
-            myHum.Sit = false
-            myHum.PlatformStand = false
-            -- Орбита вокруг живота (низ торса, -1.7): ковыляем из стороны
-            -- в сторону и подковыриваем снизу, не висим сверху
-            local a = flingT * 0.4
-            local ox = math.sin(a) * 1.4
-            local oz = math.cos(a) * 1.4
-            local tilt = CFrame.Angles(math.rad(25) * math.sin(a * 0.7), 0, math.rad(25) * math.cos(a * 0.7))
-            myHRP.CFrame = torso.CFrame * CFrame.new(ox, -1.7, oz) * tilt
-            myHRP.Velocity = torso.Velocity + Vector3.new(ox * 8, 4, oz * 8)
-            myHRP.RotVelocity = Vector3.new(20, FLING_SPIN, 0)
-        end)
+        end
     end)
-    table.insert(flingConns, hb)
+    return res
 end
 
-LocalPlayer.CharacterAdded:Connect(function()
-    StopFling(true, true)
+local function IsGoodNoodle()
+    local stats = ReadStats()
+    if #stats == 0 then return nil end
+    for _, s in ipairs(stats) do
+        if s.value < 95 then return false end
+    end
+    return true
+end
+
+-- Поиск ремоутов еды/сна/лаборатории
+local EatRemotes, SleepRemotes, StatRemotes, TestRemotes, GrabRemotes = {}, {}, {}, {}, {}
+pcall(function()
+    for _, d in ipairs(game:GetDescendants()) do
+        if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+            local n = string.lower(d.Name)
+            local function has(...) for _, k in ipairs({...}) do if string.find(n, k) then return true end end return false end
+            if has("eat","food","jelly","hunger","feed","meal","snack","cafeteria") then table.insert(EatRemotes, d) end
+            if has("sleep","bed","energy","rest","nap","tired") then table.insert(SleepRemotes, d) end
+            if has("stat","need","noodle","hygiene","wash","shower","clean","happy","mood") then table.insert(StatRemotes, d) end
+            if has("test","laser","experiment","lab","kill","scan","morph","transform") then table.insert(TestRemotes, d) end
+            if has("snatch","grab","carry","hold","drag","pickup","arrest") then table.insert(GrabRemotes, d) end
+        end
+    end
 end)
 
--- ============ GUI ============
--- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
--- хопать и кнопки нового "не работают"). Работает даже без getgenv.
+local function FireList(list, ...)
+    local args = {...}
+    for _, r in ipairs(list) do
+        pcall(function()
+            if r:IsA("RemoteEvent") then r:FireServer(unpack(args)) end
+        end)
+    end
+end
+
+local function GetTool()
+    local c = GetChar()
+    if c then
+        local t = c:FindFirstChildOfClass("Tool")
+        if t then return t end
+    end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") then return tool end
+        end
+    end
+    return nil
+end
+local function EquipTool(tool)
+    if not tool then return end
+    pcall(function()
+        local hum = GetHum()
+        if hum and tool.Parent ~= GetChar() then hum:EquipTool(tool) end
+    end)
+end
+
+-- Поиск еды/кроватей/комнат по именам в Workspace
+local function FindPartsByKeys(keys, maxN)
+    local out = {}
+    pcall(function()
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if #out >= (maxN or 25) then break end
+            if d:IsA("BasePart") or d:IsA("Model") then
+                local n = string.lower(d.Name)
+                for _, k in ipairs(keys) do
+                    if string.find(n, k) then
+                        local pos = nil
+                        if d:IsA("BasePart") then pos = d.Position
+                        else
+                            local p = d:FindFirstChild("HumanoidRootPart") or d:FindFirstChild("Handle") or d:FindFirstChildWhichIsA("BasePart", true)
+                            if p then pos = p.Position end
+                        end
+                        if pos then table.insert(out, {name = d.Name, pos = pos}) break end
+                    end
+                end
+            elseif d:IsA("Tool") then
+                local n = string.lower(d.Name)
+                for _, k in ipairs(keys) do
+                    if string.find(n, k) then
+                        local h = d:FindFirstChild("Handle")
+                        if h then table.insert(out, {name = d.Name, pos = h.Position}) break end
+                    end
+                end
+            end
+        end
+    end)
+    return out
+end
+
+local ROOM_KEYS = {
+    ["Кафетерий 🍮"] = {"cafeteria","canteen","kitchen","jelly","dining"},
+    ["Класс 📚"] = {"classroom","class","school","desk"},
+    ["Душ 🚿"] = {"shower","bathroom","hygiene","wash"},
+    ["Кровати 🛏"] = {"bed","sleep","dorm","capsule","patient quarters","quarters"},
+    ["Площадка 🛝"] = {"playground","play","slide","park","outside"},
+    ["Солнечная ☀"] = {"sun room","sunroom","sun"},
+    ["Лаборатория 🧪"] = {"laboratory","lab","testing","experiment"},
+    ["Магазин 🛒"] = {"store","shop"},
+    ["Учёные 📋"] = {"scientist","board","button"},
+}
+
+-- ============ GUI (PlayerGui первым — тапы на Delta) ============
 pcall(function()
     local targets = {}
-    if gethui then local h = gethui() if h then table.insert(targets, h) end end
+    local pg0 = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg0 then table.insert(targets, pg0) end
     pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then table.insert(targets, pg) end
+    if gethui then local h = gethui() if h then table.insert(targets, h) end end
     for _, par in ipairs(targets) do
         for _, g in ipairs(par:GetChildren()) do
-            if g:IsA("ScreenGui") and g.Name == "GiantRaidHop" then
-                g:Destroy()
-            end
+            if g:IsA("ScreenGui") and g.Name == "DaycareHub" then g:Destroy() end
         end
     end
 end)
--- Поколение запуска: старые циклы увидят чужой номер и выйдут (общая память через Workspace)
-local myGen = 0
-pcall(function()
-    local g = (workspace:GetAttribute("GiantRaidGen") or 0) + 1
-    workspace:SetAttribute("GiantRaidGen", g)
-    myGen = g
-end)
-local function IsCurrentGen()
-    if myGen == 0 then return true end
-    local ok, v = pcall(function() return workspace:GetAttribute("GiantRaidGen") end)
-    return ok and v == myGen
-end
+
 local gui = Instance.new("ScreenGui")
-gui.Name = "GiantRaidHop"
+gui.Name = "DaycareHub"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 999
-gui.Enabled = true
 pcall(function() gui.IgnoreGuiInset = true end)
--- PlayerGui ПЕРВЫМ: в нём тапы работают всегда. gethui/CoreGui на части
--- Delta глотают ввод - кнопки видно, но нажатия не доходят.
 local parentOk = false
 pcall(function()
     local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
@@ -315,49 +334,40 @@ end
 if not parentOk or not gui.Parent then
     pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
 end
-if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-if getgenv then getgenv()._GiantRaidGui = gui end
+if getgenv then getgenv()._DaycareHubGui = gui end
 
 local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 280, 0, 366)
-Main.Position = UDim2.new(0.5, -140, 0.15, 0)
+Main.Size = UDim2.new(0, 300, 0, 430)
+Main.Position = UDim2.new(0.5, -150, 0.5, -215)
 Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 Main.BorderSizePixel = 0
 Main.Active = false
-Main.Draggable = false
-Main.ClipsDescendants = false
 Main.Parent = gui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
-local st = Instance.new("UIStroke", Main)
-st.Color = Color3.fromRGB(170, 100, 255)
-st.Thickness = 2
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+local stroke = Instance.new("UIStroke", Main)
+stroke.Color = Color3.fromRGB(255, 190, 80)
+stroke.Thickness = 2
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -10, 0, 28)
-Title.Position = UDim2.new(0, 10, 0, 0)
+Title.Size = UDim2.new(1, -70, 0, 34)
+Title.Position = UDim2.new(0, 12, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop"
+Title.Text = "Daycare 💥 | Delta Hub"
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 15
-Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextSize = 14
+Title.TextColor3 = Color3.new(1,1,1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Active = true
 Title.Parent = Main
--- Ручной драг за заголовок: штатный Draggable фрейма на части устройств глотает тапы
 do
-    local dragging = false
-    local dragStart, frameStart = nil, nil
+    local dragging, dragStart, frameStart = false, nil, nil
     Title.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            frameStart = Main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
+            dragging = true dragStart = input.Position frameStart = Main.Position
+            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
         end
     end)
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
+    UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local d = input.Position - dragStart
             Main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + d.X, frameStart.Y.Scale, frameStart.Y.Offset + d.Y)
@@ -365,911 +375,555 @@ do
     end)
 end
 
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -16, 0, 60)
-Status.Position = UDim2.new(0, 8, 0, 30)
-Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-Status.Font = Enum.Font.Gotham
-Status.TextSize = 12
-Status.TextColor3 = Color3.new(1, 1, 1)
-Status.TextWrapped = true
-Status.Text = "Сканирую..."
-Status.Active = false
-Status.Parent = Main
-Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
-
-local function Btn(txt, y, cb)
+local function MakeTopBtn(txt, x)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -16, 0, 30)
-    b.Position = UDim2.new(0, 8, 0, y)
-    b.BackgroundColor3 = Color3.fromRGB(60, 50, 90)
-    b.Text = txt
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 13
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.AutoButtonColor = true
-    b.Active = true
-    b.BorderSizePixel = 0
-    b.ClipsDescendants = false
-    b.ZIndex = 5
+    b.Size = UDim2.new(0, 26, 0, 26)
+    b.Position = UDim2.new(1, x, 0, 5)
+    b.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+    b.Text = txt b.Font = Enum.Font.GothamBold b.TextSize = 14
+    b.TextColor3 = Color3.new(1,1,1)
+    b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
     b.Parent = Main
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    return b
+end
+local MinBtn = MakeTopBtn("-", -62)
+local CloseBtn = MakeTopBtn("X", -32)
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1, -16, 1, -46)
+Scroll.Position = UDim2.new(0, 8, 0, 38)
+Scroll.BackgroundTransparency = 1
+Scroll.ScrollBarThickness = 4
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.CanvasSize = UDim2.new(0,0,0,0)
+Scroll.Parent = Main
+local Layout = Instance.new("UIListLayout", Scroll)
+Layout.Padding = UDim.new(0, 6)
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local minimized = false
+local function setMin(m)
+    minimized = m
+    Scroll.Visible = not minimized
+    Main.Size = minimized and UDim2.new(0, 300, 0, 40) or UDim2.new(0, 300, 0, 430)
+    MinBtn.Text = minimized and "+" or "-"
+end
+MinBtn.Activated:Connect(function() setMin(not minimized) end)
+MinBtn.MouseButton1Click:Connect(function() setMin(not minimized) end)
+CloseBtn.Activated:Connect(function() gui:Destroy() if getgenv then getgenv()._DaycareHubLoaded = false getgenv()._DaycareHubGen = (getgenv()._DaycareHubGen or 1) + 1 end end)
+CloseBtn.MouseButton1Click:Connect(function() gui:Destroy() if getgenv then getgenv()._DaycareHubLoaded = false end end)
+
+local function Section(name)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -4, 0, 20)
+    l.BackgroundTransparency = 1
+    l.Text = "— " .. name .. " —"
+    l.Font = Enum.Font.GothamBold l.TextSize = 12
+    l.TextColor3 = Color3.fromRGB(255, 200, 120)
+    l.Parent = Scroll
+    return l
+end
+local function Toggle(name, default, cb)
+    local state = default
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 32)
+    b.Font = Enum.Font.GothamBold b.TextSize = 13
+    b.TextColor3 = Color3.new(1,1,1)
+    b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
+    b.Parent = Scroll
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Три сигнала + сырой ввод: хоть один да дойдёт на любом executor'е.
-    -- tick-дебаунс гасит двойное срабатывание за один тап.
-    -- Зелёная вспышка = тап дошёл (диагностика).
-    local baseColor = b.BackgroundColor3
+    local function refresh()
+        b.Text = (state and "[ON] " or "[OFF] ") .. name
+        b.BackgroundColor3 = state and Color3.fromRGB(60,180,90) or Color3.fromRGB(45,45,58)
+    end
+    refresh()
     local last = 0
     local function fire()
-        local now = tick()
-        if now - last < 0.4 then return end
-        last = now
-        pcall(function()
-            b.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
-            task.delay(0.15, function()
-                pcall(function() b.BackgroundColor3 = baseColor end)
-            end)
-        end)
+        local now = tick() if now - last < 0.3 then return end last = now
+        state = not state refresh() pcall(cb, state)
+    end
+    b.Activated:Connect(fire) b.MouseButton1Click:Connect(fire) b.TouchTap:Connect(fire)
+    return b
+end
+local function Button(name, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 32)
+    b.BackgroundColor3 = Color3.fromRGB(55, 55, 78)
+    b.Text = name b.Font = Enum.Font.GothamBold b.TextSize = 13
+    b.TextColor3 = Color3.new(1,1,1)
+    b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
+    b.Parent = Scroll
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    local last = 0
+    local base = b.BackgroundColor3
+    local function fire()
+        local now = tick() if now - last < 0.3 then return end last = now
+        pcall(function() b.BackgroundColor3 = Color3.fromRGB(120,200,120) task.delay(0.15, function() pcall(function() b.BackgroundColor3 = base end) end) end)
         pcall(cb)
     end
-    b.Activated:Connect(fire)
-    b.MouseButton1Click:Connect(fire)
-    b.TouchTap:Connect(fire)
-    b.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            fire()
-        end
+    b.Activated:Connect(fire) b.MouseButton1Click:Connect(fire) b.TouchTap:Connect(fire)
+    return b
+end
+local function SliderBtn(name, min, max, step, default, cb)
+    local val = default
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 32)
+    b.BackgroundColor3 = Color3.fromRGB(50, 50, 72)
+    b.Font = Enum.Font.GothamBold b.TextSize = 13
+    b.TextColor3 = Color3.new(1,1,1)
+    b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
+    b.Parent = Scroll
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    local function refresh() b.Text = name .. ": " .. tostring(val) .. " (тап = +)" end
+    refresh()
+    local last = 0
+    b.Activated:Connect(function()
+        local now = tick() if now - last < 0.2 then return end last = now
+        val = val + step if val > max then val = min end refresh() pcall(cb, val)
+    end)
+    b.MouseButton1Click:Connect(function()
+        local now = tick() if now - last < 0.2 then return end last = now
+        val = val + step if val > max then val = min end refresh() pcall(cb, val)
     end)
     return b
 end
 
-local running = true
-local hopNow = false
-local hopTimer = 0
-Btn("Автохоп сейчас", 96, function() hopNow = true end)
-Btn("Стоп флинг", 130, function() StopFling(false) end)
-Btn("Стоп / Старт", 164, function()
-    running = not running
-    Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
+Section("Статус")
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -4, 0, 44)
+Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+Status.Font = Enum.Font.Gotham Status.TextSize = 12
+Status.TextColor3 = Color3.new(1,1,1)
+Status.TextWrapped = true
+Status.Text = "Загрузка..."
+Status.Parent = Scroll
+Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
+
+Section("Good Noodle 🍜")
+Toggle("Auto 100% статы", false, function(s) Config.AutoStats = s Notify("Daycare", s and "Auto-статы ВКЛ" or "Auto-статы ВЫКЛ") end)
+Toggle("Auto Eat (кушать)", false, function(s) Config.AutoEat = s end)
+Toggle("Auto Sleep (спать)", false, function(s) Config.AutoSleep = s end)
+Toggle("Auto Hygiene (мыться)", false, function(s) Config.AutoHygiene = s end)
+Button("Покушать сейчас (ТП к еде)", function()
+    local my = GetHRP() if not my then return end
+    local foods = FindPartsByKeys({"jelly","food","cafeteria","table","chair","eat","cake","dining"}, 20)
+    if #foods == 0 then Notify("Daycare", "Еда не найдена, иду в кафетерий") end
+    local best, bd = nil, 1e9
+    for _, f in ipairs(foods) do local d = (my.Position - f.pos).Magnitude if d < bd then bd = d best = f end end
+    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("Daycare", "ТП: " .. best.name) end
+    FireList(EatRemotes)
+    local tool = GetTool() if tool then EquipTool(tool) pcall(function() tool:Activate() end) end
+end)
+Button("Спать сейчас (ТП к кровати)", function()
+    local my = GetHRP() if not my then return end
+    local beds = FindPartsByKeys({"bed","capsule","sleep","dorm","quarters","mattress"}, 20)
+    local best, bd = nil, 1e9
+    for _, f in ipairs(beds) do local d = (my.Position - f.pos).Magnitude if d < bd then bd = d best = f end end
+    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("Daycare", "ТП: " .. best.name) else Notify("Daycare", "Кровати не найдены") end
+    FireList(SleepRemotes)
 end)
 
--- Запасное управление через чат (если тапы по кнопкам не доходят):
--- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
-LocalPlayer.Chatted:Connect(function(msg)
-    local m = string.lower(tostring(msg))
-    if m == "/hop off" or m == "/ahop off" then
-        AUTO_HOP = false
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
-    elseif m == "/hop on" or m == "/ahop on" then
-        AUTO_HOP = true
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
-    elseif m == "/hop now" or m == "/ghop" then
-        hopNow = true
-        Notify("Giant Raid", "Хопаю сейчас (чат)")
-    end
-end)
-
-local ListTitle = Instance.new("TextLabel")
-ListTitle.Size = UDim2.new(1, -16, 0, 20)
-ListTitle.Position = UDim2.new(0, 8, 0, 198)
-ListTitle.BackgroundTransparency = 1
-ListTitle.Text = "Гиганты на сервере: 0"
-ListTitle.Font = Enum.Font.GothamBold
-ListTitle.TextSize = 12
-ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
-ListTitle.TextXAlignment = Enum.TextXAlignment.Left
-ListTitle.Parent = Main
-
--- Обычный Frame вместо ScrollingFrame: скролл на телефоне конфликтовал с тапами
-local GiantsList = Instance.new("Frame")
-GiantsList.Size = UDim2.new(1, -16, 0, 136)
-GiantsList.Position = UDim2.new(0, 8, 0, 222)
-GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-GiantsList.BorderSizePixel = 0
-GiantsList.Active = false
-GiantsList.ClipsDescendants = true
-GiantsList.Parent = Main
-Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
-local ListLayout = Instance.new("UIListLayout", GiantsList)
-ListLayout.Padding = UDim.new(0, 4)
-ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local function RefreshGiantsList(giants)
-    pcall(function()
-        -- Чистим по имени: строки теперь кнопки, а не лейблы (из-за этого дубли)
-        for _, ch in ipairs(GiantsList:GetChildren()) do
-            if ch.Name == "_GRow" then ch:Destroy() end
-        end
-        ListTitle.Text = "Гиганты на сервере: " .. #giants
-        local maxRows = 4 -- 4x30 + отступы влезают в 136px
-        for i = 1, math.min(#giants, maxRows) do
-            local g = giants[i]
-            local l = Instance.new("TextButton")
-            l.Name = "_GRow"
-            l.Size = UDim2.new(1, -8, 0, 30)
-            l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
-            l.BorderSizePixel = 0
-            l.Active = true
-            l.AutoButtonColor = true
-            l.Font = Enum.Font.GothamBold
-            l.TextSize = 11
-            l.TextColor3 = Color3.new(1, 1, 1)
-            l.TextWrapped = true
-            l.TextTruncate = Enum.TextTruncate.AtEnd
-            local mark = (flinging and flingTarget == g.player) and "> " or ""
-            l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
-            l.Parent = GiantsList
-            Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
-            local target = g.player
-            local t0 = 0
-            local function onTap()
-                local now = tick()
-                if now - t0 < 0.4 then return end
-                t0 = now
-                if target == nil then return end
-                if flinging and flingTarget == target then
-                    StopFling(false)
-                else
-                    StartFling(target)
-                end
-            end
-            l.Activated:Connect(onTap)
-            l.MouseButton1Click:Connect(onTap)
-            l.TouchTap:Connect(onTap)
-        end
-        if #giants > maxRows then
-            local more = Instance.new("TextLabel")
-            more.Name = "_GRow"
-            more.Size = UDim2.new(1, -8, 0, 16)
-            more.BackgroundTransparency = 1
-            more.Active = false
-            more.Font = Enum.Font.Gotham
-            more.TextSize = 11
-            more.TextColor3 = Color3.fromRGB(220, 170, 255)
-            more.Text = "+" .. (#giants - maxRows) .. " ещё"
-            more.Parent = GiantsList
-        end
-    end)
-end
-
--- ============ SERVER HOP (как Infinite Yield) ============
-local function ServerHop()
-    QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
-    if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
-    StopFling(true) -- снять флинг перед хопом
-    local placeId = PLACE_ID
-    local cursor = ""
-    local visited = getgenv and getgenv()._GiantRaidVisited or {}
-    local myJob = game.JobId
-    visited[myJob] = true
-    Notify("Giant Raid", "Гигантов нет, ищу сервер 8+ ...")
-    task.wait(1)
-    local ok, err = pcall(function()
-        -- Desc = сначала самые полные. Баг был: Asc брал мелкие 1-5.
-        local tries = 0
-        local bestMedium, bestMediumInfo, bestAny, bestAnyInfo = nil, nil, nil, nil
-        while tries < 5 and bestMedium == nil do
-            tries = tries + 1
-            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
-            local resp = game:HttpGet(url)
-            local data = HttpService:JSONDecode(resp)
-            cursor = data.nextPageCursor or ""
-            if data.data then
-                for _, s in ipairs(data.data) do
-                    if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
-                        if bestAny == nil then bestAny, bestAnyInfo = s.id, s.playing .. "/" .. s.maxPlayers end
-                        if s.playing >= MIN_PLAYERS then
-                            bestMedium, bestMediumInfo = s.id, s.playing .. "/" .. s.maxPlayers
-                            break
-                        end
-                    end
-                end
-            end
-            if cursor == "" or cursor == nil then break end
-        end
-        local target, info = bestMedium, bestMediumInfo
-        if target == nil then target, info = bestAny, bestAnyInfo end
-        if target ~= nil then
-            visited[target] = true
-            Notify("Giant Raid", "Хоп на сервер (" .. tostring(info) .. ")")
-            TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer)
-            task.wait(3)
-            return
-        end
-        TeleportService:Teleport(placeId, LocalPlayer)
-    end)
-    if not ok then
-        Notify("Giant Raid", "Хоп не вышел, пробую обычный Teleport")
-        pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
-    end
-end
-
--- ============ MAIN LOOP ============
-task.spawn(function()
-    hopTimer = 0
-    QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
-    while gui.Parent and IsCurrentGen() do
-        task.wait(1)
-        if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-        else
-            if hopNow then hopNow = false hopTimer = 999 end
-            local giants = {}
-            pcall(function() giants = FindGiants() end)
-            if #giants > 0 then
-                hopTimer = 0
-                Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
-                RefreshGiantsList(giants)
-                Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
-                pcall(function()
-                    for _, g in ipairs(giants) do
-                        local c = g.player and g.player.Character or nil
-                        if c and not c:FindFirstChild("_GIANT_HL") then
-                            local hl = Instance.new("Highlight")
-                            hl.Name = "_GIANT_HL"
-                            hl.FillColor = Color3.fromRGB(170, 60, 255)
-                            hl.OutlineColor = Color3.fromRGB(220, 170, 255)
-                            hl.FillTransparency = 0.4
-                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                            hl.Parent = c
-                        end
-                    end
-                end)
-                task.wait(5)
-            else
-                hopTimer = hopTimer + 1
-                RefreshGiantsList({})
-                local left = math.max(0, HOP_DELAY - hopTimer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-                if AUTO_HOP and hopTimer >= HOP_DELAY then
-                    hopTimer = 0
-                    ServerHop()
-                    task.wait(5)
-                end
-            end
-        end
-    end
-end)
-
-Notify("Giant Raid", "Запущен. Хоп через " .. HOP_DELAY .. "с")
-print("[GiantRaid] loaded, place " .. PLACE_ID)
-
-]=====]
--- GIANT RAID HOP | Infectious Smile | Delta (auto-queue, no URL needed)
--- Вставь весь файл в Delta -> Execute. Дальше хопы сами подхватываются.
--- S = self source (upvalue SELF set by header). Reconstructs full file, queues it (IY mechanic, no URL needed).
--- NB: closer built dynamically so source never contains the raw closer bytes.
-local _CLOSE = "]" .. "=====]"
-local FULL = "local SELF = [=====[\n" .. SELF .. "\n" .. _CLOSE .. "\n" .. SELF
-
-local SCRIPT_URL = "" -- оставить пустым: работает без pastebin за счёт SELF-очереди
-local PLACE_ID = 5985232436
-local HOP_DELAY = 5
-local AUTO_HOP = true
-local MIN_PLAYERS = 8 -- хопать только на сервера с 8+ игроками (полные/средние)
-
-local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local StarterGui = game:GetService("StarterGui")
-local LocalPlayer = Players.LocalPlayer
-
-if getgenv and getgenv()._GiantRaidRunning then
-    pcall(function() getgenv()._GiantRaidGui:Destroy() end)
-end
-if getgenv then
-    getgenv()._GiantRaidRunning = true
-    getgenv()._GiantRaidVisited = getgenv()._GiantRaidVisited or {}
-end
-
-local function Notify(title, text, dur)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 4})
-    end)
-    print("[GiantRaid] " .. tostring(text))
-end
-
--- ============ QUEUE ON TELEPORT (как Infinite Yield, но без ссылки) ============
-local QueueStatus = "?"
-local function TryQueue(src)
-    local variants = {}
-    pcall(function()
-        if queue_on_teleport then table.insert(variants, queue_on_teleport) end
-    end)
-    pcall(function()
-        if queueonteleport then table.insert(variants, queueonteleport) end
-    end)
-    pcall(function()
-        if syn and syn.queue_on_teleport then table.insert(variants, syn.queue_on_teleport) end
-    end)
-    if getgenv then
-        pcall(function()
-            if getgenv().queue_on_teleport then table.insert(variants, getgenv().queue_on_teleport) end
-        end)
-        pcall(function()
-            if getgenv().queueonteleport then table.insert(variants, getgenv().queueonteleport) end
-        end)
-    end
-    for _, q in ipairs(variants) do
-        local ok = pcall(function() q(src) end)
-        if ok then return true end
-    end
-    return false
-end
-
-local function QueueSelf()
-    local src = FULL
-    if SCRIPT_URL ~= "" then
-        src = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
-    end
-    if TryQueue(src) then
-        QueueStatus = "queue OK"
-        return true
-    else
-        QueueStatus = "queue НЕТ: executor не поддерживает queue_on_teleport. Положи файл в Delta > AutoExecute как запасной вариант."
-        Notify("Giant Raid", QueueStatus, 6)
-        return false
-    end
-end
-
--- ============ ДЕТЕКТ ГИГАНТА-ИГРОКА (NPC игнорим) ============
-local function IsPlayerGiant(plr)
-    if not plr or not plr.Character then return false, nil end
-    local c = plr.Character
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    local hrp = c:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return false, nil end
-    local info = {}
-    -- Гигант: 300 HP (endangered-гигант 400). Обычный endangered-смайл = 200 HP,
-    -- поэтому порог 250: отсекает endangered (200) и бигхедов (100).
-    if hum.MaxHealth and hum.MaxHealth >= 250 then
-        info.reason = "HP:" .. tostring(hum.MaxHealth)
-        return true, info
-    end
-    if c:GetAttribute("Giant") == true or c:GetAttribute("IsGiant") == true
-    or plr:GetAttribute("Giant") == true or plr:GetAttribute("IsGiant") == true then
-        info.reason = "attr"
-        return true, info
-    end
-    if c:FindFirstChild("Giant") or c:FindFirstChild("IsGiant") or c:FindFirstChild("GiantPotion") then
-        info.reason = "value"
-        return true, info
-    end
-    -- Тело x2 у гиганта (HRP ~4). Endangered +30% (~2.6) не проходит порог 3.0.
-    if hrp.Size.Y > 3.0 then
-        info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
-        return true, info
-    end
-    -- Детект по голове УБРАН: у обычных смайлов бывает шанс-бигхед (большая голова при 100 HP) - это не гигант.
-    local hasGlow = false
-    for _, d in ipairs(c:GetDescendants()) do
-        if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
-            hasGlow = true
-            break
-        end
-    end
-    -- Фиолетовое свечение гиганта + большое тело. У endangered красные партиклы
-    -- и мелкое тело (~2.6) - порог 3.0 их отсекает.
-    if hasGlow and hrp.Size.Y > 3.0 then
-        info.reason = "glow+size"
-        return true, info
-    end
-    return false, nil
-end
-
-local function FindGiants()
-    local found = {}
+Section("ESP")
+Toggle("ESP Scientists (красные)", true, function(s) Config.ESP_Scientist = s end)
+Toggle("ESP Patients (зелёные)", true, function(s) Config.ESP_Patient = s end)
+Button("Очистить ESP", function()
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local ok, info = IsPlayerGiant(p)
-            if ok then
-                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-                local hum = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
-                table.insert(found, {
-                    name = p.DisplayName .. " (@" .. p.Name .. ")",
-                    player = p,
-                    hrp = hrp,
-                    hp = hum and math.floor(hum.Health) or 0,
-                    maxHp = hum and math.floor(hum.MaxHealth) or 0,
-                    reason = info and info.reason or "?",
-                })
-            end
-        end
-    end
-    return found
-end
-
--- ============ ФЛИНГ ПО ТАПУ НА НИК (кастом, в торс) ============
--- Тап по строке = вкл/выкл флинг этой цели. Контакт держится каждый кадр,
--- т.к. хитбокс гиганта капризный и с одного касания не флингает.
-local RunService = game:GetService("RunService")
-local FLING_SPIN = 50 -- средняя мощность, чуть ниже (рад/с). Больше = жёстче.
-local flingTarget = nil
-local flinging = false
-local flingConns = {}
-local flingSavedCF = nil
-local flingT = 0 -- счётчик кадров орбиты
-
-local function GetTorso(char)
-    if not char then return nil end
-    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-end
-
-local function StopFling(silent, noRestore)
-    flinging = false
-    flingTarget = nil
-    for _, c in ipairs(flingConns) do pcall(function() c:Disconnect() end) end
-    flingConns = {}
-    pcall(function()
-        local c = LocalPlayer.Character
+        local c = p.Character
         if c then
-            for _, v in ipairs(c:GetDescendants()) do
-                if (v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity")) and v.Name == "_GFling" then
-                    v:Destroy()
+            local h = c:FindFirstChild("_DC_HL") if h then h:Destroy() end
+            local b = c:FindFirstChild("_DC_BB") if b then b:Destroy() end
+        end
+    end
+end)
+
+Section("Движение")
+Toggle("Speed", false, function(s) Config.SpeedEnabled = s end)
+SliderBtn("WalkSpeed", 16, 150, 2, 32, function(v) Config.SpeedValue = v end)
+SliderBtn("JumpPower", 50, 200, 10, 50, function(v) Config.JumpValue = v pcall(function() local h = GetHum() if h then h.JumpPower = v h.UseJumpPower = true end end) end)
+Toggle("Fly (летит куда идёшь)", false, function(s) Config.FlyEnabled = s end)
+SliderBtn("FlySpeed", 20, 150, 5, 50, function(v) Config.FlySpeed = v end)
+Toggle("Noclip (сквозь стены)", false, function(s) Config.Noclip = s end)
+Toggle("Inf Jump", false, function(s) Config.InfJump = s end)
+
+Section("Защита")
+Toggle("Anti-Snatch (анти-захват)", false, function(s) Config.AntiSnatch = s Notify("Daycare", s and "Anti-Snatch ВКЛ" or "ВЫКЛ") end)
+Toggle("Anti-Test / Anti-Kill (лаб.)", false, function(s) Config.AntiTest = s end)
+Toggle("Anti Lights-Out (свет)", false, function(s)
+    Config.AntiLightsOut = s
+    if s then Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000 Lighting.GlobalShadows = false Lighting.Ambient = Color3.new(1,1,1) end
+end)
+Toggle("Fullbright", false, function(s)
+    Config.Fullbright = s
+    if s then Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000 Lighting.GlobalShadows = false
+    else Lighting.Brightness = 1 Lighting.GlobalShadows = true end
+end)
+
+Section("Телепорты комнат")
+for label, keys in pairs(ROOM_KEYS) do
+    Button("ТП: " .. label, function()
+        local my = GetHRP() if not my then return end
+        local pts = FindPartsByKeys(keys, 30)
+        if #pts == 0 then Notify("Daycare", "Не найдено: " .. label) return end
+        local best, bd = nil, 1e9
+        for _, f in ipairs(pts) do local d = (my.Position - f.pos).Magnitude if d < bd then bd = d best = f end end
+        if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("Daycare", "ТП: " .. label .. " (" .. best.name .. ")") end
+    end)
+end
+Button("Сохранить точку", function() local h = GetHRP() if h then SavedCF = h.CFrame Notify("Daycare", "Точка сохранена") end end)
+Button("ТП на сохранённую", function() local h = GetHRP() if h and SavedCF then h.CFrame = SavedCF + Vector3.new(0,3,0) end end)
+Button("ТП к ближайшему игроку", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local t = p.Character:FindFirstChild("HumanoidRootPart")
+            if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
+        end
+    end
+    if best then my.CFrame = best.CFrame + Vector3.new(0,2,3) end
+end)
+
+Section("Scientist 🧪")
+Toggle("Grab Aura (цеплять рядом)", false, function(s) Config.GrabAura = s end)
+SliderBtn("Grab Distance", 8, 60, 2, 18, function(v) Config.GrabDistance = v end)
+Button("Взять Snatch-tool (если рядом)", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("Tool") then
+            local n = string.lower(d.Name)
+            if string.find(n, "snatch") or string.find(n, "grab") then
+                local h = d:FindFirstChild("Handle")
+                if h then local dd = (my.Position - h.Position).Magnitude if dd < bd then bd = dd best = h end end
+            end
+        end
+    end
+    if best then my.CFrame = CFrame.new(best.Position + Vector3.new(0,3,0)) else Notify("Daycare", "Snatch не найден на полу — ищи у доски учёных") end
+end)
+Button("Claim комнаты (тап рядом с дверью)", function()
+    Notify("Daycare", "Подойди к своей двери и нажми Claim вручную — авто-клейм ниже")
+    pcall(function()
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("ClickDetector") or d:IsA("ProximityPrompt") then
+                local n = string.lower(d.Parent and d.Parent.Name or d.Name)
+                if string.find(n, "claim") then
+                    pcall(function()
+                        if d:IsA("ClickDetector") and fireclickdetector then fireclickdetector(d) end
+                        if d:IsA("ProximityPrompt") and fireproximityprompt then fireproximityprompt(d) end
+                    end)
                 end
             end
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            local hrp = c:FindFirstChild("HumanoidRootPart")
-            if hum then
-                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-                hum.PlatformStand = false
-                hum.Sit = false
-            end
-            if hrp and flingSavedCF and not noRestore then
-                hrp.CFrame = flingSavedCF
-                hrp.Velocity = Vector3.new(0, 0, 0)
-                hrp.RotVelocity = Vector3.new(0, 0, 0)
-            end
         end
     end)
-    flingSavedCF = nil
-    if not silent then Notify("Fling", "Флинг остановлен") end
-end
+end)
 
-local function StartFling(plr)
-    if plr == nil then return end
-    if flinging and flingTarget == plr then StopFling(false) return end
-    StopFling(true)
-    local c = LocalPlayer.Character
-    local hrp = c and c:FindFirstChild("HumanoidRootPart")
-    local hum = c and c:FindFirstChildOfClass("Humanoid")
-    if hrp == nil or hum == nil or hum.Health <= 0 then
-        Notify("Fling", "Нет живого персонажа")
-        return
-    end
-    flingSavedCF = hrp.CFrame
-    flingTarget = plr
-    flinging = true
-    flingT = 0
+Section("Разное")
+Button("Rejoin", function() pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end) end)
+Button("ServerHop (малый онлайн)", function()
     pcall(function()
-        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-        hum.PlatformStand = false
-        hum.Sit = false
-    end)
-    local ang = Instance.new("BodyAngularVelocity")
-    ang.Name = "_GFling"
-    ang.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    ang.AngularVelocity = Vector3.new(15, FLING_SPIN, 0)
-    ang.P = 1250
-    ang.Parent = hrp
-    local vel = Instance.new("BodyVelocity")
-    vel.Name = "_GFling"
-    vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    vel.Velocity = Vector3.new(0, 0, 0)
-    vel.Parent = hrp
-    Notify("Fling", "Флингаю: " .. plr.DisplayName .. " (тап снова = стоп)")
-    local hb = RunService.Heartbeat:Connect(function()
-        if not flinging then return end
-        if flingTarget == nil or flingTarget.Parent == nil then
-            StopFling(false)
-            Notify("Fling", "Цель ушла с сервера")
-            return
-        end
-        local my = LocalPlayer.Character
-        local myHRP = my and my:FindFirstChild("HumanoidRootPart")
-        local myHum = my and my:FindFirstChildOfClass("Humanoid")
-        if myHRP == nil or myHum == nil or myHum.Health <= 0 then return end
-        local tchar = flingTarget.Character
-        local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
-        local torso = GetTorso(tchar)
-        if torso == nil or thum == nil or thum.Health <= 0 then return end
-        flingT = flingT + 1
-        pcall(function()
-            for _, v in ipairs(my:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = false end
-            end
-            myHum.Sit = false
-            myHum.PlatformStand = false
-            -- Орбита вокруг живота (низ торса, -1.7): ковыляем из стороны
-            -- в сторону и подковыриваем снизу, не висим сверху
-            local a = flingT * 0.4
-            local ox = math.sin(a) * 1.4
-            local oz = math.cos(a) * 1.4
-            local tilt = CFrame.Angles(math.rad(25) * math.sin(a * 0.7), 0, math.rad(25) * math.cos(a * 0.7))
-            myHRP.CFrame = torso.CFrame * CFrame.new(ox, -1.7, oz) * tilt
-            myHRP.Velocity = torso.Velocity + Vector3.new(ox * 8, 4, oz * 8)
-            myHRP.RotVelocity = Vector3.new(20, FLING_SPIN, 0)
-        end)
-    end)
-    table.insert(flingConns, hb)
-end
-
-LocalPlayer.CharacterAdded:Connect(function()
-    StopFling(true, true)
-end)
-
--- ============ GUI ============
--- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
--- хопать и кнопки нового "не работают"). Работает даже без getgenv.
-pcall(function()
-    local targets = {}
-    if gethui then local h = gethui() if h then table.insert(targets, h) end end
-    pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then table.insert(targets, pg) end
-    for _, par in ipairs(targets) do
-        for _, g in ipairs(par:GetChildren()) do
-            if g:IsA("ScreenGui") and g.Name == "GiantRaidHop" then
-                g:Destroy()
-            end
-        end
-    end
-end)
--- Поколение запуска: старые циклы увидят чужой номер и выйдут (общая память через Workspace)
-local myGen = 0
-pcall(function()
-    local g = (workspace:GetAttribute("GiantRaidGen") or 0) + 1
-    workspace:SetAttribute("GiantRaidGen", g)
-    myGen = g
-end)
-local function IsCurrentGen()
-    if myGen == 0 then return true end
-    local ok, v = pcall(function() return workspace:GetAttribute("GiantRaidGen") end)
-    return ok and v == myGen
-end
-local gui = Instance.new("ScreenGui")
-gui.Name = "GiantRaidHop"
-gui.ResetOnSpawn = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.DisplayOrder = 999
-gui.Enabled = true
-pcall(function() gui.IgnoreGuiInset = true end)
--- PlayerGui ПЕРВЫМ: в нём тапы работают всегда. gethui/CoreGui на части
--- Delta глотают ввод - кнопки видно, но нажатия не доходят.
-local parentOk = false
-pcall(function()
-    local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
-    if pg then gui.Parent = pg parentOk = true end
-end)
-if not parentOk then
-    pcall(function()
-        local h = nil
-        if gethui then h = gethui() end
-        if h then gui.Parent = h parentOk = true end
-    end)
-end
-if not parentOk or not gui.Parent then
-    pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
-end
-if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-if getgenv then getgenv()._GiantRaidGui = gui end
-
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 280, 0, 366)
-Main.Position = UDim2.new(0.5, -140, 0.15, 0)
-Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-Main.BorderSizePixel = 0
-Main.Active = false
-Main.Draggable = false
-Main.ClipsDescendants = false
-Main.Parent = gui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
-local st = Instance.new("UIStroke", Main)
-st.Color = Color3.fromRGB(170, 100, 255)
-st.Thickness = 2
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -10, 0, 28)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop"
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 15
-Title.TextColor3 = Color3.new(1, 1, 1)
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Active = true
-Title.Parent = Main
--- Ручной драг за заголовок: штатный Draggable фрейма на части устройств глотает тапы
-do
-    local dragging = false
-    local dragStart, frameStart = nil, nil
-    Title.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            frameStart = Main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            Main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + d.X, frameStart.Y.Scale, frameStart.Y.Offset + d.Y)
-        end
-    end)
-end
-
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -16, 0, 60)
-Status.Position = UDim2.new(0, 8, 0, 30)
-Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-Status.Font = Enum.Font.Gotham
-Status.TextSize = 12
-Status.TextColor3 = Color3.new(1, 1, 1)
-Status.TextWrapped = true
-Status.Text = "Сканирую..."
-Status.Active = false
-Status.Parent = Main
-Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
-
-local function Btn(txt, y, cb)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -16, 0, 30)
-    b.Position = UDim2.new(0, 8, 0, y)
-    b.BackgroundColor3 = Color3.fromRGB(60, 50, 90)
-    b.Text = txt
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 13
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.AutoButtonColor = true
-    b.Active = true
-    b.BorderSizePixel = 0
-    b.ClipsDescendants = false
-    b.ZIndex = 5
-    b.Parent = Main
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Три сигнала + сырой ввод: хоть один да дойдёт на любом executor'е.
-    -- tick-дебаунс гасит двойное срабатывание за один тап.
-    -- Зелёная вспышка = тап дошёл (диагностика).
-    local baseColor = b.BackgroundColor3
-    local last = 0
-    local function fire()
-        local now = tick()
-        if now - last < 0.4 then return end
-        last = now
-        pcall(function()
-            b.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
-            task.delay(0.15, function()
-                pcall(function() b.BackgroundColor3 = baseColor end)
-            end)
-        end)
-        pcall(cb)
-    end
-    b.Activated:Connect(fire)
-    b.MouseButton1Click:Connect(fire)
-    b.TouchTap:Connect(fire)
-    b.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            fire()
-        end
-    end)
-    return b
-end
-
-local running = true
-local hopNow = false
-local hopTimer = 0
-Btn("Автохоп сейчас", 96, function() hopNow = true end)
-Btn("Стоп флинг", 130, function() StopFling(false) end)
-Btn("Стоп / Старт", 164, function()
-    running = not running
-    Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
-end)
-
--- Запасное управление через чат (если тапы по кнопкам не доходят):
--- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
-LocalPlayer.Chatted:Connect(function(msg)
-    local m = string.lower(tostring(msg))
-    if m == "/hop off" or m == "/ahop off" then
-        AUTO_HOP = false
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
-    elseif m == "/hop on" or m == "/ahop on" then
-        AUTO_HOP = true
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
-    elseif m == "/hop now" or m == "/ghop" then
-        hopNow = true
-        Notify("Giant Raid", "Хопаю сейчас (чат)")
-    end
-end)
-
-local ListTitle = Instance.new("TextLabel")
-ListTitle.Size = UDim2.new(1, -16, 0, 20)
-ListTitle.Position = UDim2.new(0, 8, 0, 198)
-ListTitle.BackgroundTransparency = 1
-ListTitle.Text = "Гиганты на сервере: 0"
-ListTitle.Font = Enum.Font.GothamBold
-ListTitle.TextSize = 12
-ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
-ListTitle.TextXAlignment = Enum.TextXAlignment.Left
-ListTitle.Parent = Main
-
--- Обычный Frame вместо ScrollingFrame: скролл на телефоне конфликтовал с тапами
-local GiantsList = Instance.new("Frame")
-GiantsList.Size = UDim2.new(1, -16, 0, 136)
-GiantsList.Position = UDim2.new(0, 8, 0, 222)
-GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-GiantsList.BorderSizePixel = 0
-GiantsList.Active = false
-GiantsList.ClipsDescendants = true
-GiantsList.Parent = Main
-Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
-local ListLayout = Instance.new("UIListLayout", GiantsList)
-ListLayout.Padding = UDim.new(0, 4)
-ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local function RefreshGiantsList(giants)
-    pcall(function()
-        -- Чистим по имени: строки теперь кнопки, а не лейблы (из-за этого дубли)
-        for _, ch in ipairs(GiantsList:GetChildren()) do
-            if ch.Name == "_GRow" then ch:Destroy() end
-        end
-        ListTitle.Text = "Гиганты на сервере: " .. #giants
-        local maxRows = 4 -- 4x30 + отступы влезают в 136px
-        for i = 1, math.min(#giants, maxRows) do
-            local g = giants[i]
-            local l = Instance.new("TextButton")
-            l.Name = "_GRow"
-            l.Size = UDim2.new(1, -8, 0, 30)
-            l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
-            l.BorderSizePixel = 0
-            l.Active = true
-            l.AutoButtonColor = true
-            l.Font = Enum.Font.GothamBold
-            l.TextSize = 11
-            l.TextColor3 = Color3.new(1, 1, 1)
-            l.TextWrapped = true
-            l.TextTruncate = Enum.TextTruncate.AtEnd
-            local mark = (flinging and flingTarget == g.player) and "> " or ""
-            l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
-            l.Parent = GiantsList
-            Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
-            local target = g.player
-            local t0 = 0
-            local function onTap()
-                local now = tick()
-                if now - t0 < 0.4 then return end
-                t0 = now
-                if target == nil then return end
-                if flinging and flingTarget == target then
-                    StopFling(false)
-                else
-                    StartFling(target)
-                end
-            end
-            l.Activated:Connect(onTap)
-            l.MouseButton1Click:Connect(onTap)
-            l.TouchTap:Connect(onTap)
-        end
-        if #giants > maxRows then
-            local more = Instance.new("TextLabel")
-            more.Name = "_GRow"
-            more.Size = UDim2.new(1, -8, 0, 16)
-            more.BackgroundTransparency = 1
-            more.Active = false
-            more.Font = Enum.Font.Gotham
-            more.TextSize = 11
-            more.TextColor3 = Color3.fromRGB(220, 170, 255)
-            more.Text = "+" .. (#giants - maxRows) .. " ещё"
-            more.Parent = GiantsList
-        end
-    end)
-end
-
--- ============ SERVER HOP (как Infinite Yield) ============
-local function ServerHop()
-    QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
-    if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
-    StopFling(true) -- снять флинг перед хопом
-    local placeId = PLACE_ID
-    local cursor = ""
-    local visited = getgenv and getgenv()._GiantRaidVisited or {}
-    local myJob = game.JobId
-    visited[myJob] = true
-    Notify("Giant Raid", "Гигантов нет, ищу сервер 8+ ...")
-    task.wait(1)
-    local ok, err = pcall(function()
-        -- Desc = сначала самые полные. Баг был: Asc брал мелкие 1-5.
-        local tries = 0
-        local bestMedium, bestMediumInfo, bestAny, bestAnyInfo = nil, nil, nil, nil
-        while tries < 5 and bestMedium == nil do
-            tries = tries + 1
-            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
+        local cursor = ""
+        local HttpService = game:GetService("HttpService")
+        local myJob = game.JobId
+        for _ = 1, 3 do
+            local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
             local resp = game:HttpGet(url)
             local data = HttpService:JSONDecode(resp)
             cursor = data.nextPageCursor or ""
             if data.data then
                 for _, s in ipairs(data.data) do
-                    if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
-                        if bestAny == nil then bestAny, bestAnyInfo = s.id, s.playing .. "/" .. s.maxPlayers end
-                        if s.playing >= MIN_PLAYERS then
-                            bestMedium, bestMediumInfo = s.id, s.playing .. "/" .. s.maxPlayers
-                            break
-                        end
+                    if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob then
+                        TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, LocalPlayer)
+                        return
                     end
                 end
             end
-            if cursor == "" or cursor == nil then break end
+            if cursor == "" then break end
         end
-        local target, info = bestMedium, bestMediumInfo
-        if target == nil then target, info = bestAny, bestAnyInfo end
-        if target ~= nil then
-            visited[target] = true
-            Notify("Giant Raid", "Хоп на сервер (" .. tostring(info) .. ")")
-            TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer)
-            task.wait(3)
-            return
-        end
-        TeleportService:Teleport(placeId, LocalPlayer)
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
-    if not ok then
-        Notify("Giant Raid", "Хоп не вышел, пробую обычный Teleport")
-        pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
+end)
+
+-- ============ ESP LOOP ============
+local function ApplyESP(plr)
+    if plr == LocalPlayer then return end
+    local c = plr.Character
+    if not c then return end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return end
+    local sci = IsScientist(plr)
+    local show = (sci and Config.ESP_Scientist) or ((not sci) and Config.ESP_Patient)
+    local hl = c:FindFirstChild("_DC_HL")
+    local bb = c:FindFirstChild("_DC_BB")
+    if not show then if hl then hl:Destroy() end if bb then bb:Destroy() end return end
+    local col = sci and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(50, 255, 100)
+    if not hl then
+        hl = Instance.new("Highlight")
+        hl.Name = "_DC_HL"
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.FillTransparency = 0.6 hl.OutlineTransparency = 0
+        hl.Parent = c
     end
+    hl.FillColor = col hl.OutlineColor = col
+    if not bb then
+        bb = Instance.new("BillboardGui")
+        bb.Name = "_DC_BB"
+        bb.Size = UDim2.new(0, 130, 0, 42)
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent = c
+        local tl = Instance.new("TextLabel")
+        tl.Name = "TL" tl.Size = UDim2.new(1,0,1,0)
+        tl.BackgroundTransparency = 1
+        tl.Font = Enum.Font.GothamBold tl.TextSize = 12
+        tl.TextStrokeTransparency = 0.3
+        tl.Parent = bb
+    end
+    local my = GetHRP()
+    local dist = my and math.floor((my.Position - hrp.Position).Magnitude) or 0
+    local tl = bb:FindFirstChild("TL")
+    if tl then
+        tl.Text = plr.DisplayName .. " (" .. dist .. "m)\n" .. (sci and "SCIENTIST" or "PATIENT") .. " | " .. math.floor(hum.Health) .. "HP"
+        tl.TextColor3 = col
+    end
+    local head = c:FindFirstChild("Head")
+    if head then bb.Adornee = head end
 end
 
--- ============ MAIN LOOP ============
 task.spawn(function()
-    hopTimer = 0
-    QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
     while gui.Parent and IsCurrentGen() do
-        task.wait(1)
-        if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-        else
-            if hopNow then hopNow = false hopTimer = 999 end
-            local giants = {}
-            pcall(function() giants = FindGiants() end)
-            if #giants > 0 then
-                hopTimer = 0
-                Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
-                RefreshGiantsList(giants)
-                Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
-                pcall(function()
-                    for _, g in ipairs(giants) do
-                        local c = g.player and g.player.Character or nil
-                        if c and not c:FindFirstChild("_GIANT_HL") then
-                            local hl = Instance.new("Highlight")
-                            hl.Name = "_GIANT_HL"
-                            hl.FillColor = Color3.fromRGB(170, 60, 255)
-                            hl.OutlineColor = Color3.fromRGB(220, 170, 255)
-                            hl.FillTransparency = 0.4
-                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                            hl.Parent = c
+        task.wait(0.5)
+        pcall(function() for _, p in ipairs(Players:GetPlayers()) do ApplyESP(p) end end)
+    end
+end)
+
+-- ============ MOVEMENT ============
+RunService.Heartbeat:Connect(function()
+    if not IsCurrentGen() then return end
+    pcall(function()
+        local hum = GetHum()
+        if hum and hum.Health > 0 and Config.SpeedEnabled then
+            hum.WalkSpeed = Config.SpeedValue
+        end
+    end)
+end)
+RunService.Stepped:Connect(function()
+    if Config.Noclip and IsCurrentGen() then
+        pcall(function()
+            local c = GetChar()
+            if c then for _, v in ipairs(c:GetDescendants()) do if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end end end
+        end)
+    end
+end)
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfJump and IsCurrentGen() then
+        pcall(function() local hum = GetHum() if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end end)
+    end
+end)
+
+local FlyGyro, FlyVel = nil, nil
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        RunService.Heartbeat:Wait()
+        pcall(function()
+            local hrp = GetHRP() local hum = GetHum()
+            if Config.FlyEnabled and hrp and hum then
+                if not FlyGyro then
+                    FlyGyro = Instance.new("BodyGyro")
+                    FlyGyro.P = 9000 FlyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+                    FlyGyro.CFrame = hrp.CFrame FlyGyro.Parent = hrp
+                    FlyVel = Instance.new("BodyVelocity")
+                    FlyVel.MaxForce = Vector3.new(9e9,9e9,9e9)
+                    FlyVel.Parent = hrp
+                end
+                local cam = Workspace.CurrentCamera
+                local move = hum.MoveDirection
+                FlyGyro.CFrame = cam.CFrame
+                FlyVel.Velocity = (move.Magnitude > 0.1) and (move * Config.FlySpeed) or Vector3.new(0,0,0)
+            else
+                if FlyGyro then FlyGyro:Destroy() FlyGyro = nil end
+                if FlyVel then FlyVel:Destroy() FlyVel = nil end
+            end
+        end)
+    end
+end)
+
+-- ============ AUTO STATS (Good Noodle) ============
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.5)
+        if Config.AutoStats or Config.AutoEat or Config.AutoSleep or Config.AutoHygiene then
+            pcall(function()
+                -- 1. прямое выставление Values
+                for _, v in ipairs(GetStatHolders()) do
+                    local n = string.lower(v.Name)
+                    local want = false
+                    if Config.AutoStats then want = true
+                    elseif Config.AutoEat and (string.find(n,"hunger") or string.find(n,"food") or string.find(n,"eat")) then want = true
+                    elseif Config.AutoSleep and (string.find(n,"energy") or string.find(n,"sleep")) then want = true
+                    elseif Config.AutoHygiene and (string.find(n,"hygiene") or string.find(n,"clean") or string.find(n,"wash")) then want = true
+                    end
+                    if want then
+                        if v:IsA("NumberValue") then v.Value = v.MaxValue > 0 and v.MaxValue or 100
+                        elseif v:IsA("IntValue") then v.Value = 100 end
+                    end
+                end
+                -- 2. атрибуты
+                local function setAttr(holder, names)
+                    for _, an in ipairs(names) do
+                        pcall(function() if holder:GetAttribute(an) ~= nil then holder:SetAttribute(an, 100) end end)
+                    end
+                end
+                if Config.AutoStats or Config.AutoEat or Config.AutoSleep or Config.AutoHygiene then
+                    setAttr(LocalPlayer, {"Hunger","Energy","Hygiene","Happiness","Mood","Food","Sleep"})
+                    local c = GetChar()
+                    if c then setAttr(c, {"Hunger","Energy","Hygiene","Happiness","Mood","Food","Sleep"}) end
+                end
+                -- 3. ремоуты
+                if Config.AutoStats or Config.AutoEat then FireList(EatRemotes) FireList(StatRemotes, "eat") end
+                if Config.AutoStats or Config.AutoSleep then FireList(SleepRemotes) FireList(StatRemotes, "sleep") end
+                if Config.AutoHygiene then FireList(StatRemotes) end
+                -- 4. touch еды/кровати рядом (best effort, без телепорта — не дёргаем камеру)
+                local myHRP = GetHRP()
+                if myHRP and firetouchinterest then
+                    if Config.AutoEat then
+                        for _, d in ipairs(Workspace:GetDescendants()) do
+                            if d:IsA("BasePart") then
+                                local n = string.lower(d.Name)
+                                if string.find(n, "jelly") or string.find(n, "food") then
+                                    if (myHRP.Position - d.Position).Magnitude < 12 then
+                                        firetouchinterest(myHRP, d, 0) task.wait() firetouchinterest(myHRP, d, 1)
+                                    end
+                                end
+                            end
                         end
                     end
-                end)
-                task.wait(5)
-            else
-                hopTimer = hopTimer + 1
-                RefreshGiantsList({})
-                local left = math.max(0, HOP_DELAY - hopTimer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-                if AUTO_HOP and hopTimer >= HOP_DELAY then
-                    hopTimer = 0
-                    ServerHop()
-                    task.wait(5)
                 end
-            end
+            end)
         end
     end
 end)
 
-Notify("Giant Raid", "Запущен. Хоп через " .. HOP_DELAY .. "с")
-print("[GiantRaid] loaded, place " .. PLACE_ID)
+-- ============ GRAB AURA (scientist) ============
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.3)
+        if Config.GrabAura then
+            pcall(function()
+                local myHRP = GetHRP()
+                if not myHRP then return end
+                local tool = GetTool() if tool then EquipTool(tool) end
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character and not IsScientist(p) then
+                        local thrp = p.Character:FindFirstChild("HumanoidRootPart")
+                        local thum = p.Character:FindFirstChildOfClass("Humanoid")
+                        if thrp and thum and thum.Health > 0 and (myHRP.Position - thrp.Position).Magnitude <= Config.GrabDistance then
+                            if tool then pcall(function() tool:Activate() end) end
+                            pcall(function()
+                                if tool and tool:FindFirstChild("Handle") and firetouchinterest then
+                                    firetouchinterest(tool.Handle, thrp, 0) task.wait() firetouchinterest(tool.Handle, thrp, 1)
+                                end
+                                if firetouchinterest then
+                                    firetouchinterest(myHRP, thrp, 0) task.wait() firetouchinterest(myHRP, thrp, 1)
+                                end
+                            end)
+                        end
+                    end
+                end
+                FireList(GrabRemotes)
+            end)
+        end
+    end
+end)
+
+-- ============ ANTI-SNATCH / ANTI-TEST ============
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.2)
+        if Config.AntiSnatch then
+            pcall(function()
+                local c = GetChar() local hrp = GetHRP() local hum = GetHum()
+                if not c or not hrp or not hum then return end
+                local grabbed = false
+                if hum.Seated then grabbed = true end
+                if c:GetAttribute("Grabbed") == true or c:GetAttribute("Carried") == true or c:GetAttribute("Held") == true then grabbed = true end
+                for _, v in ipairs(hrp:GetChildren()) do
+                    if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then grabbed = true v:Destroy() end
+                end
+                for _, v in ipairs(c:GetDescendants()) do
+                    if v:IsA("Weld") or v:IsA("WeldConstraint") then
+                        local n = string.lower(v.Name)
+                        if string.find(n,"grab") or string.find(n,"hold") or string.find(n,"carry") or string.find(n,"snatch") then grabbed = true v:Destroy() end
+                    end
+                end
+                if grabbed then
+                    hum.Sit = false hum.PlatformStand = false
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                    hrp.CFrame = hrp.CFrame + Vector3.new(0, 4, 0) + hrp.CFrame.LookVector * -5
+                    hrp.Velocity = Vector3.new(0, 50, 0)
+                end
+            end)
+        end
+        if Config.AntiTest then
+            pcall(function()
+                local hum = GetHum()
+                if hum then hum.Sit = false hum.PlatformStand = false
+                    if hum:GetState() == Enum.HumanoidStateType.Physics or hum:GetState() == Enum.HumanoidStateType.Ragdoll then
+                        hum:ChangeState(Enum.HumanoidStateType.Running)
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- Anti-LightsOut: гасим локальные тёмные эффекты
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(3)
+        if Config.AntiLightsOut or Config.Fullbright or Config.AntiTest then
+            pcall(function()
+                Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000
+                Lighting.GlobalShadows = false
+                if Config.AntiLightsOut then Lighting.Ambient = Color3.new(1,1,1) Lighting.OutdoorAmbient = Color3.new(1,1,1) end
+            end)
+        end
+    end
+end)
+
+-- Респавн: вернуть скорость/прыжок
+LocalPlayer.CharacterAdded:Connect(function(c)
+    task.wait(1)
+    pcall(function()
+        local hum = c:WaitForChild("Humanoid", 5)
+        if hum then
+            hum.WalkSpeed = Config.SpeedEnabled and Config.SpeedValue or 16
+            hum.JumpPower = Config.JumpValue hum.UseJumpPower = true
+        end
+    end)
+end)
+
+-- Статус-строка
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(1)
+        pcall(function()
+            local role = IsScientist(LocalPlayer) and "SCIENTIST 🧪" or "PATIENT 🙂"
+            local gn = IsGoodNoodle()
+            local gnTxt = (gn == nil and "?") or (gn and "GOOD ✅" or "BAD ❌")
+            local stats = ReadStats()
+            local stTxt = ""
+            if #stats > 0 then
+                local parts = {}
+                for i = 1, math.min(#stats, 3) do table.insert(parts, stats[i].name .. ":" .. math.floor(stats[i].value)) end
+                stTxt = " | " .. table.concat(parts, " ")
+            end
+            local placeWarn = PLACE_IDS[game.PlaceId] and "" or " (не Daycare?)"
+            Status.Text = role .. " | " .. gnTxt .. stTxt .. "\nОнлайн: " .. #Players:GetPlayers() .. placeWarn .. " | " .. os.date("%H:%M:%S")
+        end)
+    end
+end)
+
+Notify("Daycare Hub", "Загружено! Вставь еду/сон в Auto для Good Noodle 🍜", 5)
+print("[DaycareHub] loaded, place " .. tostring(game.PlaceId))
