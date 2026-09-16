@@ -40,10 +40,12 @@ local Config = {
 }
 
 local SavedSpawnCFrame = nil
-pcall(function()
-    local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hrp = c:WaitForChild("HumanoidRootPart", 5)
-    if hrp then SavedSpawnCFrame = hrp.CFrame end
+task.spawn(function()
+    pcall(function()
+        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = c:WaitForChild("HumanoidRootPart", 5)
+        if hrp then SavedSpawnCFrame = hrp.CFrame end
+    end)
 end)
 
 -- ============ HELPERS ============
@@ -131,9 +133,10 @@ do
 end
 
 local function FireRemotes(list, ...)
+    local args = {...}
     for _, r in ipairs(list) do
         pcall(function()
-            if r:IsA("RemoteEvent") then r:FireServer(...) end
+            if r:IsA("RemoteEvent") then r:FireServer(unpack(args)) end
         end)
     end
 end
@@ -167,9 +170,20 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "InfectiousHub"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.IgnoreGuiInset = true
-pcall(function() gui.Parent = game:GetService("CoreGui") end)
-if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+pcall(function() gui.IgnoreGuiInset = true end)
+-- Delta-friendly parent: gethui > CoreGui > PlayerGui
+local _parentOk = false
+pcall(function()
+    local h = nil
+    if gethui then h = gethui() end
+    if h then gui.Parent = h _parentOk = true end
+end)
+if not _parentOk then
+    pcall(function() gui.Parent = game:GetService("CoreGui") _parentOk = true end)
+end
+if not _parentOk or not gui.Parent then
+    gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
 if getgenv then getgenv()._InfectiousHubGui = gui end
 
 local Main = Instance.new("Frame")
@@ -806,3 +820,10 @@ task.spawn(function()
 end)
 
 print("[InfectiousHub] loaded for Delta")
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Infectious Hub",
+        Text = "Загружено! Если нет окна - смени parent / перезайди",
+        Duration = 5
+    })
+end)
