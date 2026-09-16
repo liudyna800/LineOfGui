@@ -228,23 +228,29 @@ local function Btn(txt, y, cb)
     b.TextColor3 = Color3.new(1, 1, 1)
     b.Parent = Main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Activated вместо MouseButton1Click: на телефоне тапы ловит надёжнее
-    local deb = false
-    b.Activated:Connect(function()
-        if deb then return end
-        deb = true
+    -- Оба сигнала сразу: на части executor'ов глохнет один из них.
+    -- tick-дебаунс гасит двойное срабатывание за один тап.
+    local last = 0
+    local function fire()
+        local now = tick()
+        if now - last < 0.4 then return end
+        last = now
         pcall(cb)
-        task.delay(0.3, function() deb = false end)
-    end)
+    end
+    b.Activated:Connect(fire)
+    b.MouseButton1Click:Connect(fire)
     return b
 end
 
 local running = true
 local hopNow = false
+local hopTimer = 0
 Btn("Хоп сейчас", 96, function() hopNow = true end)
 local hopBtn = Btn("Авто-хоп: ВКЛ (5с)", 130, function()
     AUTO_HOP = not AUTO_HOP
+    hopTimer = 0
     hopBtn.Text = "Авто-хоп: " .. (AUTO_HOP and "ВКЛ (5с)" or "ВЫКЛ")
+    Notify("Giant Raid", "Авто-хоп " .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ"))
 end)
 Btn("Стоп / Старт", 164, function()
     running = not running
@@ -349,18 +355,18 @@ end
 
 -- ============ MAIN LOOP ============
 task.spawn(function()
-    local timer = 0
+    hopTimer = 0
     QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
     while gui.Parent and IsCurrentGen() do
         task.wait(1)
         if not running then
             Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
         else
-            if hopNow then hopNow = false timer = 999 end
+            if hopNow then hopNow = false hopTimer = 999 end
             local giants = {}
             pcall(function() giants = FindGiants() end)
             if #giants > 0 then
-                timer = 0
+                hopTimer = 0
                 Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
                 RefreshGiantsList(giants)
                 Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
@@ -380,12 +386,12 @@ task.spawn(function()
                 end)
                 task.wait(5)
             else
-                timer = timer + 1
+                hopTimer = hopTimer + 1
                 RefreshGiantsList({})
-                local left = math.max(0, HOP_DELAY - timer)
+                local left = math.max(0, HOP_DELAY - hopTimer)
                 Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "]"
-                if AUTO_HOP and timer >= HOP_DELAY then
-                    timer = 0
+                if AUTO_HOP and hopTimer >= HOP_DELAY then
+                    hopTimer = 0
                     ServerHop()
                     task.wait(5)
                 end
@@ -627,23 +633,29 @@ local function Btn(txt, y, cb)
     b.TextColor3 = Color3.new(1, 1, 1)
     b.Parent = Main
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Activated вместо MouseButton1Click: на телефоне тапы ловит надёжнее
-    local deb = false
-    b.Activated:Connect(function()
-        if deb then return end
-        deb = true
+    -- Оба сигнала сразу: на части executor'ов глохнет один из них.
+    -- tick-дебаунс гасит двойное срабатывание за один тап.
+    local last = 0
+    local function fire()
+        local now = tick()
+        if now - last < 0.4 then return end
+        last = now
         pcall(cb)
-        task.delay(0.3, function() deb = false end)
-    end)
+    end
+    b.Activated:Connect(fire)
+    b.MouseButton1Click:Connect(fire)
     return b
 end
 
 local running = true
 local hopNow = false
+local hopTimer = 0
 Btn("Хоп сейчас", 96, function() hopNow = true end)
 local hopBtn = Btn("Авто-хоп: ВКЛ (5с)", 130, function()
     AUTO_HOP = not AUTO_HOP
+    hopTimer = 0
     hopBtn.Text = "Авто-хоп: " .. (AUTO_HOP and "ВКЛ (5с)" or "ВЫКЛ")
+    Notify("Giant Raid", "Авто-хоп " .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ"))
 end)
 Btn("Стоп / Старт", 164, function()
     running = not running
@@ -748,18 +760,18 @@ end
 
 -- ============ MAIN LOOP ============
 task.spawn(function()
-    local timer = 0
+    hopTimer = 0
     QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
     while gui.Parent and IsCurrentGen() do
         task.wait(1)
         if not running then
             Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
         else
-            if hopNow then hopNow = false timer = 999 end
+            if hopNow then hopNow = false hopTimer = 999 end
             local giants = {}
             pcall(function() giants = FindGiants() end)
             if #giants > 0 then
-                timer = 0
+                hopTimer = 0
                 Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
                 RefreshGiantsList(giants)
                 Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
@@ -779,12 +791,12 @@ task.spawn(function()
                 end)
                 task.wait(5)
             else
-                timer = timer + 1
+                hopTimer = hopTimer + 1
                 RefreshGiantsList({})
-                local left = math.max(0, HOP_DELAY - timer)
+                local left = math.max(0, HOP_DELAY - hopTimer)
                 Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "]"
-                if AUTO_HOP and timer >= HOP_DELAY then
-                    timer = 0
+                if AUTO_HOP and hopTimer >= HOP_DELAY then
+                    hopTimer = 0
                     ServerHop()
                     task.wait(5)
                 end
