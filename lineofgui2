@@ -1,29 +1,808 @@
--- lineofgui2 build 27: patch-loader. Base + invpatch27 splice, no stale copy.
-print("[LineOfBots] lineofgui2 build 27 patch-loader")
-local stamp = tostring(os.time())
-local function get(url)
-	local ok, res = pcall(function() return game:HttpGet(url, true) end)
-	if not ok then ok, res = pcall(function() return game:HttpGet(url) end) end
-	if ok and type(res) == "string" then return res end
-	return nil
+-- Infectious Smile | Delta Hub (Keyless, Mobile Friendly)
+-- Place: Infectious Smile by laughablehaha (5985232436)
+-- Executor: Delta (Android / iOS / PC), также Xeno / Codex / Fluxus
+-- Функции: ESP, Speed/Fly/Noclip, Hit Aura, Infect Aura, NoCooldown, Anti-Grab/Stun, Teleports
+-- Использование: вставить в Delta -> Execute. Повторный Execute не дублирует GUI.
+
+if getgenv and getgenv()._InfectiousHubLoaded then
+    pcall(function() getgenv()._InfectiousHubGui:Destroy() end)
 end
-local base = get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOfBotsBeta2.lua?b27=" .. stamp)
-	or get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/LineOneGui?b27=" .. stamp)
-assert(base and #base > 400000, "[LineOfBots] FAILED: base not fetched")
-local patch = get("https://raw.githubusercontent.com/liudyna800/LineOfGui/main/invpatch27?b27=" .. stamp)
-assert(patch and #patch > 8000 and patch:find("UNIVERSAL inventory", 1, true), "[LineOfBots] FAILED: invpatch27 not fetched")
-local s0 = base:find("v21 Beta 2 p.3: Inventory INLINE", 1, true)
-local e0 = base:find("v25 INVENTORY wiring", 1, true)
-assert(s0 and e0 and e0 > s0, "[LineOfBots] FAILED: markers missing")
-local s = s0
-while s > 1 and base:sub(s - 1, s - 1) ~= "\n" do s = s - 1 end
-local e = e0
-while e > 1 and base:sub(e - 1, e - 1) ~= "\n" do e = e - 1 end
-base = base:sub(1, s - 1) .. patch .. "\n" .. base:sub(e)
-base = base:gsub("build 26 LOADED", "build 27 LOADED")
-base = base:gsub("Beta2%-inv build 26 loaded", "Beta2-inv build 27 loaded")
-base = base:gsub("v20 beta 2, build 26", "v20 beta 2, build 27")
-print("[LineOfBots] patched OK (" .. #base .. " bytes), starting")
-local fn, err = loadstring(base)
-assert(fn, "[LineOfBots] FAILED loadstring: " .. tostring(err))
-fn()
+if getgenv then getgenv()._InfectiousHubLoaded = true end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Config
+local Config = {
+    ESP_Smiler = true,
+    ESP_Human = true,
+    ESP_Items = false,
+    SpeedEnabled = false,
+    SpeedValue = 32,
+    JumpValue = 50,
+    FlyEnabled = false,
+    FlySpeed = 50,
+    Noclip = false,
+    InfJump = false,
+    HitAura = false,
+    HitDistance = 18,
+    InfectAura = false,
+    InfectDistance = 18,
+    NoCooldown = false,
+    AntiGrab = false,
+    AntiStun = false,
+    AntiLight = false,
+    Fullbright = false,
+}
+
+local SavedSpawnCFrame = nil
+pcall(function()
+    local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = c:WaitForChild("HumanoidRootPart", 5)
+    if hrp then SavedSpawnCFrame = hrp.CFrame end
+end)
+
+-- ============ HELPERS ============
+local function GetChar(plr)
+    plr = plr or LocalPlayer
+    return plr.Character
+end
+local function GetHRP(plr)
+    local c = GetChar(plr)
+    if c then return c:FindFirstChild("HumanoidRootPart") end
+    return nil
+end
+local function GetHum(plr)
+    local c = GetChar(plr)
+    if c then return c:FindFirstChildOfClass("Humanoid") end
+    return nil
+end
+
+-- Определение смайлера: Team + атрибуты + лицо
+local function IsSmiler(plr)
+    if not plr or not plr.Character then return false end
+    local ok, res = pcall(function()
+        -- 1. Team
+        if plr.Team and plr.Team.Name then
+            local t = string.lower(plr.Team.Name)
+            if string.find(t, "smile") or string.find(t, "infect") or string.find(t, "monster") then
+                return true
+            end
+            if string.find(t, "human") or string.find(t, "surviv") then
+                return false
+            end
+        end
+        -- 2. Атрибуты / Values
+        local c = plr.Character
+        if c:GetAttribute("Infected") == true then return true end
+        if c:GetAttribute("Smiler") == true then return true end
+        if c:GetAttribute("IsSmile") == true then return true end
+        if c:GetAttribute("IsSmiler") == true then return true end
+        if plr:GetAttribute("Infected") == true then return true end
+        if plr:GetAttribute("IsSmiler") == true then return true end
+        if c:FindFirstChild("Infected") or c:FindFirstChild("Smiler") or c:FindFirstChild("IsSmiler") then return true end
+        if plr:FindFirstChild("IsSmiler") or plr:FindFirstChild("Infected") then return true end
+        local role = plr:FindFirstChild("Role") or c:FindFirstChild("Role")
+        if role and role.Value then
+            local rv = string.lower(tostring(role.Value))
+            if string.find(rv, "smile") or string.find(rv, "infect") then return true end
+        end
+        -- 3. Лицо Winning Smile (ID 20573078 / 180399745 и варианты)
+        local head = c:FindFirstChild("Head")
+        if head then
+            for _, d in ipairs(head:GetChildren()) do
+                if d:IsA("Decal") and d.Texture then
+                    local tx = string.lower(d.Texture)
+                    if string.find(tx, "20573078") or string.find(tx, "180399745")
+                    or string.find(tx, "264235874") or string.find(tx, "winning") then
+                        return true
+                    end
+                end
+            end
+        end
+        return nil -- неизвестно
+    end)
+    if not ok then return false end
+    if res == nil then return false end
+    return res
+end
+
+-- Поиск ремоутов для аур / нокулдауна
+local GrabRemotes = {}
+local HitRemotes = {}
+do
+    pcall(function()
+        for _, d in ipairs(game:GetDescendants()) do
+            if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+                local n = string.lower(d.Name)
+                if string.find(n, "grab") or string.find(n, "infect") or string.find(n, "smile") or string.find(n, "bite") then
+                    table.insert(GrabRemotes, d)
+                end
+                if string.find(n, "hit") or string.find(n, "attack") or string.find(n, "damage") or string.find(n, "swing") or string.find(n, "weapon") then
+                    table.insert(HitRemotes, d)
+                end
+            end
+        end
+    end)
+end
+
+local function FireRemotes(list, ...)
+    for _, r in ipairs(list) do
+        pcall(function()
+            if r:IsA("RemoteEvent") then r:FireServer(...) end
+        end)
+    end
+end
+
+local function GetTool()
+    local c = GetChar()
+    if not c then return nil end
+    local t = c:FindFirstChildOfClass("Tool")
+    if t then return t end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") then return tool end
+        end
+    end
+    return nil
+end
+
+local function EquipTool(tool)
+    if not tool then return end
+    pcall(function()
+        local hum = GetHum()
+        if hum and tool.Parent ~= GetChar() then
+            hum:EquipTool(tool)
+        end
+    end)
+end
+
+-- ============ GUI (без loadstring, Delta-friendly) ============
+local gui = Instance.new("ScreenGui")
+gui.Name = "InfectiousHub"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.IgnoreGuiInset = true
+pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+if getgenv then getgenv()._InfectiousHubGui = gui end
+
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.new(0, 310, 0, 440)
+Main.Position = UDim2.new(0.5, -155, 0.5, -220)
+Main.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+local stroke = Instance.new("UIStroke", Main)
+stroke.Color = Color3.fromRGB(255, 80, 80)
+stroke.Thickness = 2
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -70, 0, 36)
+Title.Position = UDim2.new(0, 12, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Infectious Smile | Delta Hub"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Main
+
+local function MakeTopBtn(txt, x)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 26, 0, 26)
+    b.Position = UDim2.new(1, x, 0, 5)
+    b.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    b.Text = txt
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 14
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Parent = Main
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    return b
+end
+local MinBtn = MakeTopBtn("-", -62)
+local CloseBtn = MakeTopBtn("X", -32)
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1, -16, 1, -48)
+Scroll.Position = UDim2.new(0, 8, 0, 40)
+Scroll.BackgroundTransparency = 1
+Scroll.ScrollBarThickness = 4
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.Parent = Main
+local Layout = Instance.new("UIListLayout", Scroll)
+Layout.Padding = UDim.new(0, 6)
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    Scroll.Visible = not minimized
+    Main.Size = minimized and UDim2.new(0, 310, 0, 40) or UDim2.new(0, 310, 0, 440)
+    MinBtn.Text = minimized and "+" or "-"
+end)
+CloseBtn.MouseButton1Click:Connect(function() gui:Destroy() if getgenv then getgenv()._InfectiousHubLoaded = false end end)
+
+local function Section(name)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -4, 0, 20)
+    l.BackgroundTransparency = 1
+    l.Text = "— " .. name .. " —"
+    l.Font = Enum.Font.GothamBold
+    l.TextSize = 12
+    l.TextColor3 = Color3.fromRGB(255, 120, 120)
+    l.Parent = Scroll
+    return l
+end
+
+local function Toggle(name, default, cb)
+    local state = default
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 32)
+    b.BackgroundColor3 = state and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(45, 45, 55)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Parent = Scroll
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    local function refresh() b.Text = (state and "[ON] " or "[OFF] ") .. name b.BackgroundColor3 = state and Color3.fromRGB(60,180,90) or Color3.fromRGB(45,45,55) end
+    refresh()
+    b.MouseButton1Click:Connect(function() state = not state refresh() pcall(cb, state) end)
+    return b
+end
+
+local function Button(name, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 32)
+    b.BackgroundColor3 = Color3.fromRGB(55, 55, 75)
+    b.Text = name
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Parent = Scroll
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    b.MouseButton1Click:Connect(function() pcall(cb) end)
+    return b
+end
+
+local function SliderBtn(name, min, max, default, cb)
+    local val = default
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 32)
+    b.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Parent = Scroll
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    local function refresh() b.Text = name .. ": " .. tostring(val) .. " (тап = +)" end
+    refresh()
+    b.MouseButton1Click:Connect(function()
+        val = val + 1
+        if val > max then val = min end
+        refresh()
+        pcall(cb, val)
+    end)
+    return b
+end
+
+Section("ESP")
+Toggle("ESP Smilers (красные)", true, function(s) Config.ESP_Smiler = s end)
+Toggle("ESP Humans (зелёные)", true, function(s) Config.ESP_Human = s end)
+Toggle("ESP Оружие/Предметы", false, function(s) Config.ESP_Items = s end)
+Button("Очистить ESP", function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        local c = p.Character
+        if c then
+            local h = c:FindFirstChild("_ISH_HL") if h then h:Destroy() end
+            local bb = c:FindFirstChild("_ISH_BB") if bb then bb:Destroy() end
+        end
+    end
+end)
+
+Section("Движение")
+Toggle("Speed", false, function(s) Config.SpeedEnabled = s end)
+SliderBtn("WalkSpeed", 16, 150, 32, function(v) Config.SpeedValue = v end)
+SliderBtn("JumpPower", 50, 200, 50, function(v) Config.JumpValue = v pcall(function() local h=GetHum() if h then h.JumpPower=v; h.UseJumpPower=true end end) end)
+Toggle("Fly (на телефоне: летит куда идёшь)", false, function(s) Config.FlyEnabled = s end)
+SliderBtn("FlySpeed", 20, 150, 50, function(v) Config.FlySpeed = v end)
+Toggle("Noclip (сквозь стены)", false, function(s) Config.Noclip = s end)
+Toggle("Inf Jump", false, function(s) Config.InfJump = s end)
+
+Section("Ауры + Бой")
+Toggle("Hit Aura (человек бьёт смайлов)", false, function(s) Config.HitAura = s end)
+SliderBtn("Hit Distance", 8, 60, 18, function(v) Config.HitDistance = v end)
+Toggle("Infect Aura (смайл заражает)", false, function(s) Config.InfectAura = s end)
+SliderBtn("Infect Distance", 8, 60, 18, function(v) Config.InfectDistance = v end)
+Toggle("No Cooldown (без КД оружия)", false, function(s) Config.NoCooldown = s end)
+Button("Ударить всех рядом (разово)", function()
+    local myHRP = GetHRP()
+    local tool = GetTool()
+    if tool then EquipTool(tool) end
+    if not myHRP then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local thrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local thum = p.Character:FindFirstChildOfClass("Humanoid")
+            if thrp and thum and thum.Health > 0 and (myHRP.Position - thrp.Position).Magnitude <= 25 then
+                pcall(function() if tool then tool:Activate() end end)
+                pcall(function()
+                    if tool and tool:FindFirstChild("Handle") and firetouchinterest then
+                        firetouchinterest(tool.Handle, thrp, 0)
+                        task.wait()
+                        firetouchinterest(tool.Handle, thrp, 1)
+                    end
+                end)
+            end
+        end
+    end
+    FireRemotes(HitRemotes)
+end)
+
+Section("Защита")
+Toggle("Anti-Grab (выход из захвата)", false, function(s) Config.AntiGrab = s end)
+Toggle("Anti-Stun", false, function(s) Config.AntiStun = s end)
+Toggle("Anti Infect Light (попытка)", false, function(s) Config.AntiLight = s end)
+Toggle("Fullbright (светлая карта)", false, function(s)
+    Config.Fullbright = s
+    if s then
+        Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000
+        Lighting.GlobalShadows = false Lighting.OutdoorAmbient = Color3.new(1,1,1)
+    else
+        Lighting.Brightness = 1 Lighting.GlobalShadows = true
+    end
+end)
+
+Section("Телепорты")
+Button("Сохранить точку", function()
+    local hrp = GetHRP() if hrp then SavedSpawnCFrame = hrp.CFrame end
+end)
+Button("ТП на сохранённую точку / Спавн", function()
+    local hrp = GetHRP()
+    if hrp and SavedSpawnCFrame then hrp.CFrame = SavedSpawnCFrame + Vector3.new(0, 3, 0) end
+end)
+Button("ТП к ближайшему игроку", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local t = p.Character:FindFirstChild("HumanoidRootPart")
+            if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
+        end
+    end
+    if best then my.CFrame = best.CFrame + Vector3.new(0, 2, 3) end
+end)
+Button("ТП к ближайшему смайлу", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and IsSmiler(p) and p.Character then
+            local t = p.Character:FindFirstChild("HumanoidRootPart")
+            if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
+        end
+    end
+    if best then my.CFrame = best.CFrame + Vector3.new(0, 3, 5) end
+end)
+Button("ТП к оружию (Knife/Bat/Gun)", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("Tool") or (d:IsA("Model") and d:FindFirstChild("Handle")) then
+            local n = string.lower(d.Name)
+            if string.find(n, "knife") or string.find(n, "bat") or string.find(n, "gun")
+            or string.find(n, "shotgun") or string.find(n, "katana") or string.find(n, "branch")
+            or string.find(n, "spear") or string.find(n, "bottle") then
+                local pos = nil
+                local h = d:FindFirstChild("Handle") or d:FindFirstChild("HumanoidRootPart") or d:FindFirstChild("Head")
+                if d:IsA("BasePart") then pos = d.Position
+                elseif h and h:IsA("BasePart") then pos = h.Position end
+                if pos then local dd = (my.Position - pos).Magnitude if dd < bd then bd = dd best = pos end end
+            end
+        end
+    end
+    if best then my.CFrame = CFrame.new(best + Vector3.new(0, 3, 0)) end
+end)
+
+Section("Статус")
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -4, 0, 28)
+Status.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+Status.Text = "Роль: ... | Пинг: ..."
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 12
+Status.TextColor3 = Color3.new(1,1,1)
+Status.Parent = Scroll
+Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
+
+-- ============ ESP LOOP ============
+local function ApplyESP(plr)
+    if plr == LocalPlayer then return end
+    local c = plr.Character
+    if not c then return end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return end
+    local smiler = IsSmiler(plr)
+    local show = (smiler and Config.ESP_Smiler) or ((not smiler) and Config.ESP_Human)
+    local hl = c:FindFirstChild("_ISH_HL")
+    local bb = c:FindFirstChild("_ISH_BB")
+    if not show then
+        if hl then hl:Destroy() end
+        if bb then bb:Destroy() end
+        return
+    end
+    local col = smiler and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(40, 255, 90)
+    if not hl then
+        hl = Instance.new("Highlight")
+        hl.Name = "_ISH_HL"
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.FillTransparency = 0.6
+        hl.OutlineTransparency = 0
+        hl.Parent = c
+    end
+    hl.FillColor = col
+    hl.OutlineColor = col
+    if not bb then
+        bb = Instance.new("BillboardGui")
+        bb.Name = "_ISH_BB"
+        bb.Size = UDim2.new(0, 120, 0, 40)
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent = c
+        local tl = Instance.new("TextLabel")
+        tl.Name = "TL"
+        tl.Size = UDim2.new(1, 0, 1, 0)
+        tl.BackgroundTransparency = 1
+        tl.Font = Enum.Font.GothamBold
+        tl.TextSize = 12
+        tl.TextStrokeTransparency = 0.3
+        tl.Parent = bb
+    end
+    local my = GetHRP()
+    local dist = my and math.floor((my.Position - hrp.Position).Magnitude) or 0
+    local tl = bb:FindFirstChild("TL")
+    if tl then
+        tl.Text = plr.DisplayName .. " (" .. dist .. "m)\n" .. (smiler and "SMILER" or "HUMAN") .. " | " .. math.floor(hum.Health) .. "HP"
+        tl.TextColor3 = col
+    end
+    local head = c:FindFirstChild("Head")
+    if head and bb then bb.Adornee = head end
+end
+
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.5)
+        pcall(function()
+            for _, p in ipairs(Players:GetPlayers()) do ApplyESP(p) end
+            -- ESP предметов
+            -- (чистим старый)
+        end)
+    end
+end)
+
+-- Item ESP (оружие)
+task.spawn(function()
+    while gui.Parent do
+        task.wait(2)
+        if Config.ESP_Items then
+            pcall(function()
+                for _, d in ipairs(Workspace:GetDescendants()) do
+                    if d:IsA("Tool") and not d:FindFirstChild("_ISH_ITEM") then
+                        local h = d:FindFirstChild("Handle")
+                        local ador = h or (d:IsA("BasePart") and d) or nil
+                        if ador then
+                            local b = Instance.new("BillboardGui")
+                            b.Name = "_ISH_ITEM"
+                            b.Size = UDim2.new(0, 100, 0, 25)
+                            b.AlwaysOnTop = true
+                            b.Adornee = ador
+                            b.Parent = ador
+                            local t = Instance.new("TextLabel")
+                            t.Size = UDim2.new(1,0,1,0)
+                            t.BackgroundTransparency = 1
+                            t.Text = "🔫 " .. d.Name
+                            t.Font = Enum.Font.GothamBold
+                            t.TextSize = 12
+                            t.TextColor3 = Color3.fromRGB(255, 220, 80)
+                            t.Parent = b
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ============ MOVEMENT ============
+-- Speed / Jump lock
+RunService.Heartbeat:Connect(function()
+    pcall(function()
+        local hum = GetHum()
+        if hum and hum.Health > 0 then
+            if Config.SpeedEnabled then
+                hum.WalkSpeed = Config.SpeedValue
+            end
+            if Config.AntiStun then
+                hum.PlatformStand = false
+                hum.Sit = false
+                if hum:GetState() == Enum.HumanoidStateType.Physics
+                or hum:GetState() == Enum.HumanoidStateType.Ragdoll
+                or hum:GetState() == Enum.HumanoidStateType.FallingDown then
+                    hum:ChangeState(Enum.HumanoidStateType.Running)
+                end
+            end
+        end
+    end)
+end)
+
+-- Noclip
+RunService.Stepped:Connect(function()
+    if Config.Noclip then
+        pcall(function()
+            local c = GetChar()
+            if c then
+                for _, v in ipairs(c:GetDescendants()) do
+                    if v:IsA("BasePart") and v.CanCollide then
+                        v.CanCollide = false
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- InfJump
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfJump then
+        pcall(function()
+            local hum = GetHum()
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end)
+    end
+end)
+
+-- Fly (работает на мобиле через MoveDirection)
+local FlyGyro, FlyVel = nil, nil
+task.spawn(function()
+    while gui.Parent do
+        RunService.Heartbeat:Wait()
+        pcall(function()
+            local hrp = GetHRP()
+            local hum = GetHum()
+            if Config.FlyEnabled and hrp and hum then
+                if not FlyGyro then
+                    FlyGyro = Instance.new("BodyGyro")
+                    FlyGyro.P = 9000 FlyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+                    FlyGyro.CFrame = hrp.CFrame
+                    FlyGyro.Parent = hrp
+                    FlyVel = Instance.new("BodyVelocity")
+                    FlyVel.MaxForce = Vector3.new(9e9,9e9,9e9)
+                    FlyVel.Parent = hrp
+                end
+                local cam = Workspace.CurrentCamera
+                local move = hum.MoveDirection
+                FlyGyro.CFrame = cam.CFrame
+                if move.Magnitude > 0.1 then
+                    FlyVel.Velocity = move * Config.FlySpeed
+                else
+                    FlyVel.Velocity = Vector3.new(0,0,0)
+                end
+            else
+                if FlyGyro then FlyGyro:Destroy() FlyGyro = nil end
+                if FlyVel then FlyVel:Destroy() FlyVel = nil end
+            end
+        end)
+    end
+end)
+
+-- ============ AURAS ============
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.25)
+        pcall(function()
+            local myHRP = GetHRP()
+            if not myHRP then return end
+
+            -- HIT AURA (мы человек, бьём смайлов; если роль не определилась — бьём всех рядом)
+            if Config.HitAura then
+                local iAmSmiler = IsSmiler(LocalPlayer)
+                if not iAmSmiler then
+                    local tool = GetTool()
+                    if tool then EquipTool(tool) end
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= LocalPlayer and p.Character then
+                            local thrp = p.Character:FindFirstChild("HumanoidRootPart")
+                            local thum = p.Character:FindFirstChildOfClass("Humanoid")
+                            if thrp and thum and thum.Health > 0 then
+                                local d = (myHRP.Position - thrp.Position).Magnitude
+                                -- бьём смайлов, а если детект не сработал — всех в радиусе
+                                if d <= Config.HitDistance and (IsSmiler(p) or true) then
+                                    if tool then
+                                        pcall(function() tool:Activate() end)
+                                        pcall(function()
+                                            if tool:FindFirstChild("Handle") and firetouchinterest then
+                                                firetouchinterest(tool.Handle, thrp, 0)
+                                                task.wait()
+                                                firetouchinterest(tool.Handle, thrp, 1)
+                                            end
+                                        end)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    -- пробуем ремоуты урона
+                    FireRemotes(HitRemotes)
+                end
+            end
+
+            -- INFECT AURA (мы смайл, заражаем хуманосов)
+            if Config.InfectAura then
+                local iAmSmiler = IsSmiler(LocalPlayer)
+                -- разрешаем всегда, чтобы работало даже если детект роли подвёл
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character then
+                        if iAmSmiler or true then
+                            local thrp = p.Character:FindFirstChild("HumanoidRootPart")
+                            local thum = p.Character:FindFirstChildOfClass("Humanoid")
+                            if thrp and thum and thum.Health > 0 and not IsSmiler(p) then
+                                local d = (myHRP.Position - thrp.Position).Magnitude
+                                if d <= Config.InfectDistance then
+                                    pcall(function()
+                                        if firetouchinterest then
+                                            firetouchinterest(myHRP, thrp, 0)
+                                            task.wait()
+                                            firetouchinterest(myHRP, thrp, 1)
+                                        end
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                end
+                FireRemotes(GrabRemotes)
+            end
+        end)
+    end
+end)
+
+-- ============ NO COOLDOWN ============
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.3)
+        if Config.NoCooldown then
+            pcall(function()
+                local c = GetChar()
+                local bp = LocalPlayer:FindFirstChild("Backpack")
+                local tools = {}
+                if c then for _, t in ipairs(c:GetChildren()) do if t:IsA("Tool") then table.insert(tools, t) end end end
+                if bp then for _, t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then table.insert(tools, t) end end end
+                for _, tool in ipairs(tools) do
+                    -- атрибуты
+                    for _, an in ipairs({"Cooldown","AttackCooldown","CooldownTime","ReloadTime","SwingCooldown","HitCooldown"}) do
+                        pcall(function()
+                            if tool:GetAttribute(an) ~= nil then tool:SetAttribute(an, 0) end
+                        end)
+                    end
+                    tool.Enabled = true
+                    for _, v in ipairs(tool:GetDescendants()) do
+                        if v:IsA("NumberValue") or v:IsA("IntValue") then
+                            local n = string.lower(v.Name)
+                            if string.find(n, "cooldown") or string.find(n, "debounce") or string.find(n, "lastattack")
+                            or string.find(n, "lastuse") or string.find(n, "nextattack") or string.find(n, "reload") then
+                                v.Value = 0
+                            end
+                        elseif v:IsA("BoolValue") then
+                            local n = string.lower(v.Name)
+                            if string.find(n, "debounce") or string.find(n, "cooldown") or string.find(n, "attacking") then
+                                v.Value = false
+                            end
+                        end
+                    end
+                end
+                -- глобальный кулдаун игрока
+                for _, an in ipairs({"Cooldown","AttackCooldown","GlobalCooldown","WeaponCooldown"}) do
+                    pcall(function()
+                        if LocalPlayer:GetAttribute(an) ~= nil then LocalPlayer:SetAttribute(an, 0) end
+                    end)
+                    local ch = GetChar()
+                    if ch then pcall(function() if ch:GetAttribute(an) ~= nil then ch:SetAttribute(an, 0) end end) end
+                end
+            end)
+        end
+    end
+end)
+
+-- ============ ANTI ============
+-- Anti-Grab: рвём велды + отпрыгиваем
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.2)
+        if Config.AntiGrab then
+            pcall(function()
+                local c = GetChar()
+                local hrp = GetHRP()
+                local hum = GetHum()
+                if not c or not hrp or not hum then return end
+                local grabbed = false
+                if hum.Seated then grabbed = true end
+                if c:GetAttribute("Grabbed") == true then grabbed = true end
+                for _, v in ipairs(hrp:GetChildren()) do
+                    if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then
+                        grabbed = true
+                        v:Destroy()
+                    end
+                end
+                for _, v in ipairs(c:GetDescendants()) do
+                    if (v:IsA("Weld") or v:IsA("WeldConstraint")) and (string.lower(v.Name):find("grab") or string.lower(v.Name):find("hold")) then
+                        grabbed = true
+                        v:Destroy()
+                    end
+                end
+                if grabbed then
+                    hum.Sit = false
+                    hum.PlatformStand = false
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                    hrp.CFrame = hrp.CFrame + Vector3.new(0, 4, 0) + hrp.CFrame.LookVector * -5
+                    hrp.Velocity = Vector3.new(0, 50, 0)
+                end
+            end)
+        end
+    end
+end)
+
+-- Anti Infect Light: локально отключаем Touch у белых парти (best effort)
+task.spawn(function()
+    while gui.Parent do
+        task.wait(3)
+        if Config.AntiLight then
+            pcall(function()
+                for _, d in ipairs(Workspace:GetDescendants()) do
+                    if d:IsA("BasePart") then
+                        local n = string.lower(d.Name)
+                        if string.find(n, "infect") or string.find(n, "smile light") or string.find(n, "infecting") then
+                            pcall(function() d.CanTouch = false end)
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- Статус + автосейв спавна при респавне
+LocalPlayer.CharacterAdded:Connect(function(c)
+    task.wait(1)
+    pcall(function()
+        local hum = c:WaitForChild("Humanoid", 5)
+        if hum then
+            hum.WalkSpeed = Config.SpeedEnabled and Config.SpeedValue or 16
+            hum.JumpPower = Config.JumpValue
+            hum.UseJumpPower = true
+        end
+    end)
+end)
+
+task.spawn(function()
+    while gui.Parent do
+        task.wait(1)
+        pcall(function()
+            local role = IsSmiler(LocalPlayer) and "SMILER 😁" or "HUMAN 🙂"
+            local n = #Players:GetPlayers()
+            Status.Text = role .. " | Онлайн: " .. n .. " | " .. os.date("%H:%M:%S")
+        end)
+    end
+end)
+
+print("[InfectiousHub] loaded for Delta")
