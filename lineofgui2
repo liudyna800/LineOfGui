@@ -152,6 +152,7 @@ local flingTarget = nil
 local flinging = false
 local flingConns = {}
 local flingSavedCF = nil
+local flingT = 0 -- счётчик кадров орбиты
 
 local function GetTorso(char)
     if not char then return nil end
@@ -203,6 +204,7 @@ local function StartFling(plr)
     flingSavedCF = hrp.CFrame
     flingTarget = plr
     flinging = true
+    flingT = 0
     pcall(function()
         hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
         hum.PlatformStand = false
@@ -210,8 +212,8 @@ local function StartFling(plr)
     end)
     local ang = Instance.new("BodyAngularVelocity")
     ang.Name = "_GFling"
-    ang.MaxTorque = Vector3.new(0, math.huge, 0)
-    ang.AngularVelocity = Vector3.new(0, FLING_SPIN, 0)
+    ang.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    ang.AngularVelocity = Vector3.new(15, FLING_SPIN, 0)
     ang.P = 1250
     ang.Parent = hrp
     local vel = Instance.new("BodyVelocity")
@@ -235,15 +237,22 @@ local function StartFling(plr)
         local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
         local torso = GetTorso(tchar)
         if torso == nil or thum == nil or thum.Health <= 0 then return end
+        flingT = flingT + 1
         pcall(function()
             for _, v in ipairs(my:GetDescendants()) do
                 if v:IsA("BasePart") then v.CanCollide = false end
             end
             myHum.Sit = false
             myHum.PlatformStand = false
-            myHRP.CFrame = torso.CFrame * CFrame.new(0, 0.5, 0)
-            myHRP.Velocity = torso.Velocity + Vector3.new(0, 5, 0)
-            myHRP.RotVelocity = Vector3.new(0, FLING_SPIN, 0)
+            -- Орбита вокруг живота (низ торса, -1.7): ковыляем из стороны
+            -- в сторону и подковыриваем снизу, не висим сверху
+            local a = flingT * 0.4
+            local ox = math.sin(a) * 1.4
+            local oz = math.cos(a) * 1.4
+            local tilt = CFrame.Angles(math.rad(25) * math.sin(a * 0.7), 0, math.rad(25) * math.cos(a * 0.7))
+            myHRP.CFrame = torso.CFrame * CFrame.new(ox, -1.7, oz) * tilt
+            myHRP.Velocity = torso.Velocity + Vector3.new(ox * 8, 4, oz * 8)
+            myHRP.RotVelocity = Vector3.new(20, FLING_SPIN, 0)
         end)
     end)
     table.insert(flingConns, hb)
@@ -469,14 +478,16 @@ ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local function RefreshGiantsList(giants)
     pcall(function()
+        -- Чистим по имени: строки теперь кнопки, а не лейблы (из-за этого дубли)
         for _, ch in ipairs(GiantsList:GetChildren()) do
-            if ch:IsA("TextLabel") then ch:Destroy() end
+            if ch.Name == "_GRow" then ch:Destroy() end
         end
         ListTitle.Text = "Гиганты на сервере: " .. #giants
         local maxRows = 4 -- 4x30 + отступы влезают в 136px
         for i = 1, math.min(#giants, maxRows) do
             local g = giants[i]
             local l = Instance.new("TextButton")
+            l.Name = "_GRow"
             l.Size = UDim2.new(1, -8, 0, 30)
             l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
             l.BorderSizePixel = 0
@@ -510,6 +521,7 @@ local function RefreshGiantsList(giants)
         end
         if #giants > maxRows then
             local more = Instance.new("TextLabel")
+            more.Name = "_GRow"
             more.Size = UDim2.new(1, -8, 0, 16)
             more.BackgroundTransparency = 1
             more.Active = false
@@ -778,6 +790,7 @@ local flingTarget = nil
 local flinging = false
 local flingConns = {}
 local flingSavedCF = nil
+local flingT = 0 -- счётчик кадров орбиты
 
 local function GetTorso(char)
     if not char then return nil end
@@ -829,6 +842,7 @@ local function StartFling(plr)
     flingSavedCF = hrp.CFrame
     flingTarget = plr
     flinging = true
+    flingT = 0
     pcall(function()
         hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
         hum.PlatformStand = false
@@ -836,8 +850,8 @@ local function StartFling(plr)
     end)
     local ang = Instance.new("BodyAngularVelocity")
     ang.Name = "_GFling"
-    ang.MaxTorque = Vector3.new(0, math.huge, 0)
-    ang.AngularVelocity = Vector3.new(0, FLING_SPIN, 0)
+    ang.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    ang.AngularVelocity = Vector3.new(15, FLING_SPIN, 0)
     ang.P = 1250
     ang.Parent = hrp
     local vel = Instance.new("BodyVelocity")
@@ -861,15 +875,22 @@ local function StartFling(plr)
         local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
         local torso = GetTorso(tchar)
         if torso == nil or thum == nil or thum.Health <= 0 then return end
+        flingT = flingT + 1
         pcall(function()
             for _, v in ipairs(my:GetDescendants()) do
                 if v:IsA("BasePart") then v.CanCollide = false end
             end
             myHum.Sit = false
             myHum.PlatformStand = false
-            myHRP.CFrame = torso.CFrame * CFrame.new(0, 0.5, 0)
-            myHRP.Velocity = torso.Velocity + Vector3.new(0, 5, 0)
-            myHRP.RotVelocity = Vector3.new(0, FLING_SPIN, 0)
+            -- Орбита вокруг живота (низ торса, -1.7): ковыляем из стороны
+            -- в сторону и подковыриваем снизу, не висим сверху
+            local a = flingT * 0.4
+            local ox = math.sin(a) * 1.4
+            local oz = math.cos(a) * 1.4
+            local tilt = CFrame.Angles(math.rad(25) * math.sin(a * 0.7), 0, math.rad(25) * math.cos(a * 0.7))
+            myHRP.CFrame = torso.CFrame * CFrame.new(ox, -1.7, oz) * tilt
+            myHRP.Velocity = torso.Velocity + Vector3.new(ox * 8, 4, oz * 8)
+            myHRP.RotVelocity = Vector3.new(20, FLING_SPIN, 0)
         end)
     end)
     table.insert(flingConns, hb)
@@ -1095,14 +1116,16 @@ ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local function RefreshGiantsList(giants)
     pcall(function()
+        -- Чистим по имени: строки теперь кнопки, а не лейблы (из-за этого дубли)
         for _, ch in ipairs(GiantsList:GetChildren()) do
-            if ch:IsA("TextLabel") then ch:Destroy() end
+            if ch.Name == "_GRow" then ch:Destroy() end
         end
         ListTitle.Text = "Гиганты на сервере: " .. #giants
         local maxRows = 4 -- 4x30 + отступы влезают в 136px
         for i = 1, math.min(#giants, maxRows) do
             local g = giants[i]
             local l = Instance.new("TextButton")
+            l.Name = "_GRow"
             l.Size = UDim2.new(1, -8, 0, 30)
             l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
             l.BorderSizePixel = 0
@@ -1136,6 +1159,7 @@ local function RefreshGiantsList(giants)
         end
         if #giants > maxRows then
             local more = Instance.new("TextLabel")
+            more.Name = "_GRow"
             more.Size = UDim2.new(1, -8, 0, 16)
             more.BackgroundTransparency = 1
             more.Active = false
