@@ -1,18 +1,15 @@
--- GIANT RAID HOP | Infectious Smile | Delta
--- Что делает: ищет гигантов на сервере, если нет - хопает на следующий.
--- Как Infinite Yield: после телепорта скрипт сам запускается через queue_on_teleport.
---
--- НАСТРОЙКА АВТОЗАПУСКА (важно):
--- 1. Залей этот файл на pastebin / github gist raw
--- 2. Вставь ссылку в SCRIPT_URL ниже
--- 3. Execute в Delta. Дальше всё само: поиск -> хоп -> поиск...
--- Без SCRIPT_URL авто-запуск после хопа НЕ сработает, придётся жать Execute вручную.
+local SELF = [=====[
+-- GIANT RAID HOP | Infectious Smile | Delta (auto-queue, no URL needed)
+-- Вставь весь файл в Delta -> Execute. Дальше хопы сами подхватываются.
+-- S = self source (upvalue SELF set by header). Reconstructs full file, queues it (IY mechanic, no URL needed).
+-- NB: closer built dynamically so source never contains the raw closer bytes.
+local _CLOSE = "]" .. "=====]"
+local FULL = "local SELF = [=====[\n" .. SELF .. "\n" .. _CLOSE .. "\n" .. SELF
 
-local SCRIPT_URL = "" -- например "https://pastebin.com/raw/XXXXXXX"
+local SCRIPT_URL = "" -- оставить пустым: работает без pastebin за счёт SELF-очереди
 local PLACE_ID = 5985232436
-local HOP_DELAY = 20 -- секунд искать на сервере перед хопом
+local HOP_DELAY = 20
 local AUTO_HOP = true
-local AUTO_TP_TO_GIANT = true
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -35,31 +32,50 @@ local function Notify(title, text, dur)
     print("[GiantRaid] " .. tostring(text))
 end
 
--- ============ QUEUE ON TELEPORT (как в Infinite Yield) ============
-local function QueueNext()
-    if SCRIPT_URL == "" then
-        Notify("Giant Raid", "Нет SCRIPT_URL - после хопа нажми Execute вручную")
-        return
-    end
-    local code = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
-    local q = nil
+-- ============ QUEUE ON TELEPORT (как Infinite Yield, но без ссылки) ============
+local QueueStatus = "?"
+local function TryQueue(src)
+    local variants = {}
     pcall(function()
-        q = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+        if queue_on_teleport then table.insert(variants, queue_on_teleport) end
     end)
-    if getgenv and not q then
-        pcall(function() q = getgenv().queue_on_teleport or getgenv().queueonteleport end)
+    pcall(function()
+        if queueonteleport then table.insert(variants, queueonteleport) end
+    end)
+    pcall(function()
+        if syn and syn.queue_on_teleport then table.insert(variants, syn.queue_on_teleport) end
+    end)
+    if getgenv then
+        pcall(function()
+            if getgenv().queue_on_teleport then table.insert(variants, getgenv().queue_on_teleport) end
+        end)
+        pcall(function()
+            if getgenv().queueonteleport then table.insert(variants, getgenv().queueonteleport) end
+        end)
     end
-    if q then
-        pcall(function() q(code) end)
-        Notify("Giant Raid", "Авто-запуск на след. сервере включён")
+    for _, q in ipairs(variants) do
+        local ok = pcall(function() q(src) end)
+        if ok then return true end
+    end
+    return false
+end
+
+local function QueueSelf()
+    local src = FULL
+    if SCRIPT_URL ~= "" then
+        src = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
+    end
+    if TryQueue(src) then
+        QueueStatus = "queue OK"
+        return true
     else
-        Notify("Giant Raid", "Executor не поддерживает queue_on_teleport")
+        QueueStatus = "queue НЕТ: executor не поддерживает queue_on_teleport. Положи файл в Delta > AutoExecute как запасной вариант."
+        Notify("Giant Raid", QueueStatus, 6)
+        return false
     end
 end
 
--- ============ ДЕТЕКТ ГИГАНТА ============
--- Гигант из Giant Potion: 300 HP, x2 размер, фиолетовое свечение/партиклы
--- Endangered гигант: +100 HP. NPC-гигант в Giant's Room: большое тело + много HP.
+-- ============ ДЕТЕКТ ГИГАНТА-ИГРОКА (NPC игнорим) ============
 local function IsPlayerGiant(plr)
     if not plr or not plr.Character then return false, nil end
     local c = plr.Character
@@ -68,13 +84,10 @@ local function IsPlayerGiant(plr)
     local head = c:FindFirstChild("Head")
     if not hum or not hrp then return false, nil end
     local info = {}
-
-    -- 1. HP (самый надёжный признак: у гиганта 300)
     if hum.MaxHealth and hum.MaxHealth >= 200 then
         info.reason = "HP:" .. tostring(hum.MaxHealth)
         return true, info
     end
-    -- 2. Атрибуты / значения
     if c:GetAttribute("Giant") == true or c:GetAttribute("IsGiant") == true
     or plr:GetAttribute("Giant") == true or plr:GetAttribute("IsGiant") == true then
         info.reason = "attr"
@@ -84,7 +97,6 @@ local function IsPlayerGiant(plr)
         info.reason = "value"
         return true, info
     end
-    -- 3. Размер тела (гигант x2)
     if hrp.Size.Y > 2.6 then
         info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
         return true, info
@@ -93,7 +105,6 @@ local function IsPlayerGiant(plr)
         info.reason = "head"
         return true, info
     end
-    -- 4. Фиолетовое свечение гиганта (PointLight + ParticleEmitter) + большой размер
     local hasGlow = false
     for _, d in ipairs(c:GetDescendants()) do
         if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
@@ -110,7 +121,6 @@ end
 
 local function FindGiants()
     local found = {}
-    -- игроки-гиганты
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local ok, info = IsPlayerGiant(p)
@@ -128,7 +138,6 @@ local function FindGiants()
             end
         end
     end
-    -- только игроки-гиганты (NPC игнорируем)
     return found
 end
 
@@ -148,8 +157,8 @@ if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("Pl
 if getgenv then getgenv()._GiantRaidGui = gui end
 
 local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 280, 0, 210)
-Main.Position = UDim2.new(0.5, -140, 0.2, 0)
+Main.Size = UDim2.new(0, 280, 0, 330)
+Main.Position = UDim2.new(0.5, -140, 0.15, 0)
 Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 Main.BorderSizePixel = 0
 Main.Active = true
@@ -201,18 +210,59 @@ end
 local running = true
 local hopNow = false
 Btn("Хоп сейчас", 96, function() hopNow = true end)
-local tpBtn = Btn("Авто-ТП к гиганту: ВКЛ", 130, function()
-    AUTO_TP_TO_GIANT = not AUTO_TP_TO_GIANT
-    tpBtn.Text = "Авто-ТП к гиганту: " .. (AUTO_TP_TO_GIANT and "ВКЛ" or "ВЫКЛ")
-end)
-Btn("Стоп / Старт", 164, function()
+Btn("Стоп / Старт", 130, function()
     running = not running
     Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
 end)
 
+local ListTitle = Instance.new("TextLabel")
+ListTitle.Size = UDim2.new(1, -16, 0, 20)
+ListTitle.Position = UDim2.new(0, 8, 0, 164)
+ListTitle.BackgroundTransparency = 1
+ListTitle.Text = "Гиганты на сервере: 0"
+ListTitle.Font = Enum.Font.GothamBold
+ListTitle.TextSize = 12
+ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
+ListTitle.TextXAlignment = Enum.TextXAlignment.Left
+ListTitle.Parent = Main
+
+local GiantsList = Instance.new("ScrollingFrame")
+GiantsList.Size = UDim2.new(1, -16, 0, 138)
+GiantsList.Position = UDim2.new(0, 8, 0, 184)
+GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+GiantsList.ScrollBarThickness = 4
+GiantsList.CanvasSize = UDim2.new(0, 0, 0, 0)
+GiantsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+GiantsList.Parent = Main
+Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
+local ListLayout = Instance.new("UIListLayout", GiantsList)
+ListLayout.Padding = UDim.new(0, 4)
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function RefreshGiantsList(giants)
+    pcall(function()
+        for _, ch in ipairs(GiantsList:GetChildren()) do
+            if ch:IsA("TextLabel") then ch:Destroy() end
+        end
+        ListTitle.Text = "Гиганты на сервере: " .. #giants
+        for i, g in ipairs(giants) do
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.new(1, -8, 0, 34)
+            l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
+            l.Font = Enum.Font.Gotham
+            l.TextSize = 11
+            l.TextColor3 = Color3.new(1, 1, 1)
+            l.TextWrapped = true
+            l.Text = i .. ". " .. g.name .. "\n" .. g.hp .. "/" .. g.maxHp .. " HP (" .. g.reason .. ")"
+            l.Parent = GiantsList
+            Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+        end
+    end)
+end
+
 -- ============ SERVER HOP (как Infinite Yield) ============
 local function ServerHop()
-    QueueNext() -- чтобы скрипт сам запустился на новом сервере
+    QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
@@ -240,7 +290,6 @@ local function ServerHop()
             end
             if cursor == "" or cursor == nil then break end
         end
-        -- если все обошли / не нашли - просто ре-телепорт в этот же плейс (другой сервер)
         TeleportService:Teleport(placeId, LocalPlayer)
     end)
     if not ok then
@@ -252,45 +301,40 @@ end
 -- ============ MAIN LOOP ============
 task.spawn(function()
     local timer = 0
-    QueueNext() -- сразу ставим в очередь, чтобы работало после хопа
+    QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
     while gui.Parent do
         task.wait(1)
         if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт."
+            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
         else
             if hopNow then hopNow = false timer = 999 end
             local giants = {}
             pcall(function() giants = FindGiants() end)
             if #giants > 0 then
                 timer = 0
-                local g = giants[1]
-                Status.Text = "НАШЁЛ ГИГАНТА: " .. g.name .. " | " .. g.hp .. "/" .. g.maxHp .. "HP (" .. g.reason .. ")"
-                Notify("GIANT FOUND", g.name .. " " .. g.hp .. "HP")
-                -- подсветка
+                Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
+                RefreshGiantsList(giants)
+                Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
                 pcall(function()
-                    local c = g.player and g.player.Character or nil
-                    if c and not c:FindFirstChild("_GIANT_HL") then
-                        local hl = Instance.new("Highlight")
-                        hl.Name = "_GIANT_HL"
-                        hl.FillColor = Color3.fromRGB(170, 60, 255)
-                        hl.OutlineColor = Color3.fromRGB(220, 170, 255)
-                        hl.FillTransparency = 0.4
-                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                        hl.Parent = c
+                    for _, g in ipairs(giants) do
+                        local c = g.player and g.player.Character or nil
+                        if c and not c:FindFirstChild("_GIANT_HL") then
+                            local hl = Instance.new("Highlight")
+                            hl.Name = "_GIANT_HL"
+                            hl.FillColor = Color3.fromRGB(170, 60, 255)
+                            hl.OutlineColor = Color3.fromRGB(220, 170, 255)
+                            hl.FillTransparency = 0.4
+                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            hl.Parent = c
+                        end
                     end
                 end)
-                -- авто-тп
-                if AUTO_TP_TO_GIANT and g.hrp then
-                    pcall(function()
-                        local my = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        if my then my.CFrame = g.hrp.CFrame + Vector3.new(0, 3, 6) end
-                    end)
-                end
-                task.wait(5) -- не спамим, даём время на рейд
+                task.wait(5)
             else
                 timer = timer + 1
+                RefreshGiantsList({})
                 local left = math.max(0, HOP_DELAY - timer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с"
+                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "]"
                 if AUTO_HOP and timer >= HOP_DELAY then
                     timer = 0
                     ServerHop()
@@ -301,5 +345,355 @@ task.spawn(function()
     end
 end)
 
-Notify("Giant Raid", "Запущен. Ищу гигантов, хоп через " .. HOP_DELAY .. "с")
+Notify("Giant Raid", "Запущен. Хоп через " .. HOP_DELAY .. "с")
+print("[GiantRaid] loaded, place " .. PLACE_ID)
+
+]=====]
+-- GIANT RAID HOP | Infectious Smile | Delta (auto-queue, no URL needed)
+-- Вставь весь файл в Delta -> Execute. Дальше хопы сами подхватываются.
+-- S = self source (upvalue SELF set by header). Reconstructs full file, queues it (IY mechanic, no URL needed).
+-- NB: closer built dynamically so source never contains the raw closer bytes.
+local _CLOSE = "]" .. "=====]"
+local FULL = "local SELF = [=====[\n" .. SELF .. "\n" .. _CLOSE .. "\n" .. SELF
+
+local SCRIPT_URL = "" -- оставить пустым: работает без pastebin за счёт SELF-очереди
+local PLACE_ID = 5985232436
+local HOP_DELAY = 20
+local AUTO_HOP = true
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local StarterGui = game:GetService("StarterGui")
+local LocalPlayer = Players.LocalPlayer
+
+if getgenv and getgenv()._GiantRaidRunning then
+    pcall(function() getgenv()._GiantRaidGui:Destroy() end)
+end
+if getgenv then
+    getgenv()._GiantRaidRunning = true
+    getgenv()._GiantRaidVisited = getgenv()._GiantRaidVisited or {}
+end
+
+local function Notify(title, text, dur)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 4})
+    end)
+    print("[GiantRaid] " .. tostring(text))
+end
+
+-- ============ QUEUE ON TELEPORT (как Infinite Yield, но без ссылки) ============
+local QueueStatus = "?"
+local function TryQueue(src)
+    local variants = {}
+    pcall(function()
+        if queue_on_teleport then table.insert(variants, queue_on_teleport) end
+    end)
+    pcall(function()
+        if queueonteleport then table.insert(variants, queueonteleport) end
+    end)
+    pcall(function()
+        if syn and syn.queue_on_teleport then table.insert(variants, syn.queue_on_teleport) end
+    end)
+    if getgenv then
+        pcall(function()
+            if getgenv().queue_on_teleport then table.insert(variants, getgenv().queue_on_teleport) end
+        end)
+        pcall(function()
+            if getgenv().queueonteleport then table.insert(variants, getgenv().queueonteleport) end
+        end)
+    end
+    for _, q in ipairs(variants) do
+        local ok = pcall(function() q(src) end)
+        if ok then return true end
+    end
+    return false
+end
+
+local function QueueSelf()
+    local src = FULL
+    if SCRIPT_URL ~= "" then
+        src = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
+    end
+    if TryQueue(src) then
+        QueueStatus = "queue OK"
+        return true
+    else
+        QueueStatus = "queue НЕТ: executor не поддерживает queue_on_teleport. Положи файл в Delta > AutoExecute как запасной вариант."
+        Notify("Giant Raid", QueueStatus, 6)
+        return false
+    end
+end
+
+-- ============ ДЕТЕКТ ГИГАНТА-ИГРОКА (NPC игнорим) ============
+local function IsPlayerGiant(plr)
+    if not plr or not plr.Character then return false, nil end
+    local c = plr.Character
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    local head = c:FindFirstChild("Head")
+    if not hum or not hrp then return false, nil end
+    local info = {}
+    if hum.MaxHealth and hum.MaxHealth >= 200 then
+        info.reason = "HP:" .. tostring(hum.MaxHealth)
+        return true, info
+    end
+    if c:GetAttribute("Giant") == true or c:GetAttribute("IsGiant") == true
+    or plr:GetAttribute("Giant") == true or plr:GetAttribute("IsGiant") == true then
+        info.reason = "attr"
+        return true, info
+    end
+    if c:FindFirstChild("Giant") or c:FindFirstChild("IsGiant") or c:FindFirstChild("GiantPotion") then
+        info.reason = "value"
+        return true, info
+    end
+    if hrp.Size.Y > 2.6 then
+        info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
+        return true, info
+    end
+    if head and head.Size.Y > 1.8 then
+        info.reason = "head"
+        return true, info
+    end
+    local hasGlow = false
+    for _, d in ipairs(c:GetDescendants()) do
+        if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
+            hasGlow = true
+            break
+        end
+    end
+    if hasGlow and hrp.Size.Y > 2.2 then
+        info.reason = "glow+size"
+        return true, info
+    end
+    return false, nil
+end
+
+local function FindGiants()
+    local found = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local ok, info = IsPlayerGiant(p)
+            if ok then
+                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+                local hum = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+                table.insert(found, {
+                    name = p.DisplayName .. " (@" .. p.Name .. ")",
+                    player = p,
+                    hrp = hrp,
+                    hp = hum and math.floor(hum.Health) or 0,
+                    maxHp = hum and math.floor(hum.MaxHealth) or 0,
+                    reason = info and info.reason or "?",
+                })
+            end
+        end
+    end
+    return found
+end
+
+-- ============ GUI ============
+local gui = Instance.new("ScreenGui")
+gui.Name = "GiantRaidHop"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local parentOk = false
+pcall(function()
+    local h = nil
+    if gethui then h = gethui() end
+    if h then gui.Parent = h parentOk = true end
+end)
+if not parentOk then pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end) end
+if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+if getgenv then getgenv()._GiantRaidGui = gui end
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 280, 0, 330)
+Main.Position = UDim2.new(0.5, -140, 0.15, 0)
+Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+local st = Instance.new("UIStroke", Main)
+st.Color = Color3.fromRGB(170, 100, 255)
+st.Thickness = 2
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -10, 0, 28)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Giant Raid Hop"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Main
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -16, 0, 60)
+Status.Position = UDim2.new(0, 8, 0, 30)
+Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 12
+Status.TextColor3 = Color3.new(1, 1, 1)
+Status.TextWrapped = true
+Status.Text = "Сканирую..."
+Status.Parent = Main
+Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
+
+local function Btn(txt, y, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -16, 0, 30)
+    b.Position = UDim2.new(0, 8, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(60, 50, 90)
+    b.Text = txt
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Parent = Main
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    b.MouseButton1Click:Connect(function() pcall(cb) end)
+    return b
+end
+
+local running = true
+local hopNow = false
+Btn("Хоп сейчас", 96, function() hopNow = true end)
+Btn("Стоп / Старт", 130, function()
+    running = not running
+    Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
+end)
+
+local ListTitle = Instance.new("TextLabel")
+ListTitle.Size = UDim2.new(1, -16, 0, 20)
+ListTitle.Position = UDim2.new(0, 8, 0, 164)
+ListTitle.BackgroundTransparency = 1
+ListTitle.Text = "Гиганты на сервере: 0"
+ListTitle.Font = Enum.Font.GothamBold
+ListTitle.TextSize = 12
+ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
+ListTitle.TextXAlignment = Enum.TextXAlignment.Left
+ListTitle.Parent = Main
+
+local GiantsList = Instance.new("ScrollingFrame")
+GiantsList.Size = UDim2.new(1, -16, 0, 138)
+GiantsList.Position = UDim2.new(0, 8, 0, 184)
+GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+GiantsList.ScrollBarThickness = 4
+GiantsList.CanvasSize = UDim2.new(0, 0, 0, 0)
+GiantsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+GiantsList.Parent = Main
+Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
+local ListLayout = Instance.new("UIListLayout", GiantsList)
+ListLayout.Padding = UDim.new(0, 4)
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function RefreshGiantsList(giants)
+    pcall(function()
+        for _, ch in ipairs(GiantsList:GetChildren()) do
+            if ch:IsA("TextLabel") then ch:Destroy() end
+        end
+        ListTitle.Text = "Гиганты на сервере: " .. #giants
+        for i, g in ipairs(giants) do
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.new(1, -8, 0, 34)
+            l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
+            l.Font = Enum.Font.Gotham
+            l.TextSize = 11
+            l.TextColor3 = Color3.new(1, 1, 1)
+            l.TextWrapped = true
+            l.Text = i .. ". " .. g.name .. "\n" .. g.hp .. "/" .. g.maxHp .. " HP (" .. g.reason .. ")"
+            l.Parent = GiantsList
+            Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+        end
+    end)
+end
+
+-- ============ SERVER HOP (как Infinite Yield) ============
+local function ServerHop()
+    QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
+    local placeId = PLACE_ID
+    local cursor = ""
+    local visited = getgenv and getgenv()._GiantRaidVisited or {}
+    local myJob = game.JobId
+    visited[myJob] = true
+    Notify("Giant Raid", "Гигантов нет, хопаю...")
+    task.wait(1)
+    local ok, err = pcall(function()
+        local tries = 0
+        while tries < 5 do
+            tries = tries + 1
+            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
+            local resp = game:HttpGet(url)
+            local data = HttpService:JSONDecode(resp)
+            cursor = data.nextPageCursor or ""
+            if data.data then
+                for _, s in ipairs(data.data) do
+                    if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
+                        visited[s.id] = true
+                        TeleportService:TeleportToPlaceInstance(placeId, s.id, LocalPlayer)
+                        task.wait(3)
+                        return
+                    end
+                end
+            end
+            if cursor == "" or cursor == nil then break end
+        end
+        TeleportService:Teleport(placeId, LocalPlayer)
+    end)
+    if not ok then
+        Notify("Giant Raid", "Хоп не вышел, пробую обычный Teleport")
+        pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
+    end
+end
+
+-- ============ MAIN LOOP ============
+task.spawn(function()
+    local timer = 0
+    QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
+    while gui.Parent do
+        task.wait(1)
+        if not running then
+            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "]"
+        else
+            if hopNow then hopNow = false timer = 999 end
+            local giants = {}
+            pcall(function() giants = FindGiants() end)
+            if #giants > 0 then
+                timer = 0
+                Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
+                RefreshGiantsList(giants)
+                Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
+                pcall(function()
+                    for _, g in ipairs(giants) do
+                        local c = g.player and g.player.Character or nil
+                        if c and not c:FindFirstChild("_GIANT_HL") then
+                            local hl = Instance.new("Highlight")
+                            hl.Name = "_GIANT_HL"
+                            hl.FillColor = Color3.fromRGB(170, 60, 255)
+                            hl.OutlineColor = Color3.fromRGB(220, 170, 255)
+                            hl.FillTransparency = 0.4
+                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            hl.Parent = c
+                        end
+                    end
+                end)
+                task.wait(5)
+            else
+                timer = timer + 1
+                RefreshGiantsList({})
+                local left = math.max(0, HOP_DELAY - timer)
+                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "]"
+                if AUTO_HOP and timer >= HOP_DELAY then
+                    timer = 0
+                    ServerHop()
+                    task.wait(5)
+                end
+            end
+        end
+    end
+end)
+
+Notify("Giant Raid", "Запущен. Хоп через " .. HOP_DELAY .. "с")
 print("[GiantRaid] loaded, place " .. PLACE_ID)
