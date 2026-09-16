@@ -84,7 +84,9 @@ local function IsPlayerGiant(plr)
     local hrp = c:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then return false, nil end
     local info = {}
-    if hum.MaxHealth and hum.MaxHealth >= 200 then
+    -- Гигант: 300 HP (endangered-гигант 400). Обычный endangered-смайл = 200 HP,
+    -- поэтому порог 250: отсекает endangered (200) и бигхедов (100).
+    if hum.MaxHealth and hum.MaxHealth >= 250 then
         info.reason = "HP:" .. tostring(hum.MaxHealth)
         return true, info
     end
@@ -97,7 +99,8 @@ local function IsPlayerGiant(plr)
         info.reason = "value"
         return true, info
     end
-    if hrp.Size.Y > 2.6 then
+    -- Тело x2 у гиганта (HRP ~4). Endangered +30% (~2.6) не проходит порог 3.0.
+    if hrp.Size.Y > 3.0 then
         info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
         return true, info
     end
@@ -109,7 +112,9 @@ local function IsPlayerGiant(plr)
             break
         end
     end
-    if hasGlow and hrp.Size.Y > 2.2 then
+    -- Фиолетовое свечение гиганта + большое тело. У endangered красные партиклы
+    -- и мелкое тело (~2.6) - порог 3.0 их отсекает.
+    if hasGlow and hrp.Size.Y > 3.0 then
         info.reason = "glow+size"
         return true, info
     end
@@ -489,7 +494,9 @@ local function IsPlayerGiant(plr)
     local hrp = c:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then return false, nil end
     local info = {}
-    if hum.MaxHealth and hum.MaxHealth >= 200 then
+    -- Гигант: 300 HP (endangered-гигант 400). Обычный endangered-смайл = 200 HP,
+    -- поэтому порог 250: отсекает endangered (200) и бигхедов (100).
+    if hum.MaxHealth and hum.MaxHealth >= 250 then
         info.reason = "HP:" .. tostring(hum.MaxHealth)
         return true, info
     end
@@ -502,7 +509,8 @@ local function IsPlayerGiant(plr)
         info.reason = "value"
         return true, info
     end
-    if hrp.Size.Y > 2.6 then
+    -- Тело x2 у гиганта (HRP ~4). Endangered +30% (~2.6) не проходит порог 3.0.
+    if hrp.Size.Y > 3.0 then
         info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
         return true, info
     end
@@ -514,7 +522,9 @@ local function IsPlayerGiant(plr)
             break
         end
     end
-    if hasGlow and hrp.Size.Y > 2.2 then
+    -- Фиолетовое свечение гиганта + большое тело. У endangered красные партиклы
+    -- и мелкое тело (~2.6) - порог 3.0 их отсекает.
+    if hasGlow and hrp.Size.Y > 3.0 then
         info.reason = "glow+size"
         return true, info
     end
