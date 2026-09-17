@@ -1,20 +1,20 @@
--- Flee the Facility 🏃 | Delta Hub (Keyless, Mobile Friendly)
--- Place: Flee the Facility by A.W. Apps (893973440)
+-- Piggy Build Mode 👿 | Rage Hub (Keyless, Mobile Friendly, Delta)
+-- Режим: чужие карты Build Mode (ориг. Piggy MiniToon + Build Mode серверы)
 -- Executor: Delta (Android / iOS / PC), также Xeno / Codex / Fluxus
--- Функции: ESP Beast/Survivors/Computers/Exits/Pods, Auto-Hack, ТП, Speed/Fly/Noclip, Fullbright, Anti-AFK
+-- Функции: Infect All за Piggy, Spam дверьми/рычагами/кнопками, Trap-аура, Fling/Bring/Freeze Piggy, ESP, Speed/Fly/Noclip
 -- Использование: вставить в Delta -> Execute. Повторный Execute не дублирует GUI.
 
-if getgenv and getgenv()._FTFHubLoaded then
-    pcall(function() getgenv()._FTFHubGui:Destroy() end)
+if getgenv and getgenv()._PiggyRageLoaded then
+    pcall(function() getgenv()._PiggyRageGui:Destroy() end)
 end
 if getgenv then
-    getgenv()._FTFHubLoaded = true
-    getgenv()._FTFHubGen = (getgenv()._FTFHubGen or 0) + 1
+    getgenv()._PiggyRageLoaded = true
+    getgenv()._PiggyRageGen = (getgenv()._PiggyRageGen or 0) + 1
 end
-local MY_GEN = getgenv and getgenv()._FTFHubGen or 1
+local MY_GEN = getgenv and getgenv()._PiggyRageGen or 1
 local function IsCurrentGen()
     if not getgenv then return true end
-    return getgenv()._FTFHubGen == MY_GEN
+    return getgenv()._PiggyRageGen == MY_GEN
 end
 
 local Players = game:GetService("Players")
@@ -24,35 +24,52 @@ local Lighting = game:GetService("Lighting")
 local UserInputService = game:GetService("UserInputService")
 local TeleportService = game:GetService("TeleportService")
 local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local VirtualUser = game:GetService("VirtualUser")
 
-local PLACE_ID = 893973440
-
 local Config = {
-    ESP_Beast = true,
+    ESP_Piggy = true,
     ESP_Survivor = true,
-    ESP_Computer = true,
+    ESP_Door = true,
     ESP_Exit = true,
-    ESP_Pod = true,
-    AutoHack = false,
-    HackDistance = 14,
-    AutoQTE = true,
-    AutoStruggle = false,
-    InfStamina = false,
+    ESP_Trap = false,
+    LoopInfect = false,
+    InfectDistance = 25,
+    DoorSpam = false,
+    DoorSpamDelay = 0.15,
+    PromptSpam = false,
+    PromptDistance = 30,
+    PromptSpamAllMap = true,
+    LeverSpam = false,
+    TrapAura = false,
+    TrapDistance = 20,
+    FreezePiggy = false,
+    FlingAura = false,
+    BringAura = false,
     SpeedEnabled = false,
-    SpeedValue = 20,
+    SpeedValue = 24,
     JumpValue = 50,
     FlyEnabled = false,
-    FlySpeed = 50,
+    FlySpeed = 60,
     Noclip = false,
     InfJump = false,
     AntiAFK = true,
     Fullbright = false,
-    FPSBoost = false,
-    BeastSpeed = false,
+    ChatSpam = false,
+    ChatMsg = "EZ 😹 PIGGY RAGE HUB",
 }
 
+local SavedCF = nil
+task.spawn(function()
+    pcall(function()
+        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = c:WaitForChild("HumanoidRootPart", 5)
+        if hrp then SavedCF = hrp.CFrame end
+    end)
+end)
+
+-- ============ HELPERS ============
 local function GetChar(plr)
     plr = plr or LocalPlayer
     return plr.Character
@@ -71,13 +88,76 @@ local function Notify(title, text, dur)
     pcall(function()
         StarterGui:SetCore("SendNotification", {Title = tostring(title), Text = tostring(text), Duration = dur or 4})
     end)
-    print("[FTFHub] " .. tostring(text))
+    print("[PiggyRage] " .. tostring(text))
+end
+
+-- Piggy = у кого нож/бита/морф Piggy / атрибут Piggy / красное имя / Team Piggy
+local function IsPiggy(plr)
+    local ok, res = pcall(function()
+        if not plr then return false end
+        if plr.Team and plr.Team.Name then
+            local t = string.lower(plr.Team.Name)
+            if string.find(t, "piggy") or string.find(t, "infected") or string.find(t, "monster") or string.find(t, "traitor") then return true end
+            if string.find(t, "survivor") or string.find(t, "player") then
+                -- не выходим, дальше проверяем тулзы (вдруг уже заражён)
+            end
+        end
+        if plr:GetAttribute("Piggy") == true or plr:GetAttribute("IsPiggy") == true
+        or plr:GetAttribute("Infected") == true or plr:GetAttribute("IsInfected") == true then return true end
+        local c = plr.Character
+        if c then
+            if c:GetAttribute("Piggy") == true or c:GetAttribute("Infected") == true then return true end
+            for _, tool in ipairs(c:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local n = string.lower(tool.Name)
+                    if string.find(n, "knife") or string.find(n, "bat") or string.find(n, "piggy")
+                    or string.find(n, "sword") or string.find(n, "hammer") or string.find(n, "claw")
+                    or string.find(n, "baton") or string.find(n, "wrench") then return true end
+                end
+            end
+            -- Piggy часто больше/красноглазый, но надёжнее по тулзе + Backpack
+            local bp = plr:FindFirstChild("Backpack")
+            if bp then
+                for _, tool in ipairs(bp:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local n = string.lower(tool.Name)
+                        if string.find(n, "knife") or string.find(n, "bat") or string.find(n, "piggy") then return true end
+                    end
+                end
+            end
+        end
+        return false
+    end)
+    return ok and res == true
+end
+
+local function AmIPiggy()
+    return IsPiggy(LocalPlayer)
+end
+
+local function GetPiggies()
+    local out = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if IsPiggy(p) then table.insert(out, p) end
+    end
+    return out
+end
+local function GetSurvivors()
+    local out = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and not IsPiggy(p) then
+            if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                table.insert(out, p)
+            end
+        end
+    end
+    return out
 end
 
 -- ============ REMOTES SCAN ============
-local HackRemotes, ExitRemotes, PodRemotes, StaminaVals = {}, {}, {}, {}
+local InfectRemotes, DoorRemotes, TrapRemotes, MorphRemotes, MiscRemotes = {}, {}, {}, {}, {}
 local function ScanRemotes()
-    table.clear(HackRemotes) table.clear(ExitRemotes) table.clear(PodRemotes)
+    table.clear(InfectRemotes) table.clear(DoorRemotes) table.clear(TrapRemotes) table.clear(MorphRemotes) table.clear(MiscRemotes)
     pcall(function()
         for _, d in ipairs(game:GetDescendants()) do
             if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
@@ -89,9 +169,11 @@ local function ScanRemotes()
                     end
                     return false
                 end
-                if has({"hack", "computer", "pc", "terminal", "qte", "skill", "type"}) then table.insert(HackRemotes, d) end
-                if has({"exit", "door", "escape", "open"}) then table.insert(ExitRemotes, d) end
-                if has({"pod", "capsule", "freeze", "capture", "chamber", "rescue", "struggle", "hammer", "beast"}) then table.insert(PodRemotes, d) end
+                if has({"infect", "kill", "catch", "jumpscare", "tag", "attack", "damage", "down"}) then table.insert(InfectRemotes, d) end
+                if has({"door", "gate", "vent", "exit", "escape", "keydoor", "laser", "open", "close", "unlock", "lock"}) then table.insert(DoorRemotes, d) end
+                if has({"trap", "place", "slow"}) then table.insert(TrapRemotes, d) end
+                if has({"morph", "piggy", "skin", "character", "become", "spawnpiggy"}) then table.insert(MorphRemotes, d) end
+                if has({"lever", "button", "switch", "plank", "key", "item", "pickup", "use", "interact", "prompt", "build"}) then table.insert(MiscRemotes, d) end
             end
         end
     end)
@@ -109,78 +191,33 @@ local function FireList(list, ...)
         pcall(function()
             if r:IsA("RemoteEvent") then
                 if #args > 0 then r:FireServer(unpack(args)) else r:FireServer() end
+            elseif r:IsA("RemoteFunction") then
+                -- RemoteFunction не спамим без нужды (может виснуть), только с pcall+таймаут невозможен -> пропускаем
             end
         end)
     end
 end
 
--- ============ FTF OBJECT FINDERS ============
--- Beast: у зверя Hammer в руках / атрибут Beast / красная аура
-local function IsBeast(plr)
-    local ok, res = pcall(function()
-        if not plr or plr == LocalPlayer then
-            -- проверяем себя тоже
-        end
-        local c = plr.Character
-        if c then
-            if c:GetAttribute("Beast") == true or c:GetAttribute("IsBeast") == true then return true end
-            for _, t in ipairs(c:GetChildren()) do
-                if t:IsA("Tool") then
-                    local n = string.lower(t.Name)
-                    if string.find(n, "hammer") or string.find(n, "beast") or string.find(n, "mallet") then return true end
-                end
-            end
-            -- рюкзак
-            local bp = plr:FindFirstChild("Backpack")
-            if bp then
-                for _, t in ipairs(bp:GetChildren()) do
-                    if t:IsA("Tool") then
-                        local n = string.lower(t.Name)
-                        if string.find(n, "hammer") or string.find(n, "beast") then return true end
-                    end
-                end
-            end
-        end
-        if plr:GetAttribute("Beast") == true or plr:GetAttribute("IsBeast") == true then return true end
-        -- по leaderstats / team
-        if plr.Team and plr.Team.Name then
-            local tn = string.lower(plr.Team.Name)
-            if string.find(tn, "beast") then return true end
-        end
-        return false
-    end)
-    return ok and res == true
-end
-
-local function AmIBeast()
-    return IsBeast(LocalPlayer)
-end
-
--- Компьютеры: ищем по именам в Workspace
-local function GetComputers()
+-- Поиск интерактивов в Build Mode картах
+local function GetPrompts(maxDist, allMap)
     local out = {}
+    local my = GetHRP()
     pcall(function()
         for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("Model") then
-                local n = string.lower(d.Name)
-                if string.find(n, "computer") or string.find(n, "pc_") or n == "pc" then
-                    local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
+            if d:IsA("ProximityPrompt") then
+                local par = d.Parent
+                if par and par:IsA("BasePart") then
+                    local dist = my and (my.Position - par.Position).Magnitude or 0
+                    if allMap or (my and dist <= (maxDist or 30)) then
+                        table.insert(out, {prompt = d, part = par, dist = dist, name = par.Name})
+                    end
+                elseif par and par:IsA("Model") then
+                    local main = par:FindFirstChildWhichIsA("BasePart", true)
                     if main then
-                        -- hacked? экран зелёный / атрибут
-                        local hacked = false
-                        pcall(function()
-                            if d:GetAttribute("Hacked") == true then hacked = true end
-                            for _, p in ipairs(d:GetDescendants()) do
-                                if p:IsA("BasePart") and string.find(string.lower(p.Name), "screen") then
-                                    if p.BrickColor == BrickColor.new("Lime green") or p.BrickColor == BrickColor.new("Bright green") then
-                                        hacked = true
-                                    end
-                                    -- Color3 check
-                                    if p.Color and p.Color.G > 0.7 and p.Color.R < 0.3 then hacked = true end
-                                end
-                            end
-                        end)
-                        table.insert(out, {model = d, pos = main.Position, hacked = hacked, name = d.Name})
+                        local dist = my and (my.Position - main.Position).Magnitude or 0
+                        if allMap or (my and dist <= (maxDist or 30)) then
+                            table.insert(out, {prompt = d, part = main, dist = dist, name = par.Name})
+                        end
                     end
                 end
             end
@@ -189,19 +226,35 @@ local function GetComputers()
     return out
 end
 
-local function GetExits()
+local function GetClickDetectors(maxDist, allMap)
+    local out = {}
+    local my = GetHRP()
+    pcall(function()
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("ClickDetector") and d.Parent and d.Parent:IsA("BasePart") then
+                local dist = my and (my.Position - d.Parent.Position).Magnitude or 0
+                if allMap or (my and dist <= (maxDist or 30)) then
+                    table.insert(out, {cd = d, part = d.Parent, dist = dist})
+                end
+            end
+        end
+    end)
+    return out
+end
+
+local function GetDoors()
     local out = {}
     pcall(function()
         for _, d in ipairs(Workspace:GetDescendants()) do
             if d:IsA("Model") then
                 local n = string.lower(d.Name)
-                if string.find(n, "exit") or string.find(n, "escape") or string.find(n, "door") and string.find(n, "exit") then
+                if string.find(n, "door") or string.find(n, "gate") or string.find(n, "vent") or string.find(n, "exit") or string.find(n, "escape") then
                     local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
                     if main then table.insert(out, {model = d, pos = main.Position, name = d.Name}) end
                 end
             elseif d:IsA("BasePart") then
                 local n = string.lower(d.Name)
-                if n == "exitdoor" or n == "exit" then
+                if n == "exitdoor" or n == "exit" or string.find(n, "keydoor") then
                     table.insert(out, {model = d, pos = d.Position, name = d.Name})
                 end
             end
@@ -210,20 +263,101 @@ local function GetExits()
     return out
 end
 
-local function GetPods()
+local function GetTraps()
     local out = {}
     pcall(function()
         for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("Model") then
-                local n = string.lower(d.Name)
-                if string.find(n, "pod") or string.find(n, "capsule") or string.find(n, "freeze") or string.find(n, "chamber") or string.find(n, "cryo") then
-                    local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
-                    if main then table.insert(out, {model = d, pos = main.Position, name = d.Name}) end
-                end
+            local n = string.lower(d.Name)
+            if d:IsA("Model") and (string.find(n, "trap") or string.find(n, "slow")) then
+                local main = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart", true)
+                if main then table.insert(out, {model = d, pos = main.Position, name = d.Name}) end
+            elseif d:IsA("BasePart") and string.find(n, "trap") then
+                table.insert(out, {model = d, pos = d.Position, name = d.Name})
             end
         end
     end)
     return out
+end
+
+local function SpamPrompts(list)
+    if not fireproximityprompt then return 0 end
+    local n = 0
+    for _, e in ipairs(list) do
+        pcall(function()
+            if e.prompt and e.prompt.Enabled then
+                -- fireproximityprompt не чекает дистанцию на части эксплоитов -> работает по всей карте
+                fireproximityprompt(e.prompt)
+                n = n + 1
+            end
+        end)
+    end
+    return n
+end
+
+local function SpamClicks(list)
+    if not fireclickdetector then return 0 end
+    local n = 0
+    for _, e in ipairs(list) do
+        pcall(function() fireclickdetector(e.cd) n = n + 1 end)
+    end
+    return n
+end
+
+local function TouchPlayer(targetPlr)
+    -- заразить тачем: свой HRP/Tool.Handle -> чужой HRP/Head/Torso
+    pcall(function()
+        if not firetouchinterest then return end
+        local myHRP = GetHRP()
+        local tc = targetPlr.Character
+        if not myHRP or not tc then return end
+        local parts = {}
+        for _, nm in ipairs({"HumanoidRootPart", "Head", "Torso", "UpperTorso", "LowerTorso"}) do
+            local p = tc:FindFirstChild(nm)
+            if p then table.insert(parts, p) end
+        end
+        local myTool = GetChar():FindFirstChildOfClass("Tool")
+        local myHandle = myTool and myTool:FindFirstChild("Handle") or nil
+        for _, tp in ipairs(parts) do
+            firetouchinterest(myHRP, tp, 0) task.wait() firetouchinterest(myHRP, tp, 1)
+            if myHandle then
+                firetouchinterest(myHandle, tp, 0) task.wait() firetouchinterest(myHandle, tp, 1)
+            end
+        end
+    end)
+end
+
+local function InfectPlayer(targetPlr)
+    -- 1. ремоуты заражения
+    FireList(InfectRemotes, targetPlr)
+    FireList(InfectRemotes, targetPlr.Name)
+    FireList(InfectRemotes)
+    pcall(function()
+        local tc = targetPlr.Character
+        local hrp = tc and tc:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            FireList(InfectRemotes, hrp)
+            FireList(InfectRemotes, tc)
+        end
+    end)
+    -- 2. тач-заражение
+    TouchPlayer(targetPlr)
+end
+
+local function SayChat(msg)
+    pcall(function()
+        local ev = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if ev then
+            local req = ev:FindFirstChild("SayMessageRequest")
+            if req then req:FireServer(tostring(msg), "All") return end
+        end
+        -- новый TextChatService
+        local TCS = game:GetService("TextChatService")
+        local ch = TCS:FindFirstChild("TextChannels")
+        if ch then
+            local gen = ch:FindFirstChild("RBXGeneral")
+            if gen then gen:SendAsync(tostring(msg)) end
+        end
+    end)
 end
 
 -- ============ GUI ============
@@ -235,13 +369,13 @@ pcall(function()
     if gethui then local h = gethui() if h then table.insert(targets, h) end end
     for _, par in ipairs(targets) do
         for _, g in ipairs(par:GetChildren()) do
-            if g:IsA("ScreenGui") and g.Name == "FTFHub" then g:Destroy() end
+            if g:IsA("ScreenGui") and g.Name == "PiggyRageHub" then g:Destroy() end
         end
     end
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "FTFHub"
+gui.Name = "PiggyRageHub"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 999
@@ -261,25 +395,25 @@ end
 if not parentOk or not gui.Parent then
     pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
 end
-if getgenv then getgenv()._FTFHubGui = gui end
+if getgenv then getgenv()._PiggyRageGui = gui end
 
 local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 300, 0, 440)
-Main.Position = UDim2.new(0.5, -150, 0.5, -220)
-Main.BackgroundColor3 = Color3.fromRGB(14, 18, 22)
+Main.Size = UDim2.new(0, 300, 0, 460)
+Main.Position = UDim2.new(0.5, -150, 0.5, -230)
+Main.BackgroundColor3 = Color3.fromRGB(20, 12, 14)
 Main.BorderSizePixel = 0
 Main.Active = false
 Main.Parent = gui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
 local stroke = Instance.new("UIStroke", Main)
-stroke.Color = Color3.fromRGB(80, 200, 120)
+stroke.Color = Color3.fromRGB(255, 60, 60)
 stroke.Thickness = 2
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -70, 0, 34)
 Title.Position = UDim2.new(0, 12, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "FTF 🏃 | Delta Hub"
+Title.Text = "Piggy 👿 | Rage Hub"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
 Title.TextColor3 = Color3.new(1,1,1)
@@ -306,7 +440,7 @@ local function MakeTopBtn(txt, x)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(0, 26, 0, 26)
     b.Position = UDim2.new(1, x, 0, 5)
-    b.BackgroundColor3 = Color3.fromRGB(35, 45, 40)
+    b.BackgroundColor3 = Color3.fromRGB(50, 30, 32)
     b.Text = txt b.Font = Enum.Font.GothamBold b.TextSize = 14
     b.TextColor3 = Color3.new(1,1,1)
     b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
@@ -333,13 +467,13 @@ local minimized = false
 local function setMin(m)
     minimized = m
     Scroll.Visible = not minimized
-    Main.Size = minimized and UDim2.new(0, 300, 0, 40) or UDim2.new(0, 300, 0, 440)
+    Main.Size = minimized and UDim2.new(0, 300, 0, 40) or UDim2.new(0, 300, 0, 460)
     MinBtn.Text = minimized and "+" or "-"
 end
 MinBtn.Activated:Connect(function() setMin(not minimized) end)
 MinBtn.MouseButton1Click:Connect(function() setMin(not minimized) end)
-CloseBtn.Activated:Connect(function() gui:Destroy() if getgenv then getgenv()._FTFHubLoaded = false getgenv()._FTFHubGen = (getgenv()._FTFHubGen or 1) + 1 end end)
-CloseBtn.MouseButton1Click:Connect(function() gui:Destroy() if getgenv then getgenv()._FTFHubLoaded = false end end)
+CloseBtn.Activated:Connect(function() gui:Destroy() if getgenv then getgenv()._PiggyRageLoaded = false getgenv()._PiggyRageGen = (getgenv()._PiggyRageGen or 1) + 1 end end)
+CloseBtn.MouseButton1Click:Connect(function() gui:Destroy() if getgenv then getgenv()._PiggyRageLoaded = false end end)
 
 local function Section(name)
     local l = Instance.new("TextLabel")
@@ -347,7 +481,7 @@ local function Section(name)
     l.BackgroundTransparency = 1
     l.Text = "— " .. name .. " —"
     l.Font = Enum.Font.GothamBold l.TextSize = 12
-    l.TextColor3 = Color3.fromRGB(140, 255, 180)
+    l.TextColor3 = Color3.fromRGB(255, 130, 130)
     l.Parent = Scroll
     return l
 end
@@ -362,7 +496,7 @@ local function Toggle(name, default, cb)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
     local function refresh()
         b.Text = (state and "[ON] " or "[OFF] ") .. name
-        b.BackgroundColor3 = state and Color3.fromRGB(45,160,90) or Color3.fromRGB(40,45,48)
+        b.BackgroundColor3 = state and Color3.fromRGB(180, 50, 50) or Color3.fromRGB(45, 32, 34)
     end
     refresh()
     local last = 0
@@ -376,7 +510,7 @@ end
 local function Button(name, cb)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(1, -4, 0, 32)
-    b.BackgroundColor3 = Color3.fromRGB(50, 60, 58)
+    b.BackgroundColor3 = Color3.fromRGB(60, 38, 42)
     b.Text = name b.Font = Enum.Font.GothamBold b.TextSize = 13
     b.TextColor3 = Color3.new(1,1,1)
     b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
@@ -386,7 +520,7 @@ local function Button(name, cb)
     local base = b.BackgroundColor3
     local function fire()
         local now = tick() if now - last < 0.3 then return end last = now
-        pcall(function() b.BackgroundColor3 = Color3.fromRGB(120,200,140) task.delay(0.15, function() pcall(function() b.BackgroundColor3 = base end) end) end)
+        pcall(function() b.BackgroundColor3 = Color3.fromRGB(200,120,120) task.delay(0.15, function() pcall(function() b.BackgroundColor3 = base end) end) end)
         pcall(cb)
     end
     b.Activated:Connect(fire) b.MouseButton1Click:Connect(fire) b.TouchTap:Connect(fire)
@@ -396,7 +530,7 @@ local function SliderBtn(name, min, max, step, default, cb)
     local val = default
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(1, -4, 0, 32)
-    b.BackgroundColor3 = Color3.fromRGB(45, 55, 52)
+    b.BackgroundColor3 = Color3.fromRGB(55, 35, 40)
     b.Font = Enum.Font.GothamBold b.TextSize = 13
     b.TextColor3 = Color3.new(1,1,1)
     b.AutoButtonColor = true b.Active = true b.BorderSizePixel = 0
@@ -416,7 +550,7 @@ end
 Section("Статус")
 local Status = Instance.new("TextLabel")
 Status.Size = UDim2.new(1, -4, 0, 52)
-Status.BackgroundColor3 = Color3.fromRGB(26, 32, 30)
+Status.BackgroundColor3 = Color3.fromRGB(32, 22, 24)
 Status.Font = Enum.Font.Gotham Status.TextSize = 12
 Status.TextColor3 = Color3.new(1,1,1)
 Status.TextWrapped = true
@@ -424,120 +558,228 @@ Status.Text = "Загрузка..."
 Status.Parent = Scroll
 Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
 
-Section("Выживший 💻")
-Toggle("Auto-Hack (рядом)", false, function(s) Config.AutoHack = s Notify("FTF", s and "Auto-Hack ВКЛ — встань у компа" or "ВЫКЛ") end)
-Toggle("Auto-QTE (не фейлить)", true, function(s) Config.AutoQTE = s end)
-SliderBtn("Hack Distance", 8, 30, 2, 14, function(v) Config.HackDistance = v end)
-Toggle("Inf Stamina (бег)", false, function(s) Config.InfStamina = s end)
-Toggle("Auto-Struggle (вырваться)", false, function(s) Config.AutoStruggle = s end)
-Button("ТП к ближ. НЕ взломанному ПК", function()
-    local my = GetHRP() if not my then return end
-    local comps = GetComputers()
-    local best, bd = nil, 1e9
-    for _, c in ipairs(comps) do
-        if not c.hacked then local d = (my.Position - c.pos).Magnitude if d < bd then bd = d best = c end end
+Section("Заражение 🦠")
+Toggle("Loop Infect All (всех подряд)", false, function(s) Config.LoopInfect = s Notify("Piggy", s and "Loop Infect ВКЛ" or "ВЫКЛ") end)
+SliderBtn("Infect Distance", 10, 100, 5, 25, function(v) Config.InfectDistance = v end)
+Button("Заразить ВСЕХ сейчас", function()
+    local c = 0
+    for _, p in ipairs(GetSurvivors()) do
+        InfectPlayer(p) c = c + 1
+        task.wait(0.1)
     end
-    if not best and #comps > 0 then -- все взломаны, идём к любому
-        for _, c in ipairs(comps) do local d = (my.Position - c.pos).Magnitude if d < bd then bd = d best = c end end
-    end
-    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("FTF", "ТП: " .. best.name .. (best.hacked and " (взломан)" or "")) else Notify("FTF", "ПК не найдены") end
-end)
-Button("ТП к выходу (Exit)", function()
-    local my = GetHRP() if not my then return end
-    local exits = GetExits()
-    if #exits == 0 then Notify("FTF", "Выходы закрыты / не найдены (взломай все ПК)") return end
-    local best, bd = nil, 1e9
-    for _, e in ipairs(exits) do local d = (my.Position - e.pos).Magnitude if d < bd then bd = d best = e end end
-    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("FTF", "ТП: " .. best.name) end
-end)
-Button("Спастись: открыть Exit", function()
-    FireList(ExitRemotes)
-    FireList(ExitRemotes, true)
-    pcall(function()
-        for _, d in ipairs(Workspace:GetDescendants()) do
-            if (d:IsA("ProximityPrompt") or d:IsA("ClickDetector")) then
-                local n = string.lower(d.Parent and d.Parent.Name or d.Name)
-                if string.find(n, "exit") or string.find(n, "escape") or string.find(n, "door") then
-                    pcall(function()
-                        local my = GetHRP()
-                        if my and d.Parent and d.Parent:IsA("BasePart") and (my.Position - d.Parent.Position).Magnitude < 20 then
-                            if d:IsA("ProximityPrompt") and fireproximityprompt then fireproximityprompt(d) end
-                            if d:IsA("ClickDetector") and fireclickdetector then fireclickdetector(d) end
-                        end
-                    end)
-                end
+    -- + телепорт-инфект: быстро облететь всех
+    local my = GetHRP()
+    if my then
+        local save = my.CFrame
+        for _, p in ipairs(GetSurvivors()) do
+            local t = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if t then
+                my.CFrame = t.CFrame + Vector3.new(0, 0, 1)
+                task.wait(0.15)
+                TouchPlayer(p)
             end
         end
+        my.CFrame = save
+    end
+    Notify("Piggy", "Атаковано выживших: " .. c)
+end)
+Button("Стать Piggy (морф-ремоты)", function()
+    FireList(MorphRemotes)
+    FireList(MorphRemotes, true)
+    FireList(MorphRemotes, LocalPlayer)
+    FireList(MorphRemotes, "Piggy")
+    Notify("Piggy", "Морф fired: " .. #MorphRemotes .. " | Infect: " .. #InfectRemotes)
+end)
+Button("Вылечить себя (снять Piggy)", function()
+    pcall(function()
+        local c = GetChar()
+        if c then
+            c:SetAttribute("Piggy", false) c:SetAttribute("Infected", false)
+            LocalPlayer:SetAttribute("Piggy", false) LocalPlayer:SetAttribute("Infected", false)
+        end
     end)
+    Notify("Piggy", "Попытка снятия заражения")
 end)
 
-Section("Зверь 👹")
-Button("ТП к ближ. выжившему", function()
+Section("Двери / Рычаги / Кнопки 🚪")
+Toggle("Spam Двери Open/Close", false, function(s) Config.DoorSpam = s end)
+SliderBtn("Door Delay", 5, 100, 5, 15, function(v) Config.DoorSpamDelay = v / 100 end)
+Button("Открыть ВСЕ двери раз", function()
+    FireList(DoorRemotes, true)
+    FireList(DoorRemotes, "Open")
+    local n = SpamPrompts(GetPrompts(9999, true))
+    local m = SpamClicks(GetClickDetectors(9999, true))
+    Notify("Doors", "Fired doors=" .. #DoorRemotes .. " prompts=" .. n .. " clicks=" .. m)
+end)
+Button("Закрыть / поломать двери", function()
+    FireList(DoorRemotes, false)
+    FireList(DoorRemotes, "Close")
+    Notify("Doors", "Close fired")
+end)
+Toggle("Spam Рычаги/Кнопки (леп)", false, function(s) Config.LeverSpam = s end)
+Toggle("Spam ВСЕ Prompt по карте", false, function(s) Config.PromptSpam = s end)
+Toggle("Только рядом (не вся карта)", false, function(s) Config.PromptSpamAllMap = not s end)
+SliderBtn("Prompt Distance", 10, 200, 10, 30, function(v) Config.PromptDistance = v end)
+Button("Нажать всё рядом (1 раз)", function()
+    local n = SpamPrompts(GetPrompts(Config.PromptDistance, false))
+    local m = SpamClicks(GetClickDetectors(Config.PromptDistance, false))
+    FireList(MiscRemotes)
+    Notify("Spam", "Рядом: prompts=" .. n .. " clicks=" .. m)
+end)
+Button("Сканировать ремоуты заново", function()
+    ScanRemotes()
+    Notify("Scan", "Infect=" .. #InfectRemotes .. " Door=" .. #DoorRemotes .. " Trap=" .. #TrapRemotes .. " Morph=" .. #MorphRemotes .. " Misc=" .. #MiscRemotes)
+end)
+
+Section("Ловушки 🪤")
+Toggle("Trap Aura (ставить на всех рядом)", false, function(s) Config.TrapAura = s end)
+SliderBtn("Trap Distance", 8, 100, 4, 20, function(v) Config.TrapDistance = v end)
+Button("Поставить ловушку на каждого", function()
     local my = GetHRP() if not my then return end
-    local best, bd = nil, 1e9
+    local save = my.CFrame
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and not IsBeast(p) and p.Character then
+        if p ~= LocalPlayer and p.Character then
             local t = p.Character:FindFirstChild("HumanoidRootPart")
-            if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
+            if t then
+                my.CFrame = t.CFrame + Vector3.new(0, 2, 0)
+                task.wait(0.12)
+                FireList(TrapRemotes)
+                FireList(TrapRemotes, t.Position)
+                FireList(TrapRemotes, true)
+            end
         end
     end
-    if best then my.CFrame = best.CFrame + Vector3.new(0,1,2) else Notify("FTF", "Выжившие не найдены") end
+    my.CFrame = save
 end)
-Button("ТП к капсулам (Pods)", function()
+Button("Спавн 10 ловушек под собой", function()
+    for i = 1, 10 do
+        FireList(TrapRemotes)
+        FireList(TrapRemotes, true)
+        pcall(function()
+            local my = GetHRP()
+            if my then FireList(TrapRemotes, my.Position) end
+        end)
+        task.wait(0.08)
+    end
+end)
+
+Section("Троллинг игроков 🤡")
+Toggle("Freeze Piggy (стопорнуть)", false, function(s) Config.FreezePiggy = s end)
+Toggle("Fling Aura (крутить рядом)", false, function(s) Config.FlingAura = s end)
+Toggle("Bring Aura (тянуть к себе)", false, function(s) Config.BringAura = s end)
+Button("Fling ВСЕХ", function()
     local my = GetHRP() if not my then return end
-    local pods = GetPods()
-    if #pods == 0 then Notify("FTF", "Капсулы не найдены") return end
-    local best, bd = nil, 1e9
-    for _, e in ipairs(pods) do local d = (my.Position - e.pos).Magnitude if d < bd then bd = d best = e end end
-    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) end
+    local save = my.CFrame
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local t = p.Character:FindFirstChild("HumanoidRootPart")
+            if t then
+                pcall(function()
+                    -- спин + толчок
+                    local bv = Instance.new("BodyVelocity")
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    bv.Velocity = Vector3.new(math.random(-150, 150), 150, math.random(-150, 150))
+                    bv.Parent = t
+                    task.delay(0.4, function() pcall(function() bv:Destroy() end) end)
+                    if firetouchinterest then
+                        firetouchinterest(my, t, 0) task.wait() firetouchinterest(my, t, 1)
+                    end
+                end)
+            end
+        end
+    end
+    my.CFrame = save
+end)
+Button("Притянуть ВСЕХ к себе", function()
+    local my = GetHRP() if not my then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local t = p.Character:FindFirstChild("HumanoidRootPart")
+            if t then pcall(function() t.CFrame = my.CFrame + Vector3.new(math.random(-4, 4), 2, math.random(-4, 4)) end) end
+        end
+    end
+end)
+Button("Притянуть только Piggy", function()
+    local my = GetHRP() if not my then return end
+    for _, p in ipairs(GetPiggies()) do
+        local t = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+        if t then pcall(function() t.CFrame = my.CFrame + Vector3.new(0, 2, 3) end) end
+    end
+end)
+Button("ТП к Piggy", function()
+    local my = GetHRP() if not my then return end
+    for _, p in ipairs(GetPiggies()) do
+        local t = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+        if t then my.CFrame = t.CFrame + Vector3.new(0, 2, 3) return end
+    end
+    Notify("Piggy", "Piggy не найден")
 end)
 
 Section("ESP")
-Toggle("ESP Beast (красный)", true, function(s) Config.ESP_Beast = s end)
+Toggle("ESP Piggy (красный)", true, function(s) Config.ESP_Piggy = s end)
 Toggle("ESP Survivors (зелёные)", true, function(s) Config.ESP_Survivor = s end)
-Toggle("ESP Computers (синие)", true, function(s) Config.ESP_Computer = s end)
-Toggle("ESP Exit/Pods", true, function(s) Config.ESP_Exit = s Config.ESP_Pod = s end)
+Toggle("ESP Двери/Выход", true, function(s) Config.ESP_Door = s Config.ESP_Exit = s end)
+Toggle("ESP Ловушки", false, function(s) Config.ESP_Trap = s end)
 Button("Очистить ESP", function()
     for _, p in ipairs(Players:GetPlayers()) do
         local c = p.Character
         if c then
-            local h = c:FindFirstChild("_FTF_HL") if h then h:Destroy() end
-            local b = c:FindFirstChild("_FTF_BB") if b then b:Destroy() end
+            local h = c:FindFirstChild("_PG_HL") if h then h:Destroy() end
+            local b = c:FindFirstChild("_PG_BB") if b then b:Destroy() end
         end
     end
     for _, d in ipairs(Workspace:GetDescendants()) do
-        if d:IsA("Highlight") and (d.Name == "_FTF_C" or d.Name == "_FTF_E") then d:Destroy() end
-        if d:IsA("BillboardGui") and (d.Name == "_FTF_CB" or d.Name == "_FTF_EB") then d:Destroy() end
+        if d:IsA("Highlight") and (d.Name == "_PG_D" or d.Name == "_PG_E" or d.Name == "_PG_T") then d:Destroy() end
+        if d:IsA("BillboardGui") and (d.Name == "_PG_DB" or d.Name == "_PG_EB" or d.Name == "_PG_TB") then d:Destroy() end
     end
 end)
 
 Section("Движение")
 Toggle("Speed", false, function(s) Config.SpeedEnabled = s end)
-SliderBtn("WalkSpeed", 16, 40, 2, 20, function(v) Config.SpeedValue = v end)
-Toggle("Beast Speed (если зверь)", false, function(s) Config.BeastSpeed = s end)
-Toggle("Fly", false, function(s) Config.FlyEnabled = s end)
-SliderBtn("FlySpeed", 20, 150, 5, 50, function(v) Config.FlySpeed = v end)
-Toggle("Noclip", false, function(s) Config.Noclip = s end)
+SliderBtn("WalkSpeed", 16, 120, 2, 24, function(v) Config.SpeedValue = v end)
+SliderBtn("JumpPower", 50, 200, 10, 50, function(v) Config.JumpValue = v pcall(function() local h = GetHum() if h then h.JumpPower = v h.UseJumpPower = true end end) end)
+Toggle("Fly (куда идёшь)", false, function(s) Config.FlyEnabled = s end)
+SliderBtn("FlySpeed", 20, 150, 5, 60, function(v) Config.FlySpeed = v end)
+Toggle("Noclip (сквозь стены)", false, function(s) Config.Noclip = s end)
 Toggle("Inf Jump", false, function(s) Config.InfJump = s end)
+
+Section("Телепорты")
+Button("ТП к ближ. выжившему", function()
+    local my = GetHRP() if not my then return end
+    local best, bd = nil, 1e9
+    for _, p in ipairs(GetSurvivors()) do
+        local t = p.Character:FindFirstChild("HumanoidRootPart")
+        if t then local d = (my.Position - t.Position).Magnitude if d < bd then bd = d best = t end end
+    end
+    if best then my.CFrame = best.CFrame + Vector3.new(0, 2, 2) end
+end)
+Button("ТП к выходу", function()
+    local my = GetHRP() if not my then return end
+    local doors = GetDoors()
+    local best, bd = nil, 1e9
+    for _, e in ipairs(doors) do
+        local n = string.lower(e.name)
+        if string.find(n, "exit") or string.find(n, "escape") then
+            local d = (my.Position - e.pos).Magnitude if d < bd then bd = d best = e end
+        end
+    end
+    if not best then
+        for _, e in ipairs(doors) do local d = (my.Position - e.pos).Magnitude if d < bd then bd = d best = e end end
+    end
+    if best then my.CFrame = CFrame.new(best.pos + Vector3.new(0, 4, 0)) Notify("TP", best.name) else Notify("TP", "Выход не найден") end
+end)
+Button("Сохранить точку", function() local h = GetHRP() if h then SavedCF = h.CFrame Notify("TP", "Точка сохранена") end end)
+Button("ТП на сохранённую", function() local h = GetHRP() if h and SavedCF then h.CFrame = SavedCF + Vector3.new(0, 3, 0) end end)
 
 Section("Разное")
 Toggle("Anti-AFK", true, function(s) Config.AntiAFK = s end)
-Toggle("Fullbright (светлая карта)", false, function(s)
+Toggle("Fullbright", false, function(s)
     Config.Fullbright = s
     if s then Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000 Lighting.GlobalShadows = false Lighting.Ambient = Color3.new(1,1,1)
     else Lighting.Brightness = 1 Lighting.GlobalShadows = true end
 end)
-Toggle("FPS Boost", false, function(s)
-    Config.FPSBoost = s
-    pcall(function()
-        if s then
-            Lighting.GlobalShadows = false Lighting.FogEnd = 9e9
-            for _, v in ipairs(Workspace:GetDescendants()) do
-                if v:IsA("ParticleEmitter") or v:IsA("Trail") then v.Enabled = false end
-            end
-        end
-    end)
-end)
+Toggle("Chat Spam", false, function(s) Config.ChatSpam = s end)
+Button("Сказать EZ в чат", function() SayChat(Config.ChatMsg) end)
 Button("Rejoin", function() pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end) end)
 Button("ServerHop", function()
     pcall(function()
@@ -571,15 +813,15 @@ local function ApplyESP(plr)
     local hrp = c:FindFirstChild("HumanoidRootPart")
     local hum = c:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum or hum.Health <= 0 then return end
-    local beast = IsBeast(plr)
-    local show = (beast and Config.ESP_Beast) or ((not beast) and Config.ESP_Survivor)
-    local hl = c:FindFirstChild("_FTF_HL")
-    local bb = c:FindFirstChild("_FTF_BB")
+    local piggy = IsPiggy(plr)
+    local show = (piggy and Config.ESP_Piggy) or ((not piggy) and Config.ESP_Survivor)
+    local hl = c:FindFirstChild("_PG_HL")
+    local bb = c:FindFirstChild("_PG_BB")
     if not show then if hl then hl:Destroy() end if bb then bb:Destroy() end return end
-    local col = beast and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(60, 255, 120)
+    local col = piggy and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(60, 255, 120)
     if not hl then
         hl = Instance.new("Highlight")
-        hl.Name = "_FTF_HL"
+        hl.Name = "_PG_HL"
         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         hl.FillTransparency = 0.6 hl.OutlineTransparency = 0
         hl.Parent = c
@@ -587,7 +829,7 @@ local function ApplyESP(plr)
     hl.FillColor = col hl.OutlineColor = col
     if not bb then
         bb = Instance.new("BillboardGui")
-        bb.Name = "_FTF_BB"
+        bb.Name = "_PG_BB"
         bb.Size = UDim2.new(0, 140, 0, 42)
         bb.StudsOffset = Vector3.new(0, 3, 0)
         bb.AlwaysOnTop = true
@@ -603,7 +845,7 @@ local function ApplyESP(plr)
     local dist = my and math.floor((my.Position - hrp.Position).Magnitude) or 0
     local tl = bb:FindFirstChild("TL")
     if tl then
-        tl.Text = plr.DisplayName .. " (" .. dist .. "m)\n" .. (beast and "BEAST 👹" or "SURVIVOR") .. " | " .. math.floor(hum.Health) .. "HP"
+        tl.Text = plr.DisplayName .. " (" .. dist .. "m)\n" .. (piggy and "PIGGY 👿" or "SURVIVOR") .. " | " .. math.floor(hum.Health) .. "HP"
         tl.TextColor3 = col
     end
     local head = c:FindFirstChild("Head")
@@ -648,20 +890,19 @@ task.spawn(function()
         task.wait(0.7)
         pcall(function()
             for _, p in ipairs(Players:GetPlayers()) do ApplyESP(p) end
-            if Config.ESP_Computer then
-                for _, c in ipairs(GetComputers()) do
-                    local col = c.hacked and Color3.fromRGB(80, 255, 120) or Color3.fromRGB(80, 160, 255)
-                    ESPObject(c.model, "_FTF_C", "_FTF_CB", (c.hacked and "✅ " or "💻 ") .. c.name, col)
+            if Config.ESP_Door or Config.ESP_Exit then
+                for _, e in ipairs(GetDoors()) do
+                    local n = string.lower(e.name)
+                    local isExit = string.find(n, "exit") or string.find(n, "escape")
+                    if (isExit and Config.ESP_Exit) or ((not isExit) and Config.ESP_Door) then
+                        local col = isExit and Color3.fromRGB(80, 255, 120) or Color3.fromRGB(255, 220, 80)
+                        ESPObject(e.model, "_PG_D", "_PG_DB", (isExit and "🚪 EXIT " or "🚪 ") .. e.name, col)
+                    end
                 end
             end
-            if Config.ESP_Exit then
-                for _, e in ipairs(GetExits()) do
-                    ESPObject(e.model, "_FTF_E", "_FTF_EB", "🚪 EXIT", Color3.fromRGB(255, 220, 80))
-                end
-            end
-            if Config.ESP_Pod then
-                for _, e in ipairs(GetPods()) do
-                    ESPObject(e.model, "_FTF_E", "_FTF_EB", "❄ Pod", Color3.fromRGB(140, 220, 255))
+            if Config.ESP_Trap then
+                for _, e in ipairs(GetTraps()) do
+                    ESPObject(e.model, "_PG_T", "_PG_TB", "🪤 " .. e.name, Color3.fromRGB(255, 150, 50))
                 end
             end
         end)
@@ -673,32 +914,8 @@ RunService.Heartbeat:Connect(function()
     if not IsCurrentGen() then return end
     pcall(function()
         local hum = GetHum()
-        if hum and hum.Health > 0 then
-            if Config.SpeedEnabled then hum.WalkSpeed = Config.SpeedValue end
-            if Config.BeastSpeed and AmIBeast() then hum.WalkSpeed = math.max(hum.WalkSpeed, 22) end
-        end
-        -- Inf stamina: ищем NumberValue Stamina/Energy
-        if Config.InfStamina then
-            for _, d in ipairs(LocalPlayer:GetChildren()) do
-                if (d:IsA("NumberValue") or d:IsA("IntValue")) then
-                    local n = string.lower(d.Name)
-                    if string.find(n, "stamina") or string.find(n, "energy") or string.find(n, "sprint") then
-                        if d.MaxValue and d.MaxValue > 0 then d.Value = d.MaxValue else d.Value = 100 end
-                    end
-                end
-            end
-            local c = GetChar()
-            if c then
-                for _, d in ipairs(c:GetChildren()) do
-                    if (d:IsA("NumberValue") or d:IsA("IntValue")) then
-                        local n = string.lower(d.Name)
-                        if string.find(n, "stamina") or string.find(n, "energy") then d.Value = 100 end
-                    end
-                end
-                pcall(function()
-                    if c:GetAttribute("Stamina") ~= nil then c:SetAttribute("Stamina", 100) end
-                end)
-            end
+        if hum and hum.Health > 0 and Config.SpeedEnabled then
+            hum.WalkSpeed = Config.SpeedValue
         end
     end)
 end)
@@ -743,93 +960,174 @@ task.spawn(function()
     end
 end)
 
--- ============ AUTO-HACK ============
+-- ============ RAGE LOOPS ============
+-- Loop Infect: телепорт-инфект по всем выжившим
 task.spawn(function()
     while gui.Parent and IsCurrentGen() do
-        task.wait(0.4)
-        if Config.AutoHack then
+        task.wait(0.5)
+        if Config.LoopInfect then
             pcall(function()
-                local my = GetHRP() if not my then return end
-                -- 1) жмём ProximityPrompt компьютеров рядом
-                if fireproximityprompt then
-                    for _, d in ipairs(Workspace:GetDescendants()) do
-                        if d:IsA("ProximityPrompt") then
-                            local par = d.Parent
-                            if par and par:IsA("BasePart") then
-                                local an = d.Parent.Parent
-                                local anName = an and string.lower(an.Name) or ""
-                                local pn = string.lower(par.Name)
-                                if string.find(anName, "computer") or string.find(anName, "pc") or string.find(pn, "screen") or string.find(pn, "keyboard") then
-                                    if (my.Position - par.Position).Magnitude <= Config.HackDistance and d.Enabled then
-                                        fireproximityprompt(d)
-                                    end
-                                end
+                local my = GetHRP()
+                if not my then return end
+                local save = my.CFrame
+                local anyPiggy = AmIPiggy()
+                for _, p in ipairs(GetSurvivors()) do
+                    local t = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+                    local th = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+                    if t and th and th.Health > 0 then
+                        local d = (my.Position - t.Position).Magnitude
+                        if d <= Config.InfectDistance * 4 then
+                            -- рядом: просто тач + ремоут
+                            InfectPlayer(p)
+                        else
+                            -- далеко: подлёт если мы Piggy или Noclip/Fly
+                            if anyPiggy or Config.Noclip or Config.FlyEnabled then
+                                my.CFrame = t.CFrame + Vector3.new(0, 0, 1)
+                                task.wait(0.12)
+                                InfectPlayer(p)
+                            else
+                                InfectPlayer(p) -- всё равно пробуем ремоутами
                             end
                         end
                     end
+                    if not Config.LoopInfect then break end
+                    task.wait(0.1)
                 end
-                -- 2) дожимаем ремоутами хака
-                FireList(HackRemotes)
-                -- 3) Auto-QTE: ищем GUI хака и жмём
-                if Config.AutoQTE then
-                    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-                    if pg then
-                        for _, g in ipairs(pg:GetDescendants()) do
-                            if g:IsA("TextButton") or g:IsA("ImageButton") then
-                                local n = string.lower(g.Name)
-                                if (string.find(n, "hack") or string.find(n, "qte") or string.find(n, "skill") or g.Text == "E") and g.Visible then
-                                    -- проверяем что это окно хака активно
-                                    local par = g.Parent
-                                    if par and par.Visible ~= false then
-                                        pcall(function()
-                                            for _, c in ipairs({g.Activated, g.MouseButton1Click}) do end
-                                            -- эмулируем клик через fire signal? проще: вызываем через clickdetector-фолбэк
-                                        end)
-                                        -- пробуем нажать через VirtualInput невозможен на Delta, поэтому жмём через firesignal если есть
-                                        pcall(function()
-                                            if firesignal then firesignal(g.MouseButton1Click) end
-                                        end)
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-                -- 4) Anti-fail: не даём стамине упасть во время хака
-                if Config.InfStamina then
-                    local hum = GetHum()
-                    if hum then hum.WalkSpeed = Config.SpeedEnabled and Config.SpeedValue or hum.WalkSpeed end
-                end
+                -- вернуть назад если улетали
+                pcall(function() if (my.Position - save.Position).Magnitude > 30 then my.CFrame = save end end)
             end)
-        end
-        if Config.AutoStruggle then
-            pcall(function()
-                -- спам struggle-ремоутов + прыжки чтобы вырваться из лап/капсулы
-                FireList(PodRemotes)
-                local hum = GetHum()
-                if hum and hum.Seated then
-                    hum.Jump = true
-                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
-                -- кликаем кнопки Struggle/Escape в GUI
-                local pg = LocalPlayer:FindFirstChild("PlayerGui")
-                if pg and firesignal then
-                    for _, g in ipairs(pg:GetDescendants()) do
-                        if g:IsA("TextButton") and g.Visible then
-                            local t = string.lower(g.Text)
-                            if string.find(t, "struggle") or string.find(t, "escape") or string.find(t, "mash") or string.find(t, "free") then
-                                firesignal(g.MouseButton1Click)
-                            end
-                        end
-                    end
-                end
-            end)
-            task.wait(0.2)
         end
     end
 end)
 
--- ============ ANTI-AFK / FULLBRIGHT LOOP ============
+-- Door spam loop
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(Config.DoorSpamDelay)
+        if Config.DoorSpam then
+            pcall(function()
+                FireList(DoorRemotes, true) task.wait(0.05) FireList(DoorRemotes, false)
+                FireList(DoorRemotes, "Open") FireList(DoorRemotes, "Close")
+                SpamPrompts(GetPrompts(9999, true))
+            end)
+        end
+    end
+end)
+
+-- Prompt / Lever spam loop
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.4)
+        if Config.PromptSpam or Config.LeverSpam then
+            pcall(function()
+                local allMap = Config.PromptSpamAllMap
+                local list = GetPrompts(Config.PromptDistance, allMap)
+                -- для LeverSpam фильтруем по именам рычаг/кнопка/дверь
+                if Config.LeverSpam and not Config.PromptSpam then
+                    local filt = {}
+                    for _, e in ipairs(list) do
+                        local n = string.lower(e.name .. " " .. e.prompt.Name)
+                        if string.find(n, "lever") or string.find(n, "button") or string.find(n, "switch")
+                        or string.find(n, "door") or string.find(n, "gate") or string.find(n, "key")
+                        or string.find(n, "plank") or string.find(n, "exit") or string.find(n, "escape")
+                        or string.find(n, "рычаг") or string.find(n, "кнопк") then
+                            table.insert(filt, e)
+                        end
+                    end
+                    list = filt
+                end
+                SpamPrompts(list)
+                SpamClicks(GetClickDetectors(Config.PromptDistance, allMap))
+                FireList(MiscRemotes)
+            end)
+        end
+    end
+end)
+
+-- Trap aura loop
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.5)
+        if Config.TrapAura then
+            pcall(function()
+                local my = GetHRP() if not my then return end
+                local save = my.CFrame
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character then
+                        local t = p.Character:FindFirstChild("HumanoidRootPart")
+                        if t and (my.Position - t.Position).Magnitude <= Config.TrapDistance then
+                            my.CFrame = t.CFrame + Vector3.new(0, 1, 0)
+                            task.wait(0.1)
+                            FireList(TrapRemotes)
+                            FireList(TrapRemotes, true)
+                        end
+                    end
+                    if not Config.TrapAura then break end
+                end
+                my.CFrame = save
+            end)
+        end
+    end
+end)
+
+-- Freeze Piggy loop (якорим Piggy)
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.3)
+        if Config.FreezePiggy then
+            pcall(function()
+                for _, p in ipairs(GetPiggies()) do
+                    if p ~= LocalPlayer and p.Character then
+                        for _, v in ipairs(p.Character:GetDescendants()) do
+                            if v:IsA("BasePart") then
+                                v.Anchored = true
+                                -- дёргаем чтобы не мог бить
+                                pcall(function()
+                                    local h = p.Character:FindFirstChildOfClass("Humanoid")
+                                    if h then h.WalkSpeed = 0 h.JumpPower = 0 end
+                                end)
+                            end
+                        end
+                    end
+                end
+            end)
+        else
+            -- разморозка при выключении: один раз отпускаем всех
+            -- (делаем мягко чтобы не лагало: только когда тоггл выключили недавно)
+        end
+    end
+end)
+
+-- Fling / Bring aura
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(0.4)
+        if Config.FlingAura or Config.BringAura then
+            pcall(function()
+                local my = GetHRP() if not my then return end
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character then
+                        local t = p.Character:FindFirstChild("HumanoidRootPart")
+                        if t and (my.Position - t.Position).Magnitude <= 20 then
+                            if Config.BringAura then
+                                t.CFrame = my.CFrame + Vector3.new(math.random(-3, 3), 2, math.random(-3, 3))
+                            end
+                            if Config.FlingAura then
+                                local bv = Instance.new("BodyVelocity")
+                                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                                bv.Velocity = Vector3.new(math.random(-120, 120), 120, math.random(-120, 120))
+                                bv.Parent = t
+                                task.delay(0.35, function() pcall(function() bv:Destroy() end) end)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- Chat spam + misc loops
 LocalPlayer.Idled:Connect(function()
     if Config.AntiAFK and IsCurrentGen() then
         pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end)
@@ -838,12 +1136,15 @@ end)
 task.spawn(function()
     while gui.Parent and IsCurrentGen() do
         task.wait(3)
-        if Config.Fullbright then
-            pcall(function()
+        pcall(function()
+            if Config.Fullbright then
                 Lighting.Brightness = 2 Lighting.ClockTime = 14 Lighting.FogEnd = 100000
                 Lighting.GlobalShadows = false Lighting.Ambient = Color3.new(1,1,1)
-            end)
-        end
+            end
+            if Config.ChatSpam then
+                SayChat(Config.ChatMsg)
+            end
+        end)
     end
 end)
 
@@ -863,15 +1164,15 @@ task.spawn(function()
     while gui.Parent and IsCurrentGen() do
         task.wait(1.5)
         pcall(function()
-            local role = AmIBeast() and "BEAST 👹" or "SURVIVOR 🙂"
-            local comps = GetComputers()
-            local left = 0
-            for _, c in ipairs(comps) do if not c.hacked then left = left + 1 end end
-            local placeWarn = (game.PlaceId == PLACE_ID) and "" or " (не FTF?)"
-            Status.Text = role .. " | ПК: " .. left .. "/" .. #comps .. " осталось" .. placeWarn .. "\nОнлайн: " .. #Players:GetPlayers() .. " | " .. os.date("%H:%M:%S")
+            local role = AmIPiggy() and "PIGGY 👿" or "SURVIVOR 🙂"
+            local pigs = #GetPiggies()
+            local survs = #GetSurvivors()
+            local prompts = #GetPrompts(9999, true)
+            Status.Text = role .. " | Piggy: " .. pigs .. " Surv: " .. survs .. "\nПромптов на карте: " .. prompts .. " | " .. os.date("%H:%M:%S")
         end)
     end
 end)
 
-Notify("FTF Hub", "Загружено! Встань у ПК и включи Auto-Hack 💻", 5)
-print("[FTFHub] loaded, place " .. tostring(game.PlaceId) .. " hack=" .. #HackRemotes)
+Notify("Piggy Rage", "Загружено! Включи Loop Infect + Door Spam 👿", 5)
+print("[PiggyRage] loaded place " .. tostring(game.PlaceId) .. " infect=" .. #InfectRemotes .. " door=" .. #DoorRemotes .. " trap=" .. #TrapRemotes .. " misc=" .. #MiscRemotes)
+
