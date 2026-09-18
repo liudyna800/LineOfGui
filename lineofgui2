@@ -157,6 +157,7 @@ local killerDbg = "выкл"
 local killHits = 0
 local killDmg = false
 local killLastHp = nil
+local killStage = "?" -- стадия для трассировки ошибки
 local function SetKillerAuto(on)
     killerAuto = on
     pcall(function() if killerAutoBtn then killerAutoBtn.Text = "Авто-убийца: " .. (on and "ВКЛ" or "ВЫКЛ") end end)
@@ -246,7 +247,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -10, 0, 28)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop v13"
+Title.Text = "Giant Raid Hop v14"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
 Title.TextColor3 = Color3.new(1, 1, 1)
@@ -857,6 +858,7 @@ task.spawn(function()
         pcall(function() if KillerStatus then KillerStatus.Text = killerDbg end end)
         if killerOn or killerAuto then
             local okK, errK = pcall(function()
+                killStage = "autopick"
                 if killerAuto and (killTarget == nil or killTarget.Parent == nil) then
                     local gs0 = FindGiants()
                     if #gs0 > 0 and gs0[1].player then
@@ -866,10 +868,12 @@ task.spawn(function()
                         return
                     end
                 end
+                killStage = "target?"
                 if killTarget == nil or killTarget.Parent == nil then
                     killerDbg = "нет цели (тап по нику)"
                     return
                 end
+                killStage = "giant?"
                 if not IsPlayerGiant(killTarget) then
                     local gs = FindGiants()
                     if #gs > 0 and gs[1].player then
@@ -880,6 +884,7 @@ task.spawn(function()
                     end
                     return
                 end
+                killStage = "smiler?"
                 -- заразили = ресет и дальше мочить
                 if IsSmiler(LocalPlayer) then
                     killerDbg = "я смайл -> ресет"
@@ -887,6 +892,7 @@ task.spawn(function()
                     task.wait(2)
                     return
                 end
+                killStage = "grab?"
                 -- схватили (гигант или другие) = ресет и дальше
                 if ImGrabbed() then
                     killerDbg = "схвачен -> ресет"
@@ -894,19 +900,23 @@ task.spawn(function()
                     task.wait(2)
                     return
                 end
+                killStage = "sweep/bat?"
                 killSweepN = killSweepN + 1
                 if killSweepN % 30 == 0 then AntiLightSweep() end
                 local bat = FindBat()
                 if bat == nil then
+                    killStage = "fetch"
                     fetchN = fetchN + 1
                     killerDbg = "нет биты -> вендор (" .. fetchN .. ")"
                     if fetchN == 1 then Notify("Killer", "Бита кончилась, лечу к вендору...") end
                     FetchBat()
                     return
                 end
+                killStage = "hit"
                 fetchN = 0
                 EquipBat(bat)
                 KillerHitOnce(bat, killTarget)
+                killStage = "dmg?"
                 killHits = killHits + 1
                 pcall(function()
                     local th = killTarget.Character and killTarget.Character:FindFirstChildOfClass("Humanoid")
@@ -918,7 +928,8 @@ task.spawn(function()
                 killerDbg = "бью " .. killTarget.DisplayName .. " уд:" .. killHits .. " урон:" .. (killDmg and "ДА" or "НЕТ?") .. " HP:" .. (killLastHp and math.floor(killLastHp) or "?")
             end)
             if not okK and errK then
-                killerDbg = "ERR: " .. string.sub(tostring(errK), 1, 70)
+                killerDbg = "ERR@" .. killStage .. ": " .. string.sub(tostring(errK), 1, 90)
+                pcall(function() warn("[Killer] " .. killerDbg) end)
             end
         end
     end
@@ -1023,7 +1034,7 @@ task.spawn(function()
     end
 end)
 
-Notify("Giant Raid", "v13 запущен. Хоп через " .. HOP_DELAY .. "с")
+Notify("Giant Raid", "v14 запущен. Хоп через " .. HOP_DELAY .. "с")
 print("[GiantRaid] loaded, place " .. PLACE_ID)
 
 ]=====]
@@ -1185,6 +1196,7 @@ local killerDbg = "выкл"
 local killHits = 0
 local killDmg = false
 local killLastHp = nil
+local killStage = "?" -- стадия для трассировки ошибки
 local function SetKillerAuto(on)
     killerAuto = on
     pcall(function() if killerAutoBtn then killerAutoBtn.Text = "Авто-убийца: " .. (on and "ВКЛ" or "ВЫКЛ") end end)
@@ -1274,7 +1286,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -10, 0, 28)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop v13"
+Title.Text = "Giant Raid Hop v14"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
 Title.TextColor3 = Color3.new(1, 1, 1)
@@ -1885,6 +1897,7 @@ task.spawn(function()
         pcall(function() if KillerStatus then KillerStatus.Text = killerDbg end end)
         if killerOn or killerAuto then
             local okK, errK = pcall(function()
+                killStage = "autopick"
                 if killerAuto and (killTarget == nil or killTarget.Parent == nil) then
                     local gs0 = FindGiants()
                     if #gs0 > 0 and gs0[1].player then
@@ -1894,10 +1907,12 @@ task.spawn(function()
                         return
                     end
                 end
+                killStage = "target?"
                 if killTarget == nil or killTarget.Parent == nil then
                     killerDbg = "нет цели (тап по нику)"
                     return
                 end
+                killStage = "giant?"
                 if not IsPlayerGiant(killTarget) then
                     local gs = FindGiants()
                     if #gs > 0 and gs[1].player then
@@ -1908,6 +1923,7 @@ task.spawn(function()
                     end
                     return
                 end
+                killStage = "smiler?"
                 -- заразили = ресет и дальше мочить
                 if IsSmiler(LocalPlayer) then
                     killerDbg = "я смайл -> ресет"
@@ -1915,6 +1931,7 @@ task.spawn(function()
                     task.wait(2)
                     return
                 end
+                killStage = "grab?"
                 -- схватили (гигант или другие) = ресет и дальше
                 if ImGrabbed() then
                     killerDbg = "схвачен -> ресет"
@@ -1922,19 +1939,23 @@ task.spawn(function()
                     task.wait(2)
                     return
                 end
+                killStage = "sweep/bat?"
                 killSweepN = killSweepN + 1
                 if killSweepN % 30 == 0 then AntiLightSweep() end
                 local bat = FindBat()
                 if bat == nil then
+                    killStage = "fetch"
                     fetchN = fetchN + 1
                     killerDbg = "нет биты -> вендор (" .. fetchN .. ")"
                     if fetchN == 1 then Notify("Killer", "Бита кончилась, лечу к вендору...") end
                     FetchBat()
                     return
                 end
+                killStage = "hit"
                 fetchN = 0
                 EquipBat(bat)
                 KillerHitOnce(bat, killTarget)
+                killStage = "dmg?"
                 killHits = killHits + 1
                 pcall(function()
                     local th = killTarget.Character and killTarget.Character:FindFirstChildOfClass("Humanoid")
@@ -1946,7 +1967,8 @@ task.spawn(function()
                 killerDbg = "бью " .. killTarget.DisplayName .. " уд:" .. killHits .. " урон:" .. (killDmg and "ДА" or "НЕТ?") .. " HP:" .. (killLastHp and math.floor(killLastHp) or "?")
             end)
             if not okK and errK then
-                killerDbg = "ERR: " .. string.sub(tostring(errK), 1, 70)
+                killerDbg = "ERR@" .. killStage .. ": " .. string.sub(tostring(errK), 1, 90)
+                pcall(function() warn("[Killer] " .. killerDbg) end)
             end
         end
     end
@@ -2051,5 +2073,5 @@ task.spawn(function()
     end
 end)
 
-Notify("Giant Raid", "v13 запущен. Хоп через " .. HOP_DELAY .. "с")
+Notify("Giant Raid", "v14 запущен. Хоп через " .. HOP_DELAY .. "с")
 print("[GiantRaid] loaded, place " .. PLACE_ID)
