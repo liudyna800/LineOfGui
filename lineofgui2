@@ -1,2077 +1,298 @@
-local SELF = [=====[
--- GIANT RAID HOP | Infectious Smile | Delta (auto-queue, no URL needed)
--- Вставь весь файл в Delta -> Execute. Дальше хопы сами подхватываются.
--- S = self source (upvalue SELF set by header). Reconstructs full file, queues it (IY mechanic, no URL needed).
--- NB: closer built dynamically so source never contains the raw closer bytes.
-local _CLOSE = "]" .. "=====]"
-local FULL = "local SELF = [=====[\n" .. SELF .. "\n" .. _CLOSE .. "\n" .. SELF
-
-local SCRIPT_URL = "" -- оставить пустым: работает без pastebin за счёт SELF-очереди
-local PLACE_ID = 5985232436
-local HOP_DELAY = 5
-local AUTO_HOP = true
-local MIN_PLAYERS = 8 -- хопать только на сервера с 8+ игроками (полные/средние)
+-- Infectious Smile V2 | Delta Mobile | "Survivor AI" - чего нет ни у кого
+-- Фишка: не тупая драка, а выживание: Rescue, Cure, Safe Path, Item Radar
+-- Вставь в Delta -> Execute. Легкий, без лагов (в отличии от XXMZ / Nicuse хабов)
 
 local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local StarterGui = game:GetService("StarterGui")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 
-if getgenv and getgenv()._GiantRaidRunning then
-    pcall(function() getgenv()._GiantRaidGui:Destroy() end)
-end
-if getgenv then
-    getgenv()._GiantRaidRunning = true
-    getgenv()._GiantRaidVisited = getgenv()._GiantRaidVisited or {}
-end
+local S = {
+    Speed=false, SpeedVal=42,
+    ESP=false,
+    ItemRadar=false,
+    LightESP=false,
+    DangerRadar=false,
+    AntiGrabEscape=false,
+    RescueAura=false,
+    NoStun=false,
+    CoinFarm=false,
+    Fullbright=false,
+    Noclip=false,
+}
 
-local function Notify(title, text, dur)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 4})
-    end)
-    print("[GiantRaid] " .. tostring(text))
-end
+-- GUI (легкое, для Delta)
+local guiName="InfSmileV2"
+pcall(function() if game:GetService("CoreGui"):FindFirstChild(guiName) then game:GetService("CoreGui")[guiName]:Destroy() end end)
+local sg=Instance.new("ScreenGui") sg.Name=guiName sg.ResetOnSpawn=false
+pcall(function() sg.Parent = gethui and gethui() or game:GetService("CoreGui") end)
+if not sg.Parent then sg.Parent=LocalPlayer:WaitForChild("PlayerGui") end
 
--- ============ QUEUE ON TELEPORT (как Infinite Yield, но без ссылки) ============
-local QueueStatus = "?"
-local function TryQueue(src)
-    local variants = {}
-    pcall(function()
-        if queue_on_teleport then table.insert(variants, queue_on_teleport) end
-    end)
-    pcall(function()
-        if queueonteleport then table.insert(variants, queueonteleport) end
-    end)
-    pcall(function()
-        if syn and syn.queue_on_teleport then table.insert(variants, syn.queue_on_teleport) end
-    end)
-    if getgenv then
+local Main=Instance.new("Frame") Main.Size=UDim2.new(0,240,0,380) Main.Position=UDim2.new(0.04,0,0.15,0)
+Main.BackgroundColor3=Color3.fromRGB(15,15,22) Main.BorderSizePixel=0 Main.Active=true Main.Draggable=true Main.Parent=sg
+Instance.new("UICorner",Main).CornerRadius=UDim.new(0,10)
+local T=Instance.new("TextLabel") T.Size=UDim2.new(1,0,0,32) T.BackgroundColor3=Color3.fromRGB(120,40,200)
+T.Text="Smile V2 : Survivor AI" T.TextColor3=Color3.new(1,1,1) T.Font=Enum.Font.GothamBold T.TextSize=13 T.Parent=Main
+Instance.new("UICorner",T).CornerRadius=UDim.new(0,10)
+
+local tgl=Instance.new("TextButton") tgl.Size=UDim2.new(0,55,0,28) tgl.Position=UDim2.new(0,8,0,55)
+tgl.Text="МЕНЮ" tgl.BackgroundColor3=Color3.fromRGB(120,40,200) tgl.TextColor3=Color3.new(1,1,1)
+tgl.Font=Enum.Font.GothamBold tgl.TextSize=12 tgl.Parent=sg tgl.Active=true tgl.Draggable=true
+Instance.new("UICorner",tgl).CornerRadius=UDim.new(0,8)
+tgl.MouseButton1Click:Connect(function() Main.Visible=not Main.Visible end)
+
+local scr=Instance.new("ScrollingFrame") scr.Size=UDim2.new(1,0,1,-32) scr.Position=UDim2.new(0,0,0,32)
+scr.BackgroundTransparency=1 scr.ScrollBarThickness=3 scr.CanvasSize=UDim2.new(0,0,0,750) scr.Parent=Main
+local lay=Instance.new("UIListLayout",scr) lay.Padding=UDim.new(0,5) lay.HorizontalAlignment=Enum.HorizontalAlignment.Center
+
+local Teleports=Instance.new("Frame") Teleports.Size=UDim2.new(0,220,0,110) Teleports.BackgroundColor3=Color3.fromRGB(25,25,35) Teleports.Parent=scr
+Instance.new("UICorner",Teleports).CornerRadius=UDim.new(0,8)
+local tl=Instance.new("TextLabel") tl.Size=UDim2.new(1,0,0,20) tl.BackgroundTransparency=1 tl.Text="— ТЕЛЕПОРТЫ —"
+tl.TextColor3=Color3.fromRGB(200,170,255) tl.Font=Enum.Font.GothamBold tl.TextSize=12 tl.Parent=Teleports
+
+local function tpBtn(name, finder)
+    local b=Instance.new("TextButton") b.Size=UDim2.new(0,200,0,26) b.Position=UDim2.new(0,10,0,22+#Teleports:GetChildren()*2)
+    -- layout вручную
+    b.BackgroundColor3=Color3.fromRGB(60,50,90) b.TextColor3=Color3.new(1,1,1) b.Font=Enum.Font.Gotham b.TextSize=12 b.Text=name b.Parent=Teleports
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+    -- располагаем по порядку
+    local y=22 local c=0 for _,v in pairs(Teleports:GetChildren()) do if v:IsA("TextButton") then c+=1 end end
+    b.Position=UDim2.new(0,10,0,20+c*28)
+    b.MouseButton1Click:Connect(function()
         pcall(function()
-            if getgenv().queue_on_teleport then table.insert(variants, getgenv().queue_on_teleport) end
+            local pos=finder()
+            if pos then
+                local ch=LocalPlayer.Character local r=ch and ch:FindFirstChild("HumanoidRootPart")
+                if r then r.CFrame=CFrame.new(pos+Vector3.new(0,5,0)) end
+            end
         end)
-        pcall(function()
-            if getgenv().queueonteleport then table.insert(variants, getgenv().queueonteleport) end
-        end)
-    end
-    for _, q in ipairs(variants) do
-        local ok = pcall(function() q(src) end)
-        if ok then return true end
-    end
-    return false
+    end)
 end
 
-local function QueueSelf()
-    local src = FULL
-    if SCRIPT_URL ~= "" then
-        src = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
-    end
-    if TryQueue(src) then
-        QueueStatus = "queue OK"
-        return true
-    else
-        QueueStatus = "queue НЕТ: executor не поддерживает queue_on_teleport. Положи файл в Delta > AutoExecute как запасной вариант."
-        Notify("Giant Raid", QueueStatus, 6)
-        return false
-    end
-end
-
--- ============ ДЕТЕКТ ГИГАНТА-ИГРОКА (NPC игнорим) ============
-local function IsPlayerGiant(plr)
-    if not plr or not plr.Character then return false, nil end
-    local c = plr.Character
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    local hrp = c:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return false, nil end
-    local info = {}
-    -- Гигант: 300 HP (endangered-гигант 400). Обычный endangered-смайл = 200 HP,
-    -- поэтому порог 250: отсекает endangered (200) и бигхедов (100).
-    if hum.MaxHealth and hum.MaxHealth >= 250 then
-        info.reason = "HP:" .. tostring(hum.MaxHealth)
-        return true, info
-    end
-    if c:GetAttribute("Giant") == true or c:GetAttribute("IsGiant") == true
-    or plr:GetAttribute("Giant") == true or plr:GetAttribute("IsGiant") == true then
-        info.reason = "attr"
-        return true, info
-    end
-    if c:FindFirstChild("Giant") or c:FindFirstChild("IsGiant") or c:FindFirstChild("GiantPotion") then
-        info.reason = "value"
-        return true, info
-    end
-    -- Тело x2 у гиганта (HRP ~4). Endangered +30% (~2.6) не проходит порог 3.0.
-    if hrp.Size.Y > 3.0 then
-        info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
-        return true, info
-    end
-    -- Детект по голове УБРАН: у обычных смайлов бывает шанс-бигхед (большая голова при 100 HP) - это не гигант.
-    local hasGlow = false
-    for _, d in ipairs(c:GetDescendants()) do
-        if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
-            hasGlow = true
-            break
-        end
-    end
-    -- Фиолетовое свечение гиганта + большое тело. У endangered красные партиклы
-    -- и мелкое тело (~2.6) - порог 3.0 их отсекает.
-    if hasGlow and hrp.Size.Y > 3.0 then
-        info.reason = "glow+size"
-        return true, info
-    end
-    return false, nil
-end
-
-local function FindGiants()
-    local found = {}
-    local seen = {} -- защита от дублей одного игрока
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and not seen[p] then
-            local ok, info = IsPlayerGiant(p)
-            if ok then
-                seen[p] = true
-                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-                local hum = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
-                table.insert(found, {
-                    name = p.DisplayName .. " (@" .. p.Name .. ")",
-                    player = p,
-                    hrp = hrp,
-                    hp = hum and math.floor(hum.Health) or 0,
-                    maxHp = hum and math.floor(hum.MaxHealth) or 0,
-                    reason = info and info.reason or "?",
-                })
+local function findByNames(names)
+    for _,d in pairs(Workspace:GetDescendants()) do
+        if d:IsA("BasePart") then
+            for _,n in pairs(names) do
+                if string.find(string.lower(d.Name), string.lower(n)) then return d.Position end
             end
+            -- Swamp вода: большой полупрозрачный синий парт
+            if string.find(d.Name:lower(),"water") and d.Size.Magnitude>40 then return d.Position end
         end
-    end
-    return found
-end
-
--- Цель убийцы гиганта (назначается тапом по нику / чатом).
--- ВАЖНО: всё состояние - ДО GUI, иначе кнопки видят глобалы, а цикл - локалки.
-local TargetLabel = nil
-local KillerStatus = nil
-local killerOn = false
-local killTarget = nil
-local killerAuto = false
-local killerAutoBtn = nil
-local killerDbg = "выкл"
-local killHits = 0
-local killDmg = false
-local killLastHp = nil
-local killStage = "?" -- стадия для трассировки ошибки
-local function SetKillerAuto(on)
-    killerAuto = on
-    pcall(function() if killerAutoBtn then killerAutoBtn.Text = "Авто-убийца: " .. (on and "ВКЛ" or "ВЫКЛ") end end)
-    Notify("Killer", "Авто-убийца " .. (on and "ВКЛ" or "ВЫКЛ"))
-end
-local function SetKillTarget(plr)
-    killTarget = plr
-    killerOn = true
-    killHits = 0
-    killDmg = false
-    killLastHp = nil
-    killerDbg = "цель: " .. (plr and plr.DisplayName or "?")
-    pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. (plr and plr.DisplayName or "?") end end)
-end
-
--- ============ GUI ============
--- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
--- хопать и кнопки нового "не работают"). Работает даже без getgenv.
-pcall(function()
-    local targets = {}
-    if gethui then local h = gethui() if h then table.insert(targets, h) end end
-    pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then table.insert(targets, pg) end
-    for _, par in ipairs(targets) do
-        for _, g in ipairs(par:GetChildren()) do
-            if g:IsA("ScreenGui") and g.Name == "GiantRaidHop" then
-                g:Destroy()
-            end
-        end
-    end
-end)
--- Поколение запуска: старые циклы увидят чужой номер и выйдут (общая память через Workspace)
-local myGen = 0
-pcall(function()
-    local g = (workspace:GetAttribute("GiantRaidGen") or 0) + 1
-    workspace:SetAttribute("GiantRaidGen", g)
-    myGen = g
-end)
-local function IsCurrentGen()
-    if myGen == 0 then return true end
-    local ok, v = pcall(function() return workspace:GetAttribute("GiantRaidGen") end)
-    return ok and v == myGen
-end
-local gui = Instance.new("ScreenGui")
-gui.Name = "GiantRaidHop"
-gui.ResetOnSpawn = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.DisplayOrder = 999
-gui.Enabled = true
-pcall(function() gui.IgnoreGuiInset = true end)
--- PlayerGui ПЕРВЫМ: в нём тапы работают всегда. gethui/CoreGui на части
--- Delta глотают ввод - кнопки видно, но нажатия не доходят.
-local parentOk = false
-pcall(function()
-    local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
-    if pg then gui.Parent = pg parentOk = true end
-end)
-if not parentOk then
-    pcall(function()
-        local h = nil
-        if gethui then h = gethui() end
-        if h then gui.Parent = h parentOk = true end
-    end)
-end
-if not parentOk or not gui.Parent then
-    pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
-end
-if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-if getgenv then getgenv()._GiantRaidGui = gui end
-
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 280, 0, 366)
-Main.Position = UDim2.new(0.5, -140, 0.15, 0)
-Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-Main.BorderSizePixel = 0
-Main.Active = false
-Main.Draggable = false
-Main.ClipsDescendants = false
-Main.Parent = gui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
-local st = Instance.new("UIStroke", Main)
-st.Color = Color3.fromRGB(170, 100, 255)
-st.Thickness = 2
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -10, 0, 28)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop v14"
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 15
-Title.TextColor3 = Color3.new(1, 1, 1)
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Active = true
-Title.Parent = Main
--- Ручной драг за заголовок: штатный Draggable фрейма на части устройств глотает тапы
-do
-    local dragging = false
-    local dragStart, frameStart = nil, nil
-    Title.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            frameStart = Main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            Main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + d.X, frameStart.Y.Scale, frameStart.Y.Offset + d.Y)
-        end
-    end)
-end
-
-local PageRaid = Instance.new("Frame")
-PageRaid.Name = "PageRaid"
-PageRaid.Size = UDim2.new(1, -16, 0, 294)
-PageRaid.Position = UDim2.new(0, 8, 0, 64)
-PageRaid.BackgroundTransparency = 1
-PageRaid.BorderSizePixel = 0
-PageRaid.ClipsDescendants = false
-PageRaid.Parent = Main
-
-local PageFling = Instance.new("Frame")
-PageFling.Name = "PageFling"
-PageFling.Size = UDim2.new(1, -16, 0, 294)
-PageFling.Position = UDim2.new(0, 8, 0, 64)
-PageFling.BackgroundTransparency = 1
-PageFling.BorderSizePixel = 0
-PageFling.ClipsDescendants = false
-PageFling.Visible = false
-PageFling.Parent = Main
-
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -16, 0, 60)
-Status.Position = UDim2.new(0, 8, 0, 0)
-Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-Status.Font = Enum.Font.Gotham
-Status.TextSize = 12
-Status.TextColor3 = Color3.new(1, 1, 1)
-Status.TextWrapped = true
-Status.Text = "Сканирую..."
-Status.Active = false
-Status.BorderSizePixel = 0
-Status.Parent = PageRaid
-Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
-
-local Hints = Instance.new("TextLabel")
-Hints.Size = UDim2.new(1, -16, 0, 150)
-Hints.Position = UDim2.new(0, 8, 0, 134)
-Hints.BackgroundTransparency = 1
-Hints.Font = Enum.Font.Gotham
-Hints.TextSize = 11
-Hints.TextColor3 = Color3.fromRGB(170, 170, 190)
-Hints.TextWrapped = true
-Hints.TextXAlignment = Enum.TextXAlignment.Left
-Hints.TextYAlignment = Enum.TextYAlignment.Top
-Hints.Active = false
-Hints.Text = "Чат-команды:\n/hop off | on | now\n/kill ник | /killstop\n\nАвтохоп: 5с, сервера 8+.\nУбийца: вкладка Убийца, тап по нику."
-Hints.Parent = PageRaid
-
-local function Btn(txt, y, cb, parent, half)
-    local b = Instance.new("TextButton")
-    parent = parent or Main
-    if half == "left" then
-        b.Size = UDim2.new(0.5, -10, 0, 30)
-        b.Position = UDim2.new(0, 8, 0, y)
-    elseif half == "right" then
-        b.Size = UDim2.new(0.5, -10, 0, 30)
-        b.Position = UDim2.new(0.5, 2, 0, y)
-    else
-        b.Size = UDim2.new(1, -16, 0, 30)
-        b.Position = UDim2.new(0, 8, 0, y)
-    end
-    b.BackgroundColor3 = Color3.fromRGB(60, 50, 90)
-    b.Text = txt
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 13
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.AutoButtonColor = true
-    b.Active = true
-    b.BorderSizePixel = 0
-    b.ClipsDescendants = false
-    b.ZIndex = 5
-    b.Parent = parent
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Три сигнала + сырой ввод: хоть один да дойдёт на любом executor'е.
-    -- tick-дебаунс гасит двойное срабатывание за один тап.
-    -- Зелёная вспышка = тап дошёл (диагностика).
-    local baseColor = b.BackgroundColor3
-    local last = 0
-    local function fire()
-        local now = tick()
-        if now - last < 0.4 then return end
-        last = now
-        pcall(function()
-            b.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
-            task.delay(0.15, function()
-                pcall(function() b.BackgroundColor3 = baseColor end)
-            end)
-        end)
-        pcall(cb)
-    end
-    b.Activated:Connect(fire)
-    b.MouseButton1Click:Connect(fire)
-    b.TouchTap:Connect(fire)
-    b.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            fire()
-        end
-    end)
-    return b
-end
-
-local TabRaidBtn, TabFlingBtn = nil, nil
-local function ShowTab(which)
-    local raid = (which ~= "fling")
-    PageRaid.Visible = raid
-    PageFling.Visible = not raid
-    if TabRaidBtn then TabRaidBtn.BackgroundColor3 = raid and Color3.fromRGB(90, 70, 130) or Color3.fromRGB(40, 35, 60) end
-    if TabFlingBtn then TabFlingBtn.BackgroundColor3 = (not raid) and Color3.fromRGB(90, 70, 130) or Color3.fromRGB(40, 35, 60) end
-end
-TabRaidBtn = Btn("Рейд", 32, function() ShowTab("raid") end, Main, "left")
-TabFlingBtn = Btn("Убийца", 32, function() ShowTab("fling") end, Main, "right")
-ShowTab("raid")
-
-local running = true
-local hopNow = false
-local hopTimer = 0
-Btn("Автохоп сейчас", 66, function() hopNow = true end, PageRaid)
-Btn("Стоп / Старт", 100, function()
-    running = not running
-    Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
-end, PageRaid)
-
--- Вкладка Флинг: цель + список ников (тап = флинг)
-TargetLabel = Instance.new("TextLabel")
-TargetLabel.Size = UDim2.new(1, -16, 0, 24)
-TargetLabel.Position = UDim2.new(0, 8, 0, 0)
-TargetLabel.BackgroundTransparency = 1
-TargetLabel.Font = Enum.Font.GothamBold
-TargetLabel.TextSize = 12
-TargetLabel.TextColor3 = Color3.fromRGB(220, 170, 255)
-TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
-TargetLabel.Active = false
-TargetLabel.Text = "Цель: нет (тап по нику)"
-TargetLabel.Parent = PageFling
-KillerStatus = Instance.new("TextLabel")
-KillerStatus.Size = UDim2.new(1, -16, 0, 44)
-KillerStatus.Position = UDim2.new(0, 8, 0, 22)
-KillerStatus.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-KillerStatus.BorderSizePixel = 0
-KillerStatus.Font = Enum.Font.Gotham
-KillerStatus.TextSize = 11
-KillerStatus.TextColor3 = Color3.fromRGB(255, 220, 120)
-KillerStatus.TextWrapped = true
-KillerStatus.TextXAlignment = Enum.TextXAlignment.Left
-KillerStatus.TextYAlignment = Enum.TextYAlignment.Top
-KillerStatus.Active = false
-KillerStatus.Text = "выкл"
-KillerStatus.Parent = PageFling
-Instance.new("UICorner", KillerStatus).CornerRadius = UDim.new(0, 6)
-killerAutoBtn = Btn("Авто-убийца: ВЫКЛ", 70, function() SetKillerAuto(not killerAuto) end, PageFling)
-Btn("Стоп убийца", 104, function() killerOn = false; killTarget = nil; killerDbg = "выкл"; Notify("Killer", "Остановлен") end, PageFling)
-
--- Запасное управление через чат (если тапы по кнопкам не доходят):
--- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
-LocalPlayer.Chatted:Connect(function(msg)
-    local m = string.lower(tostring(msg))
-    if m == "/hop off" or m == "/ahop off" then
-        AUTO_HOP = false
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
-    elseif m == "/hop on" or m == "/ahop on" then
-        AUTO_HOP = true
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
-    elseif m == "/hop now" or m == "/ghop" then
-        hopNow = true
-        Notify("Giant Raid", "Хопаю сейчас (чат)")
-    elseif m == "/killstop" or m == "/unfling" then
-        killerOn = false; killTarget = nil; killerDbg = "выкл"; Notify("Killer", "Остановлен (чат)")
-    elseif m == "/killer on" then
-        SetKillerAuto(true)
-    elseif m == "/killer off" then
-        SetKillerAuto(false)
-    else
-        local nick = string.match(m, "^/kill%s+(.+)$")
-        if nick then
-            nick = string.gsub(string.gsub(nick, "^%s+", ""), "%s+$", "")
-            local target = nil
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and (string.lower(p.Name) == nick or string.lower(p.DisplayName) == nick) then
-                    target = p
-                    break
-                end
-            end
-            if target == nil then
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and (string.find(string.lower(p.Name), nick, 1, true) or string.find(string.lower(p.DisplayName), nick, 1, true)) then
-                        target = p
-                        break
-                    end
-                end
-            end
-            if target then
-                SetKillTarget(target)
-                Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью (чат)")
-            else
-                Notify("Killer", "Не нашёл игрока: " .. nick)
-            end
-        end
-    end
-end)
-
-local ListTitle = Instance.new("TextLabel")
-ListTitle.Size = UDim2.new(1, -16, 0, 18)
-ListTitle.Position = UDim2.new(0, 8, 0, 138)
-ListTitle.BackgroundTransparency = 1
-ListTitle.Text = "Гиганты на сервере: 0"
-ListTitle.Font = Enum.Font.GothamBold
-ListTitle.TextSize = 12
-ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
-ListTitle.TextXAlignment = Enum.TextXAlignment.Left
-ListTitle.Parent = PageFling
-
--- Обычный Frame вместо ScrollingFrame: скролл на телефоне конфликтовал с тапами
-local GiantsList = Instance.new("Frame")
-GiantsList.Size = UDim2.new(1, -16, 0, 128)
-GiantsList.Position = UDim2.new(0, 8, 0, 158)
-GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-GiantsList.BorderSizePixel = 0
-GiantsList.Active = false
-GiantsList.ClipsDescendants = true
-GiantsList.Parent = PageFling
-Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
-local ListLayout = Instance.new("UIListLayout", GiantsList)
-ListLayout.Padding = UDim.new(0, 4)
-ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local activeRows = {} -- созданные строки: чистим точно их, дубли исключены
-local function RefreshGiantsList(giants)
-    pcall(function()
-        for _, r in ipairs(activeRows) do
-            pcall(function() r:Destroy() end)
-        end
-        activeRows = {}
-        for _, ch in ipairs(GiantsList:GetChildren()) do
-            if ch.Name == "_GRow" then
-                pcall(function() ch:Destroy() end)
-            end
-        end
-        ListTitle.Text = "Гиганты на сервере: " .. #giants
-        local maxRows = 4 -- 4x28 + отступы влезают в 128px
-        for i = 1, math.min(#giants, maxRows) do
-            local g = giants[i]
-            local l = Instance.new("TextButton")
-            l.Name = "_GRow"
-            l.Size = UDim2.new(1, -8, 0, 28)
-            l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
-            l.BorderSizePixel = 0
-            l.Active = true
-            l.AutoButtonColor = true
-            l.Font = Enum.Font.GothamBold
-            l.TextSize = 11
-            l.TextColor3 = Color3.new(1, 1, 1)
-            l.TextWrapped = true
-            l.TextTruncate = Enum.TextTruncate.AtEnd
-            local mark = (killerOn and killTarget == g.player) and "> " or ""
-            l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
-            l.Parent = GiantsList
-            table.insert(activeRows, l)
-            Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
-            local target = g.player
-            local t0 = 0
-            local function onTap()
-                local now = tick()
-                if now - t0 < 0.4 then return end
-                t0 = now
-                if target == nil then return end
-                if killerOn and killTarget == target then
-                    killerOn = false; killTarget = nil; killerDbg = "выкл"
-                    Notify("Killer", "Остановлен")
-                else
-                    SetKillTarget(target)
-                    Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью")
-                end
-            end
-            l.Activated:Connect(onTap)
-            l.MouseButton1Click:Connect(onTap)
-            l.TouchTap:Connect(onTap)
-        end
-        if #giants > maxRows then
-            ListTitle.Text = "Гиганты: " .. #giants .. " (первые " .. maxRows .. ")"
-        end
-    end)
-end
-
--- ============ УБИЙЦА ГИГАНТА (по устройству игры) ============
--- Проверено по рабочим хабам, не наугад:
--- * урон: tool.SwingEvent:FireServer() + tool:Activate()
--- * кулдаун: tool.Cooldown.Value = 0 (NumberValue прямо в туле)
--- * хитбокс: частям тулы с TouchInterest ставим Size (бьёт серверный тач)
--- * выдача: workspace.Map.HumanBase.Vendor.BatCollection (HitBox + ClickDetector)
--- * своё оружие: LocalPlayer.Marketplace["Main Weapon"].Equipped.Value
--- * белые блоки: BrickColor.Name == "Institutional white"
--- * ресет при заражении/захвате: Humanoid.Health = 0 (респавн человеком)
--- Тактика: вис над головой гиганта, хитбокс только вокруг неё,
--- SwingEvent каждые ~0.08с. Других смайлов рядом с головой обычно нет.
-local KILL_HEIGHT = 3.5 -- высота над головой гиганта
-local KILL_TICK = 0.08 -- темп ударов
-local KILL_HITBOX = 10 -- хитбокс биты вокруг головы гиганта
-local spawnCF = nil
-local killSweepN = 0
-local fetchN = 0
-
-pcall(function()
-    local m = workspace:FindFirstChild("Map")
-    if m and m:FindFirstChild("AntiHack") then m.AntiHack:Destroy() end
-end)
-
-task.spawn(function()
-    pcall(function()
-        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local hrp = c:WaitForChild("HumanoidRootPart", 10)
-        if hrp then spawnCF = hrp.CFrame end
-    end)
-end)
-
-local function MyChar() return LocalPlayer.Character end
-local function MyHRP() local c = MyChar() return c and c:FindFirstChild("HumanoidRootPart") end
-local function MyHum() local c = MyChar() return c and c:FindFirstChildOfClass("Humanoid") end
-
-local function GetMainWeaponName()
-    local ok, w = pcall(function()
-        local v = LocalPlayer.Marketplace["Main Weapon"].Equipped.Value
-        if v and v ~= "Default" then return v end
-        return "Bat"
-    end)
-    if ok and w and w ~= "" then return w end
-    return "Bat"
-end
-
-local function ImGrabbed()
-    local c = MyChar()
-    if not c then return false end
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Seated then return true end
-    if c:GetAttribute("Grabbed") == true then return true end
-    local hrp = c:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        for _, v in ipairs(hrp:GetChildren()) do
-            if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then return true end
-        end
-    end
-    return false
-end
-
-local function RespawnMe()
-    pcall(function()
-        local hum = MyHum()
-        if hum then hum.Health = 0 end
-    end)
-    pcall(function()
-        local c = MyChar()
-        if c then c:BreakJoints() end
-    end)
-end
-
-local function IsBatName(n)
-    return string.find(n, "bat") or string.find(n, "club") or string.find(n, "baseball") or string.find(n, "wooden")
-end
-
-local function FindBat()
-    local wName = GetMainWeaponName()
-    local function scan(par)
-        if par then
-            for _, t in ipairs(par:GetChildren()) do
-                if t:IsA("Tool") and (t.Name == wName or IsBatName(string.lower(t.Name))) then return t end
-            end
-        end
-        return nil
-    end
-    return scan(MyChar()) or scan(LocalPlayer:FindFirstChild("Backpack"))
-end
-
-local function EquipBat(tool)
-    if tool == nil then return end
-    pcall(function()
-        local hum = MyHum()
-        if hum and tool.Parent ~= MyChar() then hum:EquipTool(tool) end
-    end)
-end
-
--- Снятие кулдауна как в рабочих хабах: Cooldown.Value + атрибуты + значения
-local function NoCdBat(tool)
-    pcall(function()
-        local cd = tool:FindFirstChild("Cooldown")
-        if cd and (cd:IsA("NumberValue") or cd:IsA("IntValue")) then cd.Value = 0 end
-        for _, an in ipairs({"Cooldown", "AttackCooldown", "CooldownTime", "SwingCooldown", "HitCooldown", "Debounce", "LastAttack", "NextAttack"}) do
-            if tool:GetAttribute(an) ~= nil then tool:SetAttribute(an, 0) end
-        end
-        tool.Enabled = true
-        for _, v in ipairs(tool:GetDescendants()) do
-            if v:IsA("NumberValue") or v:IsA("IntValue") then
-                local n = string.lower(v.Name)
-                if n ~= "durability" and (string.find(n, "cooldown") or string.find(n, "debounce") or string.find(n, "lastattack") or string.find(n, "nextattack") or string.find(n, "swing") or string.find(n, "reload")) then
-                    v.Value = 0
-                end
-            elseif v:IsA("BoolValue") then
-                local n = string.lower(v.Name)
-                if string.find(n, "debounce") or string.find(n, "cooldown") or string.find(n, "attacking") then
-                    v.Value = false
+        if d:IsA("Model") then
+            for _,n in pairs(names) do
+                if string.find(string.lower(d.Name), string.lower(n)) then
+                    local cf=d:GetModelCFrame() return cf.Position
                 end
             end
         end
-    end)
+    end
+    return nil
 end
 
--- Раздув хитбокса тулы (бьёт серверный тач): только вокруг головы гиганта
-local function ExpandBat(tool)
+tpBtn("💧 Лечебница (Swamp Cure)", function() return findByNames({"Swamp","Sadness","Cure","Steam","SafeZone","Safe Zone","Therapy"}) end)
+tpBtn("🏰 Форт", function() return findByNames({"Fort","Fortress"}) end)
+tpBtn("🏠 Спавн", function() return findByNames({"Spawn","Rob"}) end)
+
+local function mkBtn(text, cb)
+    local b=Instance.new("TextButton") b.Size=UDim2.new(0,220,0,32) b.BackgroundColor3=Color3.fromRGB(40,40,55)
+    b.TextColor3=Color3.new(1,1,1) b.Font=Enum.Font.Gotham b.TextSize=12 b.Text=text.." : OFF" b.Parent=scr
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
+    local on=false
+    b.MouseButton1Click:Connect(function() on=not on
+        b.BackgroundColor3 = on and Color3.fromRGB(120,40,200) or Color3.fromRGB(40,40,55)
+        b.Text=text..(on and " : ON" or " : OFF") cb(on,b) end)
+end
+
+-- 1. Speed + NoStun (No Slowdown по-умному)
+RunService.RenderStepped:Connect(function()
     pcall(function()
-        for _, part in tool:GetDescendants() do
-            if part:IsA("BasePart") and part:FindFirstChild("TouchInterest") then
-                part.Size = Vector3.new(KILL_HITBOX, KILL_HITBOX, KILL_HITBOX)
-                part.Massless = true
+        local ch=LocalPlayer.Character local h=ch and ch:FindFirstChildOfClass("Humanoid")
+        if h then
+            if S.Speed then h.WalkSpeed=S.SpeedVal end
+            if S.NoStun then
+                -- игра станит через PlatformStand / Sit / WalkSpeed=0
+                if h.WalkSpeed<10 and S.Speed then h.WalkSpeed=S.SpeedVal end
+                if h.PlatformStand then h.PlatformStand=false end
             end
         end
     end)
-end
+end)
 
--- Анти-заражение: белые блоки по BrickColor (точно как в игре) + по имени
-local function AntiLightSweep()
+-- 2. ESP игроков + дистанция (легкий)
+local function clearTag(n) for _,p in pairs(Players:GetPlayers()) do if p.Character and p.Character:FindFirstChild(n) then p.Character[n]:Destroy() end end end
+RunService.Heartbeat:Connect(function()
+    if not S.ESP then return end
     pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if d:IsA("BasePart") then
-                local isWhite = false
-                pcall(function()
-                    if d.BrickColor.Name == "Institutional white" then isWhite = true end
-                end)
-                if isWhite or string.find(string.lower(d.Name), "infect") then
-                    pcall(function() d.CanTouch = false d.CanQuery = false end)
-                end
-            end
-        end
-    end)
-end
-
--- Взять биту: сначала точный вендор из структуры игры, потом запасные пути
-local function FetchBat()
-    local myHRP = MyHRP()
-    if not myHRP then return false end
-    local wName = GetMainWeaponName()
-    local have = FindBat()
-    if have then EquipBat(have) return true end
-    -- 1. точный вендор: Map.HumanBase.Vendor.BatCollection.
-    -- Тепаемся в коллекцию ПОКА НЕ ВОЗЬМЁТ: если не взяло - теп ещё раз.
-    -- Цикл зовётся каждый тик убийцы, так что добивка бесконечная.
-    pcall(function()
-        local col = workspace.Map.HumanBase.Vendor.BatCollection
-        if col then
-            local hb = col:FindFirstChild("HitBox")
-            local det = col:FindFirstChild("ClickDetector")
-            if hb and hb:IsA("BasePart") and det then
-                local t0 = tick()
-                local tries = 0
-                repeat
-                    task.wait(0.1)
-                    myHRP = MyHRP()
-                    if not myHRP then break end
-                    tries = tries + 1
-                    killerDbg = "вендор: теп " .. tries .. " (ищу " .. wName .. ")"
-                    myHRP.CFrame = hb.CFrame + Vector3.new(0, 3, 0)
-                    myHRP.Velocity = Vector3.new(0, 0, 0)
+        for _,p in pairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("Head") and not p.Character:FindFirstChild("V2ESP") then
+                local isSmile = p.Team and p.Team.Name:lower():find("smil") and true or false
+                local hl=Instance.new("Highlight") hl.Name="V2ESP" hl.FillTransparency=0.65 hl.OutlineTransparency=0
+                hl.FillColor = isSmile and Color3.fromRGB(255,30,30) or Color3.fromRGB(40,255,110)
+                hl.Parent=p.Character
+                local bb=Instance.new("BillboardGui") bb.Name="V2ESP_BB" bb.Size=UDim2.new(0,120,0,32)
+                bb.StudsOffset=Vector3.new(0,3,0) bb.AlwaysOnTop=true bb.Parent=p.Character
+                local tx=Instance.new("TextLabel",bb) tx.Size=UDim2.new(1,0,1,0) tx.BackgroundTransparency=1
+                tx.Font=Enum.Font.GothamBold tx.TextSize=11 tx.TextStrokeTransparency=0.3
+                RunService.RenderStepped:Connect(function()
                     pcall(function()
-                        det.MaxActivationDistance = 9e9
-                        if fireclickdetector then fireclickdetector(det) end
+                        if p.Character and p.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                            local d=(p.Character.HumanoidRootPart.Position-LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+                            tx.Text=string.format("%s [%s] %dm",p.Name,isSmile and "SMILE" or "HUMAN",math.floor(d))
+                            tx.TextColor3=isSmile and Color3.fromRGB(255,70,70) or Color3.fromRGB(70,255,130)
+                        end
                     end)
-                    if FindBat() then
-                        killerDbg = "взял " .. wName .. " с " .. tries .. " попытки"
-                        break
-                    end
-                until tick() - t0 > 8
-            else
-                killerDbg = "вендор: нет HitBox/ClickDetector"
-            end
-        else
-            killerDbg = "вендор: нет BatCollection"
-        end
-    end)
-    local b = FindBat()
-    if b then EquipBat(b) return true end
-    -- 2. запасные: промпты выдачи рядом со спавном
-    if spawnCF then pcall(function() myHRP.CFrame = spawnCF + Vector3.new(0, 3, 0) end) end
-    task.wait(0.5)
-    pcall(function()
-        for _, pr in ipairs(workspace:GetDescendants()) do
-            if pr:IsA("ProximityPrompt") then
-                local an = pr.Parent
-                local nm = an and string.lower(an.Name) or ""
-                local pn = an and an.Parent and string.lower(an.Parent.Name) or ""
-                local function hit(s) return string.find(s, "bat") or string.find(s, "weapon") or string.find(s, "club") or string.find(s, "baseball") or string.find(s, "melee") end
-                if hit(nm) or hit(pn) then
-                    local part = ((an:IsA("BasePart") and an) or (an and an:FindFirstChildWhichIsA("BasePart")))
-                    if part and part:IsA("BasePart") and (spawnCF == nil or (part.Position - spawnCF.Position).Magnitude < 120) then
-                        myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-                        task.wait(0.3)
-                        if fireproximityprompt then
-                            pcall(function() fireproximityprompt(pr) end)
-                        end
-                        task.wait(0.4)
-                    end
-                    if FindBat() then break end
-                end
-            end
-        end
-    end)
-    if FindBat() then EquipBat(FindBat()) return true end
-    -- 3. кликдетекторы выдачи
-    pcall(function()
-        for _, cd in ipairs(workspace:GetDescendants()) do
-            if cd:IsA("ClickDetector") then
-                local an = cd.Parent
-                local nm = an and string.lower(an.Name) or ""
-                if string.find(nm, "bat") or string.find(nm, "weapon") or string.find(nm, "club") or string.find(nm, "baseball") then
-                    local part = ((an:IsA("BasePart") and an) or (an and an:FindFirstChildWhichIsA("BasePart")))
-                    if part and part:IsA("BasePart") and (spawnCF == nil or (part.Position - spawnCF.Position).Magnitude < 120) then
-                        myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-                        task.wait(0.3)
-                        if fireclickdetector then pcall(function() fireclickdetector(cd) end) end
-                        task.wait(0.4)
-                    end
-                    if FindBat() then break end
-                end
-            end
-        end
-    end)
-    if FindBat() then EquipBat(FindBat()) return true end
-    -- 4. лежащие биты: подойти и тронуть
-    pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            local dn = string.lower(d.Name)
-            if d:IsA("Tool") and (IsBatName(dn) or d.Name == wName) then
-                local part = d:FindFirstChild("Handle") or d:FindFirstChildWhichIsA("BasePart")
-                if part and part:IsA("BasePart") then
-                    myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-                    task.wait(0.25)
-                    if firetouchinterest then
-                        pcall(function()
-                            firetouchinterest(myHRP, part, 0)
-                            task.wait()
-                            firetouchinterest(myHRP, part, 1)
-                        end)
-                    end
-                    task.wait(0.25)
-                    if FindBat() then break end
-                end
-            end
-        end
-    end)
-    local b2 = FindBat()
-    if b2 then EquipBat(b2) return true end
-    return false
-end
-
--- Один удар: вис над головой + раздутый хитбокс + SwingEvent в сервер
-local function KillerHitOnce(bat, target)
-    local ch = target.Character
-    if not ch then return end
-    local head = ch:FindFirstChild("Head")
-    local thrp = ch:FindFirstChild("HumanoidRootPart")
-    local myHRP = MyHRP()
-    if not head or not thrp or not myHRP then return end
-    NoCdBat(bat)
-    ExpandBat(bat)
-    local overPos = head.Position + Vector3.new(0, KILL_HEIGHT, 0)
-    pcall(function()
-        myHRP.CFrame = CFrame.new(overPos, head.Position)
-        myHRP.Velocity = Vector3.new(0, 0, 0)
-        myHRP.RotVelocity = Vector3.new(0, 0, 0)
-    end)
-    pcall(function()
-        local se = bat:FindFirstChild("SwingEvent")
-        if se then se:FireServer() end
-    end)
-    pcall(function() bat:Activate() end)
-end
-
--- Главный цикл убийцы
-task.spawn(function()
-    while gui.Parent and IsCurrentGen() do
-        task.wait(KILL_TICK)
-        pcall(function() if KillerStatus then KillerStatus.Text = killerDbg end end)
-        if killerOn or killerAuto then
-            local okK, errK = pcall(function()
-                killStage = "autopick"
-                if killerAuto and (killTarget == nil or killTarget.Parent == nil) then
-                    local gs0 = FindGiants()
-                    if #gs0 > 0 and gs0[1].player then
-                        SetKillTarget(gs0[1].player)
-                    else
-                        killerDbg = "авто: жду гиганта..."
-                        return
-                    end
-                end
-                killStage = "target?"
-                if killTarget == nil or killTarget.Parent == nil then
-                    killerDbg = "нет цели (тап по нику)"
-                    return
-                end
-                killStage = "giant?"
-                if not IsPlayerGiant(killTarget) then
-                    local gs = FindGiants()
-                    if #gs > 0 and gs[1].player then
-                        SetKillTarget(gs[1].player)
-                    else
-                        killTarget = nil
-                        killerDbg = "цель убита, жду..."
-                    end
-                    return
-                end
-                killStage = "smiler?"
-                -- заразили = ресет и дальше мочить
-                if IsSmiler(LocalPlayer) then
-                    killerDbg = "я смайл -> ресет"
-                    RespawnMe()
-                    task.wait(2)
-                    return
-                end
-                killStage = "grab?"
-                -- схватили (гигант или другие) = ресет и дальше
-                if ImGrabbed() then
-                    killerDbg = "схвачен -> ресет"
-                    RespawnMe()
-                    task.wait(2)
-                    return
-                end
-                killStage = "sweep/bat?"
-                killSweepN = killSweepN + 1
-                if killSweepN % 30 == 0 then AntiLightSweep() end
-                local bat = FindBat()
-                if bat == nil then
-                    killStage = "fetch"
-                    fetchN = fetchN + 1
-                    killerDbg = "нет биты -> вендор (" .. fetchN .. ")"
-                    if fetchN == 1 then Notify("Killer", "Бита кончилась, лечу к вендору...") end
-                    FetchBat()
-                    return
-                end
-                killStage = "hit"
-                fetchN = 0
-                EquipBat(bat)
-                KillerHitOnce(bat, killTarget)
-                killStage = "dmg?"
-                killHits = killHits + 1
-                pcall(function()
-                    local th = killTarget.Character and killTarget.Character:FindFirstChildOfClass("Humanoid")
-                    if th then
-                        if killLastHp and th.Health < killLastHp - 0.5 then killDmg = true end
-                        killLastHp = th.Health
-                    end
                 end)
-                killerDbg = "бью " .. killTarget.DisplayName .. " уд:" .. killHits .. " урон:" .. (killDmg and "ДА" or "НЕТ?") .. " HP:" .. (killLastHp and math.floor(killLastHp) or "?")
-            end)
-            if not okK and errK then
-                killerDbg = "ERR@" .. killStage .. ": " .. string.sub(tostring(errK), 1, 90)
-                pcall(function() warn("[Killer] " .. killerDbg) end)
             end
         end
-    end
+    end)
 end)
 
--- ============ SERVER HOP (как Infinite Yield) ============
-local function ServerHop()
-    QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
-    if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
-    -- убийца сам перевыберет цель на новом сервере
-    local placeId = PLACE_ID
-    local cursor = ""
-    local visited = getgenv and getgenv()._GiantRaidVisited or {}
-    local myJob = game.JobId
-    visited[myJob] = true
-    Notify("Giant Raid", "Гигантов нет, ищу сервер 8+ ...")
-    task.wait(1)
-    local ok, err = pcall(function()
-        -- Desc = сначала самые полные. Баг был: Asc брал мелкие 1-5.
-        local tries = 0
-        local bestMedium, bestMediumInfo, bestAny, bestAnyInfo = nil, nil, nil, nil
-        while tries < 5 and bestMedium == nil do
-            tries = tries + 1
-            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
-            local resp = game:HttpGet(url)
-            local data = HttpService:JSONDecode(resp)
-            cursor = data.nextPageCursor or ""
-            if data.data then
-                for _, s in ipairs(data.data) do
-                    if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
-                        if bestAny == nil then bestAny, bestAnyInfo = s.id, s.playing .. "/" .. s.maxPlayers end
-                        if s.playing >= MIN_PLAYERS then
-                            bestMedium, bestMediumInfo = s.id, s.playing .. "/" .. s.maxPlayers
-                            break
+-- 3. Item Radar - ТАКОГО НЕТ НИ У КОГО: зелья, тазер, гигант, оружие
+local itemKeys={"potion","taser","giant","bat","bottle","knife","shotgun","axe","tommy","katana","iron","speed","jump","coin","hammer","branch"}
+RunService.Heartbeat:Connect(function()
+    if not S.ItemRadar then return end
+    pcall(function()
+        for _,o in pairs(Workspace:GetDescendants()) do
+            if o:IsA("Tool") or o:IsA("BasePart") and (o.Name:lower():find("potion") or o.Name:lower():find("taser") or o.Name:lower():find("coin")) then
+                local m=o:IsA("Tool") and o or o.Parent
+                local pos = o:IsA("BasePart") and o.Position or (o:IsA("Tool") and o.Handle and o.Handle.Position)
+                local low=o.Name:lower()
+                local good=false for _,k in pairs(itemKeys) do if low:find(k) then good=true break end end
+                if good and pos and not o:FindFirstChild("V2Item") and (pos-LocalPlayer.Character.HumanoidRootPart.Position).Magnitude<300 then
+                    local bb=Instance.new("BillboardGui") bb.Name="V2Item" bb.Size=UDim2.new(0,100,0,20)
+                    bb.AlwaysOnTop=true bb.Parent=o:IsA("BasePart") and o or (o:FindFirstChild("Handle") or o)
+                    local t=Instance.new("TextLabel",bb) t.Size=UDim2.new(1,0,1,0) t.BackgroundColor3=Color3.fromRGB(0,0,0)
+                    t.BackgroundTransparency=0.4 t.TextColor3=Color3.fromRGB(255,220,80) t.Font=Enum.Font.GothamBold t.TextSize=11 t.Text="⭐ "..o.Name
+                end
+            end
+        end
+    end)
+end)
+
+-- 4. Light ESP - белые лавы (заражающие) и оранжевые (лечащие). НИКТО НЕ ДЕЛАЕТ
+RunService.Heartbeat:Connect(function()
+    if not S.LightESP then return end
+    pcall(function()
+        for _,pt in pairs(Workspace:GetDescendants()) do
+            if pt:IsA("BasePart") and pt.Material==Enum.Material.Neon then
+                local c=pt.Color
+                local isWhite=(c.R>0.9 and c.G>0.9 and c.B>0.9)
+                local isOrange=(c.R>0.9 and c.G>0.4 and c.G<0.7 and c.B<0.2)
+                if (isWhite or isOrange) and pt.Size.Magnitude>10 and not pt:FindFirstChild("V2Light") then
+                    local bb=Instance.new("BillboardGui") bb.Name="V2Light" bb.Size=UDim2.new(0,120,0,22) bb.AlwaysOnTop=true bb.Parent=pt
+                    local t=Instance.new("TextLabel",bb) t.Size=UDim2.new(1,0,1,0) t.BackgroundTransparency=0.3
+                    t.BackgroundColor3=Color3.fromRGB(0,0,0) t.Font=Enum.Font.GothamBold t.TextSize=11
+                    if isWhite then t.Text="☠️ INFECT LIGHT" t.TextColor3=Color3.fromRGB(255,255,255)
+                    else t.Text="🛡️ CURE LIGHT" t.TextColor3=Color3.fromRGB(255,150,0) end
+                end
+            end
+        end
+    end)
+end)
+
+-- 5. Danger Radar - ближайший смайл + предупреждение
+local warnGui=Instance.new("TextLabel") warnGui.Size=UDim2.new(0,220,0,28) warnGui.Position=UDim2.new(0.5,-110,0.1,0)
+warnGui.BackgroundColor3=Color3.fromRGB(180,20,20) warnGui.TextColor3=Color3.new(1,1,1) warnGui.Font=Enum.Font.GothamBold
+warnGui.TextSize=13 warnGui.Visible=false warnGui.Text="⚠️ СМАЙЛ РЯДОМ!" warnGui.Parent=sg Instance.new("UICorner",warnGui).CornerRadius=UDim.new(0,8)
+RunService.Heartbeat:Connect(function()
+    if not S.DangerRadar then warnGui.Visible=false return end
+    pcall(function()
+        local myR=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if not myR then return end
+        local best=9999
+        for _,p in pairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                local sm = p.Team and p.Team.Name:lower():find("smil")
+                if sm or true then -- если команд нет, считаем всех угрозой в радиусе
+                    local d=(p.Character.HumanoidRootPart.Position-myR.Position).Magnitude
+                    if d<best then best=d end
+                end
+            end
+        end
+        if best<22 then warnGui.Visible=true warnGui.Text=string.format("⚠️ СМАЙЛ %.0fm! БЕГИ!",best)
+        else warnGui.Visible=false end
+    end)
+end)
+
+-- 6. AntiGrab + Auto-Escape с ножом (уникально: авто-экип ножа когда схватили)
+RunService.Stepped:Connect(function()
+    if not S.AntiGrabEscape then return end
+    pcall(function()
+        local ch=LocalPlayer.Character local h=ch and ch:FindFirstChildOfClass("Humanoid") if not ch or not h then return end
+        local grabbed = h.Seated -- захват почти всегда сажает
+        -- чистим weld захвата
+        for _,v in pairs(ch:GetDescendants()) do
+            if (v:IsA("Weld") or v:IsA("WeldConstraint")) and (v.Name:lower():find("grab") or v.Name:lower():find("hold") or v.Name:lower():find("grip")) then v:Destroy() end
+        end
+        if grabbed then
+            h.Sit=false h.Jump=true
+            -- авто-взять нож/пистолет (единственное что работает в грабе)
+            for _,t in pairs(LocalPlayer.Backpack:GetChildren()) do
+                if t:IsA("Tool") and (t.Name:lower():find("knife") or t.Name:lower():find("pistol") or t.Name:lower():find("bottle")) then
+                    h:EquipTool(t) t:Activate() break
+                end
+            end
+        end
+    end)
+end)
+
+-- 7. Rescue Aura - авто-спасение друга: бьет смайла который держит человека
+RunService.Heartbeat:Connect(function()
+    if not S.RescueAura then return end
+    pcall(function()
+        local ch=LocalPlayer.Character local myR=ch and ch:FindFirstChild("HumanoidRootPart")
+        local tool=ch and ch:FindFirstChildOfClass("Tool") if not myR then return end
+        if tool then tool:Activate() end
+        for _,p in pairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character then
+                local h=p.Character:FindFirstChildOfClass("Humanoid") local er=p.Character:FindFirstChild("HumanoidRootPart")
+                if h and er and h.Seated and (er.Position-myR.Position).Magnitude<25 then
+                    -- человек в грабе! телепортируем хит к смайлу рядом
+                    for _,s in pairs(Players:GetPlayers()) do
+                        if s~=p and s.Character and s.Character:FindFirstChild("HumanoidRootPart") then
+                            local sr=s.Character.HumanoidRootPart
+                            if (sr.Position-er.Position).Magnitude<12 then
+                                local handle=tool and tool:FindFirstChild("Handle")
+                                if handle then firetouchinterest(sr,handle,0) task.wait() firetouchinterest(sr,handle,1) end
+                            end
                         end
                     end
                 end
             end
-            if cursor == "" or cursor == nil then break end
         end
-        local target, info = bestMedium, bestMediumInfo
-        if target == nil then target, info = bestAny, bestAnyInfo end
-        if target ~= nil then
-            visited[target] = true
-            Notify("Giant Raid", "Хоп на сервер (" .. tostring(info) .. ")")
-            TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer)
-            task.wait(3)
-            return
-        end
-        TeleportService:Teleport(placeId, LocalPlayer)
-    end)
-    if not ok then
-        Notify("Giant Raid", "Хоп не вышел, пробую обычный Teleport")
-        pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
-    end
-end
-
--- ============ MAIN LOOP ============
-task.spawn(function()
-    hopTimer = 0
-    QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
-    while gui.Parent and IsCurrentGen() do
-        task.wait(1)
-        if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-        else
-            if hopNow then hopNow = false hopTimer = 999 end
-            local giants = {}
-            pcall(function() giants = FindGiants() end)
-            if #giants > 0 then
-                hopTimer = 0
-                Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
-                RefreshGiantsList(giants)
-                Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
-                pcall(function()
-                    for _, g in ipairs(giants) do
-                        local c = g.player and g.player.Character or nil
-                        if c and not c:FindFirstChild("_GIANT_HL") then
-                            local hl = Instance.new("Highlight")
-                            hl.Name = "_GIANT_HL"
-                            hl.FillColor = Color3.fromRGB(170, 60, 255)
-                            hl.OutlineColor = Color3.fromRGB(220, 170, 255)
-                            hl.FillTransparency = 0.4
-                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                            hl.Parent = c
-                        end
-                    end
-                end)
-                task.wait(5)
-            else
-                hopTimer = hopTimer + 1
-                RefreshGiantsList({})
-                local left = math.max(0, HOP_DELAY - hopTimer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-                if AUTO_HOP and hopTimer >= HOP_DELAY then
-                    hopTimer = 0
-                    ServerHop()
-                    task.wait(5)
-                end
-            end
-        end
-    end
-end)
-
-Notify("Giant Raid", "v14 запущен. Хоп через " .. HOP_DELAY .. "с")
-print("[GiantRaid] loaded, place " .. PLACE_ID)
-
-]=====]
--- GIANT RAID HOP | Infectious Smile | Delta (auto-queue, no URL needed)
--- Вставь весь файл в Delta -> Execute. Дальше хопы сами подхватываются.
--- S = self source (upvalue SELF set by header). Reconstructs full file, queues it (IY mechanic, no URL needed).
--- NB: closer built dynamically so source never contains the raw closer bytes.
-local _CLOSE = "]" .. "=====]"
-local FULL = "local SELF = [=====[\n" .. SELF .. "\n" .. _CLOSE .. "\n" .. SELF
-
-local SCRIPT_URL = "" -- оставить пустым: работает без pastebin за счёт SELF-очереди
-local PLACE_ID = 5985232436
-local HOP_DELAY = 5
-local AUTO_HOP = true
-local MIN_PLAYERS = 8 -- хопать только на сервера с 8+ игроками (полные/средние)
-
-local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local StarterGui = game:GetService("StarterGui")
-local LocalPlayer = Players.LocalPlayer
-
-if getgenv and getgenv()._GiantRaidRunning then
-    pcall(function() getgenv()._GiantRaidGui:Destroy() end)
-end
-if getgenv then
-    getgenv()._GiantRaidRunning = true
-    getgenv()._GiantRaidVisited = getgenv()._GiantRaidVisited or {}
-end
-
-local function Notify(title, text, dur)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 4})
-    end)
-    print("[GiantRaid] " .. tostring(text))
-end
-
--- ============ QUEUE ON TELEPORT (как Infinite Yield, но без ссылки) ============
-local QueueStatus = "?"
-local function TryQueue(src)
-    local variants = {}
-    pcall(function()
-        if queue_on_teleport then table.insert(variants, queue_on_teleport) end
-    end)
-    pcall(function()
-        if queueonteleport then table.insert(variants, queueonteleport) end
-    end)
-    pcall(function()
-        if syn and syn.queue_on_teleport then table.insert(variants, syn.queue_on_teleport) end
-    end)
-    if getgenv then
-        pcall(function()
-            if getgenv().queue_on_teleport then table.insert(variants, getgenv().queue_on_teleport) end
-        end)
-        pcall(function()
-            if getgenv().queueonteleport then table.insert(variants, getgenv().queueonteleport) end
-        end)
-    end
-    for _, q in ipairs(variants) do
-        local ok = pcall(function() q(src) end)
-        if ok then return true end
-    end
-    return false
-end
-
-local function QueueSelf()
-    local src = FULL
-    if SCRIPT_URL ~= "" then
-        src = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
-    end
-    if TryQueue(src) then
-        QueueStatus = "queue OK"
-        return true
-    else
-        QueueStatus = "queue НЕТ: executor не поддерживает queue_on_teleport. Положи файл в Delta > AutoExecute как запасной вариант."
-        Notify("Giant Raid", QueueStatus, 6)
-        return false
-    end
-end
-
--- ============ ДЕТЕКТ ГИГАНТА-ИГРОКА (NPC игнорим) ============
-local function IsPlayerGiant(plr)
-    if not plr or not plr.Character then return false, nil end
-    local c = plr.Character
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    local hrp = c:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return false, nil end
-    local info = {}
-    -- Гигант: 300 HP (endangered-гигант 400). Обычный endangered-смайл = 200 HP,
-    -- поэтому порог 250: отсекает endangered (200) и бигхедов (100).
-    if hum.MaxHealth and hum.MaxHealth >= 250 then
-        info.reason = "HP:" .. tostring(hum.MaxHealth)
-        return true, info
-    end
-    if c:GetAttribute("Giant") == true or c:GetAttribute("IsGiant") == true
-    or plr:GetAttribute("Giant") == true or plr:GetAttribute("IsGiant") == true then
-        info.reason = "attr"
-        return true, info
-    end
-    if c:FindFirstChild("Giant") or c:FindFirstChild("IsGiant") or c:FindFirstChild("GiantPotion") then
-        info.reason = "value"
-        return true, info
-    end
-    -- Тело x2 у гиганта (HRP ~4). Endangered +30% (~2.6) не проходит порог 3.0.
-    if hrp.Size.Y > 3.0 then
-        info.reason = "size:" .. string.format("%.1f", hrp.Size.Y)
-        return true, info
-    end
-    -- Детект по голове УБРАН: у обычных смайлов бывает шанс-бигхед (большая голова при 100 HP) - это не гигант.
-    local hasGlow = false
-    for _, d in ipairs(c:GetDescendants()) do
-        if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
-            hasGlow = true
-            break
-        end
-    end
-    -- Фиолетовое свечение гиганта + большое тело. У endangered красные партиклы
-    -- и мелкое тело (~2.6) - порог 3.0 их отсекает.
-    if hasGlow and hrp.Size.Y > 3.0 then
-        info.reason = "glow+size"
-        return true, info
-    end
-    return false, nil
-end
-
-local function FindGiants()
-    local found = {}
-    local seen = {} -- защита от дублей одного игрока
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and not seen[p] then
-            local ok, info = IsPlayerGiant(p)
-            if ok then
-                seen[p] = true
-                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-                local hum = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
-                table.insert(found, {
-                    name = p.DisplayName .. " (@" .. p.Name .. ")",
-                    player = p,
-                    hrp = hrp,
-                    hp = hum and math.floor(hum.Health) or 0,
-                    maxHp = hum and math.floor(hum.MaxHealth) or 0,
-                    reason = info and info.reason or "?",
-                })
-            end
-        end
-    end
-    return found
-end
-
--- Цель убийцы гиганта (назначается тапом по нику / чатом).
--- ВАЖНО: всё состояние - ДО GUI, иначе кнопки видят глобалы, а цикл - локалки.
-local TargetLabel = nil
-local KillerStatus = nil
-local killerOn = false
-local killTarget = nil
-local killerAuto = false
-local killerAutoBtn = nil
-local killerDbg = "выкл"
-local killHits = 0
-local killDmg = false
-local killLastHp = nil
-local killStage = "?" -- стадия для трассировки ошибки
-local function SetKillerAuto(on)
-    killerAuto = on
-    pcall(function() if killerAutoBtn then killerAutoBtn.Text = "Авто-убийца: " .. (on and "ВКЛ" or "ВЫКЛ") end end)
-    Notify("Killer", "Авто-убийца " .. (on and "ВКЛ" or "ВЫКЛ"))
-end
-local function SetKillTarget(plr)
-    killTarget = plr
-    killerOn = true
-    killHits = 0
-    killDmg = false
-    killLastHp = nil
-    killerDbg = "цель: " .. (plr and plr.DisplayName or "?")
-    pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. (plr and plr.DisplayName or "?") end end)
-end
-
--- ============ GUI ============
--- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
--- хопать и кнопки нового "не работают"). Работает даже без getgenv.
-pcall(function()
-    local targets = {}
-    if gethui then local h = gethui() if h then table.insert(targets, h) end end
-    pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then table.insert(targets, pg) end
-    for _, par in ipairs(targets) do
-        for _, g in ipairs(par:GetChildren()) do
-            if g:IsA("ScreenGui") and g.Name == "GiantRaidHop" then
-                g:Destroy()
-            end
-        end
-    end
-end)
--- Поколение запуска: старые циклы увидят чужой номер и выйдут (общая память через Workspace)
-local myGen = 0
-pcall(function()
-    local g = (workspace:GetAttribute("GiantRaidGen") or 0) + 1
-    workspace:SetAttribute("GiantRaidGen", g)
-    myGen = g
-end)
-local function IsCurrentGen()
-    if myGen == 0 then return true end
-    local ok, v = pcall(function() return workspace:GetAttribute("GiantRaidGen") end)
-    return ok and v == myGen
-end
-local gui = Instance.new("ScreenGui")
-gui.Name = "GiantRaidHop"
-gui.ResetOnSpawn = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.DisplayOrder = 999
-gui.Enabled = true
-pcall(function() gui.IgnoreGuiInset = true end)
--- PlayerGui ПЕРВЫМ: в нём тапы работают всегда. gethui/CoreGui на части
--- Delta глотают ввод - кнопки видно, но нажатия не доходят.
-local parentOk = false
-pcall(function()
-    local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
-    if pg then gui.Parent = pg parentOk = true end
-end)
-if not parentOk then
-    pcall(function()
-        local h = nil
-        if gethui then h = gethui() end
-        if h then gui.Parent = h parentOk = true end
-    end)
-end
-if not parentOk or not gui.Parent then
-    pcall(function() gui.Parent = game:GetService("CoreGui") parentOk = true end)
-end
-if not parentOk or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-if getgenv then getgenv()._GiantRaidGui = gui end
-
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 280, 0, 366)
-Main.Position = UDim2.new(0.5, -140, 0.15, 0)
-Main.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-Main.BorderSizePixel = 0
-Main.Active = false
-Main.Draggable = false
-Main.ClipsDescendants = false
-Main.Parent = gui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
-local st = Instance.new("UIStroke", Main)
-st.Color = Color3.fromRGB(170, 100, 255)
-st.Thickness = 2
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -10, 0, 28)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop v14"
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 15
-Title.TextColor3 = Color3.new(1, 1, 1)
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Active = true
-Title.Parent = Main
--- Ручной драг за заголовок: штатный Draggable фрейма на части устройств глотает тапы
-do
-    local dragging = false
-    local dragStart, frameStart = nil, nil
-    Title.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            frameStart = Main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            Main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + d.X, frameStart.Y.Scale, frameStart.Y.Offset + d.Y)
-        end
-    end)
-end
-
-local PageRaid = Instance.new("Frame")
-PageRaid.Name = "PageRaid"
-PageRaid.Size = UDim2.new(1, -16, 0, 294)
-PageRaid.Position = UDim2.new(0, 8, 0, 64)
-PageRaid.BackgroundTransparency = 1
-PageRaid.BorderSizePixel = 0
-PageRaid.ClipsDescendants = false
-PageRaid.Parent = Main
-
-local PageFling = Instance.new("Frame")
-PageFling.Name = "PageFling"
-PageFling.Size = UDim2.new(1, -16, 0, 294)
-PageFling.Position = UDim2.new(0, 8, 0, 64)
-PageFling.BackgroundTransparency = 1
-PageFling.BorderSizePixel = 0
-PageFling.ClipsDescendants = false
-PageFling.Visible = false
-PageFling.Parent = Main
-
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -16, 0, 60)
-Status.Position = UDim2.new(0, 8, 0, 0)
-Status.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-Status.Font = Enum.Font.Gotham
-Status.TextSize = 12
-Status.TextColor3 = Color3.new(1, 1, 1)
-Status.TextWrapped = true
-Status.Text = "Сканирую..."
-Status.Active = false
-Status.BorderSizePixel = 0
-Status.Parent = PageRaid
-Instance.new("UICorner", Status).CornerRadius = UDim.new(0, 8)
-
-local Hints = Instance.new("TextLabel")
-Hints.Size = UDim2.new(1, -16, 0, 150)
-Hints.Position = UDim2.new(0, 8, 0, 134)
-Hints.BackgroundTransparency = 1
-Hints.Font = Enum.Font.Gotham
-Hints.TextSize = 11
-Hints.TextColor3 = Color3.fromRGB(170, 170, 190)
-Hints.TextWrapped = true
-Hints.TextXAlignment = Enum.TextXAlignment.Left
-Hints.TextYAlignment = Enum.TextYAlignment.Top
-Hints.Active = false
-Hints.Text = "Чат-команды:\n/hop off | on | now\n/kill ник | /killstop\n\nАвтохоп: 5с, сервера 8+.\nУбийца: вкладка Убийца, тап по нику."
-Hints.Parent = PageRaid
-
-local function Btn(txt, y, cb, parent, half)
-    local b = Instance.new("TextButton")
-    parent = parent or Main
-    if half == "left" then
-        b.Size = UDim2.new(0.5, -10, 0, 30)
-        b.Position = UDim2.new(0, 8, 0, y)
-    elseif half == "right" then
-        b.Size = UDim2.new(0.5, -10, 0, 30)
-        b.Position = UDim2.new(0.5, 2, 0, y)
-    else
-        b.Size = UDim2.new(1, -16, 0, 30)
-        b.Position = UDim2.new(0, 8, 0, y)
-    end
-    b.BackgroundColor3 = Color3.fromRGB(60, 50, 90)
-    b.Text = txt
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 13
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.AutoButtonColor = true
-    b.Active = true
-    b.BorderSizePixel = 0
-    b.ClipsDescendants = false
-    b.ZIndex = 5
-    b.Parent = parent
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    -- Три сигнала + сырой ввод: хоть один да дойдёт на любом executor'е.
-    -- tick-дебаунс гасит двойное срабатывание за один тап.
-    -- Зелёная вспышка = тап дошёл (диагностика).
-    local baseColor = b.BackgroundColor3
-    local last = 0
-    local function fire()
-        local now = tick()
-        if now - last < 0.4 then return end
-        last = now
-        pcall(function()
-            b.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
-            task.delay(0.15, function()
-                pcall(function() b.BackgroundColor3 = baseColor end)
-            end)
-        end)
-        pcall(cb)
-    end
-    b.Activated:Connect(fire)
-    b.MouseButton1Click:Connect(fire)
-    b.TouchTap:Connect(fire)
-    b.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            fire()
-        end
-    end)
-    return b
-end
-
-local TabRaidBtn, TabFlingBtn = nil, nil
-local function ShowTab(which)
-    local raid = (which ~= "fling")
-    PageRaid.Visible = raid
-    PageFling.Visible = not raid
-    if TabRaidBtn then TabRaidBtn.BackgroundColor3 = raid and Color3.fromRGB(90, 70, 130) or Color3.fromRGB(40, 35, 60) end
-    if TabFlingBtn then TabFlingBtn.BackgroundColor3 = (not raid) and Color3.fromRGB(90, 70, 130) or Color3.fromRGB(40, 35, 60) end
-end
-TabRaidBtn = Btn("Рейд", 32, function() ShowTab("raid") end, Main, "left")
-TabFlingBtn = Btn("Убийца", 32, function() ShowTab("fling") end, Main, "right")
-ShowTab("raid")
-
-local running = true
-local hopNow = false
-local hopTimer = 0
-Btn("Автохоп сейчас", 66, function() hopNow = true end, PageRaid)
-Btn("Стоп / Старт", 100, function()
-    running = not running
-    Notify("Giant Raid", running and "Поиск продолжен" or "Поиск остановлен")
-end, PageRaid)
-
--- Вкладка Флинг: цель + список ников (тап = флинг)
-TargetLabel = Instance.new("TextLabel")
-TargetLabel.Size = UDim2.new(1, -16, 0, 24)
-TargetLabel.Position = UDim2.new(0, 8, 0, 0)
-TargetLabel.BackgroundTransparency = 1
-TargetLabel.Font = Enum.Font.GothamBold
-TargetLabel.TextSize = 12
-TargetLabel.TextColor3 = Color3.fromRGB(220, 170, 255)
-TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
-TargetLabel.Active = false
-TargetLabel.Text = "Цель: нет (тап по нику)"
-TargetLabel.Parent = PageFling
-KillerStatus = Instance.new("TextLabel")
-KillerStatus.Size = UDim2.new(1, -16, 0, 44)
-KillerStatus.Position = UDim2.new(0, 8, 0, 22)
-KillerStatus.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-KillerStatus.BorderSizePixel = 0
-KillerStatus.Font = Enum.Font.Gotham
-KillerStatus.TextSize = 11
-KillerStatus.TextColor3 = Color3.fromRGB(255, 220, 120)
-KillerStatus.TextWrapped = true
-KillerStatus.TextXAlignment = Enum.TextXAlignment.Left
-KillerStatus.TextYAlignment = Enum.TextYAlignment.Top
-KillerStatus.Active = false
-KillerStatus.Text = "выкл"
-KillerStatus.Parent = PageFling
-Instance.new("UICorner", KillerStatus).CornerRadius = UDim.new(0, 6)
-killerAutoBtn = Btn("Авто-убийца: ВЫКЛ", 70, function() SetKillerAuto(not killerAuto) end, PageFling)
-Btn("Стоп убийца", 104, function() killerOn = false; killTarget = nil; killerDbg = "выкл"; Notify("Killer", "Остановлен") end, PageFling)
-
--- Запасное управление через чат (если тапы по кнопкам не доходят):
--- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
-LocalPlayer.Chatted:Connect(function(msg)
-    local m = string.lower(tostring(msg))
-    if m == "/hop off" or m == "/ahop off" then
-        AUTO_HOP = false
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВЫКЛ (чат)")
-    elseif m == "/hop on" or m == "/ahop on" then
-        AUTO_HOP = true
-        hopTimer = 0
-        Notify("Giant Raid", "Авто-хоп ВКЛ (чат)")
-    elseif m == "/hop now" or m == "/ghop" then
-        hopNow = true
-        Notify("Giant Raid", "Хопаю сейчас (чат)")
-    elseif m == "/killstop" or m == "/unfling" then
-        killerOn = false; killTarget = nil; killerDbg = "выкл"; Notify("Killer", "Остановлен (чат)")
-    elseif m == "/killer on" then
-        SetKillerAuto(true)
-    elseif m == "/killer off" then
-        SetKillerAuto(false)
-    else
-        local nick = string.match(m, "^/kill%s+(.+)$")
-        if nick then
-            nick = string.gsub(string.gsub(nick, "^%s+", ""), "%s+$", "")
-            local target = nil
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and (string.lower(p.Name) == nick or string.lower(p.DisplayName) == nick) then
-                    target = p
-                    break
-                end
-            end
-            if target == nil then
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and (string.find(string.lower(p.Name), nick, 1, true) or string.find(string.lower(p.DisplayName), nick, 1, true)) then
-                        target = p
-                        break
-                    end
-                end
-            end
-            if target then
-                SetKillTarget(target)
-                Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью (чат)")
-            else
-                Notify("Killer", "Не нашёл игрока: " .. nick)
-            end
-        end
-    end
-end)
-
-local ListTitle = Instance.new("TextLabel")
-ListTitle.Size = UDim2.new(1, -16, 0, 18)
-ListTitle.Position = UDim2.new(0, 8, 0, 138)
-ListTitle.BackgroundTransparency = 1
-ListTitle.Text = "Гиганты на сервере: 0"
-ListTitle.Font = Enum.Font.GothamBold
-ListTitle.TextSize = 12
-ListTitle.TextColor3 = Color3.fromRGB(220, 170, 255)
-ListTitle.TextXAlignment = Enum.TextXAlignment.Left
-ListTitle.Parent = PageFling
-
--- Обычный Frame вместо ScrollingFrame: скролл на телефоне конфликтовал с тапами
-local GiantsList = Instance.new("Frame")
-GiantsList.Size = UDim2.new(1, -16, 0, 128)
-GiantsList.Position = UDim2.new(0, 8, 0, 158)
-GiantsList.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-GiantsList.BorderSizePixel = 0
-GiantsList.Active = false
-GiantsList.ClipsDescendants = true
-GiantsList.Parent = PageFling
-Instance.new("UICorner", GiantsList).CornerRadius = UDim.new(0, 8)
-local ListLayout = Instance.new("UIListLayout", GiantsList)
-ListLayout.Padding = UDim.new(0, 4)
-ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local activeRows = {} -- созданные строки: чистим точно их, дубли исключены
-local function RefreshGiantsList(giants)
-    pcall(function()
-        for _, r in ipairs(activeRows) do
-            pcall(function() r:Destroy() end)
-        end
-        activeRows = {}
-        for _, ch in ipairs(GiantsList:GetChildren()) do
-            if ch.Name == "_GRow" then
-                pcall(function() ch:Destroy() end)
-            end
-        end
-        ListTitle.Text = "Гиганты на сервере: " .. #giants
-        local maxRows = 4 -- 4x28 + отступы влезают в 128px
-        for i = 1, math.min(#giants, maxRows) do
-            local g = giants[i]
-            local l = Instance.new("TextButton")
-            l.Name = "_GRow"
-            l.Size = UDim2.new(1, -8, 0, 28)
-            l.BackgroundColor3 = Color3.fromRGB(50, 35, 75)
-            l.BorderSizePixel = 0
-            l.Active = true
-            l.AutoButtonColor = true
-            l.Font = Enum.Font.GothamBold
-            l.TextSize = 11
-            l.TextColor3 = Color3.new(1, 1, 1)
-            l.TextWrapped = true
-            l.TextTruncate = Enum.TextTruncate.AtEnd
-            local mark = (killerOn and killTarget == g.player) and "> " or ""
-            l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
-            l.Parent = GiantsList
-            table.insert(activeRows, l)
-            Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
-            local target = g.player
-            local t0 = 0
-            local function onTap()
-                local now = tick()
-                if now - t0 < 0.4 then return end
-                t0 = now
-                if target == nil then return end
-                if killerOn and killTarget == target then
-                    killerOn = false; killTarget = nil; killerDbg = "выкл"
-                    Notify("Killer", "Остановлен")
-                else
-                    SetKillTarget(target)
-                    Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью")
-                end
-            end
-            l.Activated:Connect(onTap)
-            l.MouseButton1Click:Connect(onTap)
-            l.TouchTap:Connect(onTap)
-        end
-        if #giants > maxRows then
-            ListTitle.Text = "Гиганты: " .. #giants .. " (первые " .. maxRows .. ")"
-        end
-    end)
-end
-
--- ============ УБИЙЦА ГИГАНТА (по устройству игры) ============
--- Проверено по рабочим хабам, не наугад:
--- * урон: tool.SwingEvent:FireServer() + tool:Activate()
--- * кулдаун: tool.Cooldown.Value = 0 (NumberValue прямо в туле)
--- * хитбокс: частям тулы с TouchInterest ставим Size (бьёт серверный тач)
--- * выдача: workspace.Map.HumanBase.Vendor.BatCollection (HitBox + ClickDetector)
--- * своё оружие: LocalPlayer.Marketplace["Main Weapon"].Equipped.Value
--- * белые блоки: BrickColor.Name == "Institutional white"
--- * ресет при заражении/захвате: Humanoid.Health = 0 (респавн человеком)
--- Тактика: вис над головой гиганта, хитбокс только вокруг неё,
--- SwingEvent каждые ~0.08с. Других смайлов рядом с головой обычно нет.
-local KILL_HEIGHT = 3.5 -- высота над головой гиганта
-local KILL_TICK = 0.08 -- темп ударов
-local KILL_HITBOX = 10 -- хитбокс биты вокруг головы гиганта
-local spawnCF = nil
-local killSweepN = 0
-local fetchN = 0
-
-pcall(function()
-    local m = workspace:FindFirstChild("Map")
-    if m and m:FindFirstChild("AntiHack") then m.AntiHack:Destroy() end
-end)
-
-task.spawn(function()
-    pcall(function()
-        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local hrp = c:WaitForChild("HumanoidRootPart", 10)
-        if hrp then spawnCF = hrp.CFrame end
     end)
 end)
 
-local function MyChar() return LocalPlayer.Character end
-local function MyHRP() local c = MyChar() return c and c:FindFirstChild("HumanoidRootPart") end
-local function MyHum() local c = MyChar() return c and c:FindFirstChildOfClass("Humanoid") end
-
-local function GetMainWeaponName()
-    local ok, w = pcall(function()
-        local v = LocalPlayer.Marketplace["Main Weapon"].Equipped.Value
-        if v and v ~= "Default" then return v end
-        return "Bat"
-    end)
-    if ok and w and w ~= "" then return w end
-    return "Bat"
-end
-
-local function ImGrabbed()
-    local c = MyChar()
-    if not c then return false end
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Seated then return true end
-    if c:GetAttribute("Grabbed") == true then return true end
-    local hrp = c:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        for _, v in ipairs(hrp:GetChildren()) do
-            if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then return true end
-        end
-    end
-    return false
-end
-
-local function RespawnMe()
+-- 8. Coin Farm - авто-подбор монет гиганта
+RunService.Heartbeat:Connect(function()
+    if not S.CoinFarm then return end
     pcall(function()
-        local hum = MyHum()
-        if hum then hum.Health = 0 end
-    end)
-    pcall(function()
-        local c = MyChar()
-        if c then c:BreakJoints() end
-    end)
-end
-
-local function IsBatName(n)
-    return string.find(n, "bat") or string.find(n, "club") or string.find(n, "baseball") or string.find(n, "wooden")
-end
-
-local function FindBat()
-    local wName = GetMainWeaponName()
-    local function scan(par)
-        if par then
-            for _, t in ipairs(par:GetChildren()) do
-                if t:IsA("Tool") and (t.Name == wName or IsBatName(string.lower(t.Name))) then return t end
+        local myR=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if not myR then return end
+        for _,o in pairs(Workspace:GetDescendants()) do
+            if o:IsA("BasePart") and o.Name:lower():find("coin") and (o.Position-myR.Position).Magnitude<40 then
+                firetouchinterest(myR,o,0) task.wait() firetouchinterest(myR,o,1)
             end
-        end
-        return nil
-    end
-    return scan(MyChar()) or scan(LocalPlayer:FindFirstChild("Backpack"))
-end
-
-local function EquipBat(tool)
-    if tool == nil then return end
-    pcall(function()
-        local hum = MyHum()
-        if hum and tool.Parent ~= MyChar() then hum:EquipTool(tool) end
-    end)
-end
-
--- Снятие кулдауна как в рабочих хабах: Cooldown.Value + атрибуты + значения
-local function NoCdBat(tool)
-    pcall(function()
-        local cd = tool:FindFirstChild("Cooldown")
-        if cd and (cd:IsA("NumberValue") or cd:IsA("IntValue")) then cd.Value = 0 end
-        for _, an in ipairs({"Cooldown", "AttackCooldown", "CooldownTime", "SwingCooldown", "HitCooldown", "Debounce", "LastAttack", "NextAttack"}) do
-            if tool:GetAttribute(an) ~= nil then tool:SetAttribute(an, 0) end
-        end
-        tool.Enabled = true
-        for _, v in ipairs(tool:GetDescendants()) do
-            if v:IsA("NumberValue") or v:IsA("IntValue") then
-                local n = string.lower(v.Name)
-                if n ~= "durability" and (string.find(n, "cooldown") or string.find(n, "debounce") or string.find(n, "lastattack") or string.find(n, "nextattack") or string.find(n, "swing") or string.find(n, "reload")) then
-                    v.Value = 0
-                end
-            elseif v:IsA("BoolValue") then
-                local n = string.lower(v.Name)
-                if string.find(n, "debounce") or string.find(n, "cooldown") or string.find(n, "attacking") then
-                    v.Value = false
-                end
+            if o:IsA("Tool") and o.Name:lower():find("coin") and o:FindFirstChild("Handle") and (o.Handle.Position-myR.Position).Magnitude<40 then
+                firetouchinterest(myR,o.Handle,0) task.wait() firetouchinterest(myR,o.Handle,1)
             end
         end
     end)
-end
-
--- Раздув хитбокса тулы (бьёт серверный тач): только вокруг головы гиганта
-local function ExpandBat(tool)
-    pcall(function()
-        for _, part in tool:GetDescendants() do
-            if part:IsA("BasePart") and part:FindFirstChild("TouchInterest") then
-                part.Size = Vector3.new(KILL_HITBOX, KILL_HITBOX, KILL_HITBOX)
-                part.Massless = true
-            end
-        end
-    end)
-end
-
--- Анти-заражение: белые блоки по BrickColor (точно как в игре) + по имени
-local function AntiLightSweep()
-    pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if d:IsA("BasePart") then
-                local isWhite = false
-                pcall(function()
-                    if d.BrickColor.Name == "Institutional white" then isWhite = true end
-                end)
-                if isWhite or string.find(string.lower(d.Name), "infect") then
-                    pcall(function() d.CanTouch = false d.CanQuery = false end)
-                end
-            end
-        end
-    end)
-end
-
--- Взять биту: сначала точный вендор из структуры игры, потом запасные пути
-local function FetchBat()
-    local myHRP = MyHRP()
-    if not myHRP then return false end
-    local wName = GetMainWeaponName()
-    local have = FindBat()
-    if have then EquipBat(have) return true end
-    -- 1. точный вендор: Map.HumanBase.Vendor.BatCollection.
-    -- Тепаемся в коллекцию ПОКА НЕ ВОЗЬМЁТ: если не взяло - теп ещё раз.
-    -- Цикл зовётся каждый тик убийцы, так что добивка бесконечная.
-    pcall(function()
-        local col = workspace.Map.HumanBase.Vendor.BatCollection
-        if col then
-            local hb = col:FindFirstChild("HitBox")
-            local det = col:FindFirstChild("ClickDetector")
-            if hb and hb:IsA("BasePart") and det then
-                local t0 = tick()
-                local tries = 0
-                repeat
-                    task.wait(0.1)
-                    myHRP = MyHRP()
-                    if not myHRP then break end
-                    tries = tries + 1
-                    killerDbg = "вендор: теп " .. tries .. " (ищу " .. wName .. ")"
-                    myHRP.CFrame = hb.CFrame + Vector3.new(0, 3, 0)
-                    myHRP.Velocity = Vector3.new(0, 0, 0)
-                    pcall(function()
-                        det.MaxActivationDistance = 9e9
-                        if fireclickdetector then fireclickdetector(det) end
-                    end)
-                    if FindBat() then
-                        killerDbg = "взял " .. wName .. " с " .. tries .. " попытки"
-                        break
-                    end
-                until tick() - t0 > 8
-            else
-                killerDbg = "вендор: нет HitBox/ClickDetector"
-            end
-        else
-            killerDbg = "вендор: нет BatCollection"
-        end
-    end)
-    local b = FindBat()
-    if b then EquipBat(b) return true end
-    -- 2. запасные: промпты выдачи рядом со спавном
-    if spawnCF then pcall(function() myHRP.CFrame = spawnCF + Vector3.new(0, 3, 0) end) end
-    task.wait(0.5)
-    pcall(function()
-        for _, pr in ipairs(workspace:GetDescendants()) do
-            if pr:IsA("ProximityPrompt") then
-                local an = pr.Parent
-                local nm = an and string.lower(an.Name) or ""
-                local pn = an and an.Parent and string.lower(an.Parent.Name) or ""
-                local function hit(s) return string.find(s, "bat") or string.find(s, "weapon") or string.find(s, "club") or string.find(s, "baseball") or string.find(s, "melee") end
-                if hit(nm) or hit(pn) then
-                    local part = ((an:IsA("BasePart") and an) or (an and an:FindFirstChildWhichIsA("BasePart")))
-                    if part and part:IsA("BasePart") and (spawnCF == nil or (part.Position - spawnCF.Position).Magnitude < 120) then
-                        myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-                        task.wait(0.3)
-                        if fireproximityprompt then
-                            pcall(function() fireproximityprompt(pr) end)
-                        end
-                        task.wait(0.4)
-                    end
-                    if FindBat() then break end
-                end
-            end
-        end
-    end)
-    if FindBat() then EquipBat(FindBat()) return true end
-    -- 3. кликдетекторы выдачи
-    pcall(function()
-        for _, cd in ipairs(workspace:GetDescendants()) do
-            if cd:IsA("ClickDetector") then
-                local an = cd.Parent
-                local nm = an and string.lower(an.Name) or ""
-                if string.find(nm, "bat") or string.find(nm, "weapon") or string.find(nm, "club") or string.find(nm, "baseball") then
-                    local part = ((an:IsA("BasePart") and an) or (an and an:FindFirstChildWhichIsA("BasePart")))
-                    if part and part:IsA("BasePart") and (spawnCF == nil or (part.Position - spawnCF.Position).Magnitude < 120) then
-                        myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-                        task.wait(0.3)
-                        if fireclickdetector then pcall(function() fireclickdetector(cd) end) end
-                        task.wait(0.4)
-                    end
-                    if FindBat() then break end
-                end
-            end
-        end
-    end)
-    if FindBat() then EquipBat(FindBat()) return true end
-    -- 4. лежащие биты: подойти и тронуть
-    pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            local dn = string.lower(d.Name)
-            if d:IsA("Tool") and (IsBatName(dn) or d.Name == wName) then
-                local part = d:FindFirstChild("Handle") or d:FindFirstChildWhichIsA("BasePart")
-                if part and part:IsA("BasePart") then
-                    myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-                    task.wait(0.25)
-                    if firetouchinterest then
-                        pcall(function()
-                            firetouchinterest(myHRP, part, 0)
-                            task.wait()
-                            firetouchinterest(myHRP, part, 1)
-                        end)
-                    end
-                    task.wait(0.25)
-                    if FindBat() then break end
-                end
-            end
-        end
-    end)
-    local b2 = FindBat()
-    if b2 then EquipBat(b2) return true end
-    return false
-end
-
--- Один удар: вис над головой + раздутый хитбокс + SwingEvent в сервер
-local function KillerHitOnce(bat, target)
-    local ch = target.Character
-    if not ch then return end
-    local head = ch:FindFirstChild("Head")
-    local thrp = ch:FindFirstChild("HumanoidRootPart")
-    local myHRP = MyHRP()
-    if not head or not thrp or not myHRP then return end
-    NoCdBat(bat)
-    ExpandBat(bat)
-    local overPos = head.Position + Vector3.new(0, KILL_HEIGHT, 0)
-    pcall(function()
-        myHRP.CFrame = CFrame.new(overPos, head.Position)
-        myHRP.Velocity = Vector3.new(0, 0, 0)
-        myHRP.RotVelocity = Vector3.new(0, 0, 0)
-    end)
-    pcall(function()
-        local se = bat:FindFirstChild("SwingEvent")
-        if se then se:FireServer() end
-    end)
-    pcall(function() bat:Activate() end)
-end
-
--- Главный цикл убийцы
-task.spawn(function()
-    while gui.Parent and IsCurrentGen() do
-        task.wait(KILL_TICK)
-        pcall(function() if KillerStatus then KillerStatus.Text = killerDbg end end)
-        if killerOn or killerAuto then
-            local okK, errK = pcall(function()
-                killStage = "autopick"
-                if killerAuto and (killTarget == nil or killTarget.Parent == nil) then
-                    local gs0 = FindGiants()
-                    if #gs0 > 0 and gs0[1].player then
-                        SetKillTarget(gs0[1].player)
-                    else
-                        killerDbg = "авто: жду гиганта..."
-                        return
-                    end
-                end
-                killStage = "target?"
-                if killTarget == nil or killTarget.Parent == nil then
-                    killerDbg = "нет цели (тап по нику)"
-                    return
-                end
-                killStage = "giant?"
-                if not IsPlayerGiant(killTarget) then
-                    local gs = FindGiants()
-                    if #gs > 0 and gs[1].player then
-                        SetKillTarget(gs[1].player)
-                    else
-                        killTarget = nil
-                        killerDbg = "цель убита, жду..."
-                    end
-                    return
-                end
-                killStage = "smiler?"
-                -- заразили = ресет и дальше мочить
-                if IsSmiler(LocalPlayer) then
-                    killerDbg = "я смайл -> ресет"
-                    RespawnMe()
-                    task.wait(2)
-                    return
-                end
-                killStage = "grab?"
-                -- схватили (гигант или другие) = ресет и дальше
-                if ImGrabbed() then
-                    killerDbg = "схвачен -> ресет"
-                    RespawnMe()
-                    task.wait(2)
-                    return
-                end
-                killStage = "sweep/bat?"
-                killSweepN = killSweepN + 1
-                if killSweepN % 30 == 0 then AntiLightSweep() end
-                local bat = FindBat()
-                if bat == nil then
-                    killStage = "fetch"
-                    fetchN = fetchN + 1
-                    killerDbg = "нет биты -> вендор (" .. fetchN .. ")"
-                    if fetchN == 1 then Notify("Killer", "Бита кончилась, лечу к вендору...") end
-                    FetchBat()
-                    return
-                end
-                killStage = "hit"
-                fetchN = 0
-                EquipBat(bat)
-                KillerHitOnce(bat, killTarget)
-                killStage = "dmg?"
-                killHits = killHits + 1
-                pcall(function()
-                    local th = killTarget.Character and killTarget.Character:FindFirstChildOfClass("Humanoid")
-                    if th then
-                        if killLastHp and th.Health < killLastHp - 0.5 then killDmg = true end
-                        killLastHp = th.Health
-                    end
-                end)
-                killerDbg = "бью " .. killTarget.DisplayName .. " уд:" .. killHits .. " урон:" .. (killDmg and "ДА" or "НЕТ?") .. " HP:" .. (killLastHp and math.floor(killLastHp) or "?")
-            end)
-            if not okK and errK then
-                killerDbg = "ERR@" .. killStage .. ": " .. string.sub(tostring(errK), 1, 90)
-                pcall(function() warn("[Killer] " .. killerDbg) end)
-            end
-        end
-    end
 end)
 
--- ============ SERVER HOP (как Infinite Yield) ============
-local function ServerHop()
-    QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
-    if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
-    -- убийца сам перевыберет цель на новом сервере
-    local placeId = PLACE_ID
-    local cursor = ""
-    local visited = getgenv and getgenv()._GiantRaidVisited or {}
-    local myJob = game.JobId
-    visited[myJob] = true
-    Notify("Giant Raid", "Гигантов нет, ищу сервер 8+ ...")
-    task.wait(1)
-    local ok, err = pcall(function()
-        -- Desc = сначала самые полные. Баг был: Asc брал мелкие 1-5.
-        local tries = 0
-        local bestMedium, bestMediumInfo, bestAny, bestAnyInfo = nil, nil, nil, nil
-        while tries < 5 and bestMedium == nil do
-            tries = tries + 1
-            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
-            local resp = game:HttpGet(url)
-            local data = HttpService:JSONDecode(resp)
-            cursor = data.nextPageCursor or ""
-            if data.data then
-                for _, s in ipairs(data.data) do
-                    if s.playing and s.maxPlayers and s.playing < s.maxPlayers and s.id ~= myJob and not visited[s.id] then
-                        if bestAny == nil then bestAny, bestAnyInfo = s.id, s.playing .. "/" .. s.maxPlayers end
-                        if s.playing >= MIN_PLAYERS then
-                            bestMedium, bestMediumInfo = s.id, s.playing .. "/" .. s.maxPlayers
-                            break
-                        end
-                    end
-                end
-            end
-            if cursor == "" or cursor == nil then break end
-        end
-        local target, info = bestMedium, bestMediumInfo
-        if target == nil then target, info = bestAny, bestAnyInfo end
-        if target ~= nil then
-            visited[target] = true
-            Notify("Giant Raid", "Хоп на сервер (" .. tostring(info) .. ")")
-            TeleportService:TeleportToPlaceInstance(placeId, target, LocalPlayer)
-            task.wait(3)
-            return
-        end
-        TeleportService:Teleport(placeId, LocalPlayer)
-    end)
-    if not ok then
-        Notify("Giant Raid", "Хоп не вышел, пробую обычный Teleport")
-        pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
-    end
-end
+-- Fullbright / Noclip
+RunService.RenderStepped:Connect(function() if S.Fullbright then Lighting.Brightness=2 Lighting.ClockTime=14 Lighting.FogEnd=100000 Lighting.GlobalShadows=false end end)
+RunService.Stepped:Connect(function() if S.Noclip then pcall(function() for _,pt in pairs(LocalPlayer.Character:GetDescendants()) do if pt:IsA("BasePart") then pt.CanCollide=false end end end) end end)
 
--- ============ MAIN LOOP ============
-task.spawn(function()
-    hopTimer = 0
-    QueueSelf() -- ставим в очередь сразу при старте (как IY): ручные телепорты тоже подхватятся
-    while gui.Parent and IsCurrentGen() do
-        task.wait(1)
-        if not running then
-            Status.Text = "Пауза. Нажми Стоп/Старт. [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-        else
-            if hopNow then hopNow = false hopTimer = 999 end
-            local giants = {}
-            pcall(function() giants = FindGiants() end)
-            if #giants > 0 then
-                hopTimer = 0
-                Status.Text = "НАЙДЕНО ГИГАНТОВ: " .. #giants .. " (остаюсь) [" .. QueueStatus .. "]"
-                RefreshGiantsList(giants)
-                Notify("GIANT FOUND", "Гигантов: " .. #giants .. " - " .. giants[1].name)
-                pcall(function()
-                    for _, g in ipairs(giants) do
-                        local c = g.player and g.player.Character or nil
-                        if c and not c:FindFirstChild("_GIANT_HL") then
-                            local hl = Instance.new("Highlight")
-                            hl.Name = "_GIANT_HL"
-                            hl.FillColor = Color3.fromRGB(170, 60, 255)
-                            hl.OutlineColor = Color3.fromRGB(220, 170, 255)
-                            hl.FillTransparency = 0.4
-                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                            hl.Parent = c
-                        end
-                    end
-                end)
-                task.wait(5)
-            else
-                hopTimer = hopTimer + 1
-                RefreshGiantsList({})
-                local left = math.max(0, HOP_DELAY - hopTimer)
-                Status.Text = "Гигантов: 0 | Онлайн: " .. #Players:GetPlayers() .. " | Хоп через " .. left .. "с [" .. QueueStatus .. "] АВТОХОП:" .. (AUTO_HOP and "ВКЛ" or "ВЫКЛ")
-                if AUTO_HOP and hopTimer >= HOP_DELAY then
-                    hopTimer = 0
-                    ServerHop()
-                    task.wait(5)
-                end
-            end
-        end
-    end
-end)
+mkBtn("⚡ Speed", function(on) S.Speed=on end)
+mkBtn("🧊 No-Stun (анти-стан)", function(on) S.NoStun=on end)
+mkBtn("👁 ESP + дистанция", function(on) S.ESP=on if not on then clearTag("V2ESP") clearTag("V2ESP_BB") end end)
+mkBtn("⭐ Item Radar (зелья/тазер)", function(on) S.ItemRadar=on end)
+mkBtn("💡 Light ESP (лавы)", function(on) S.LightESP=on end)
+mkBtn("📡 Danger Radar", function(on) S.DangerRadar=on end)
+mkBtn("🛡️ Anti-Grab + нож-выход", function(on) S.AntiGrabEscape=on end)
+mkBtn("🤝 Rescue Aura (спасать)", function(on) S.RescueAura=on end)
+mkBtn("🪙 Coin Farm", function(on) S.CoinFarm=on end)
+mkBtn("☀️ Fullbright", function(on) S.Fullbright=on end)
+mkBtn("👻 Noclip", function(on) S.Noclip=on end)
 
-Notify("Giant Raid", "v14 запущен. Хоп через " .. HOP_DELAY .. "с")
-print("[GiantRaid] loaded, place " .. PLACE_ID)
+print("Smile V2 loaded - Survivor AI")
