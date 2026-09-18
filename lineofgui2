@@ -145,131 +145,9 @@ local function FindGiants()
     return found
 end
 
--- ============ ФЛИНГ ПО ТАПУ НА НИК (кастом, в торс) ============
--- Тап по строке = вкл/выкл флинг этой цели. Контакт держится каждый кадр,
--- т.к. хитбокс гиганта капризный и с одного касания не флингает.
-local RunService = game:GetService("RunService")
-local FLING_SPIN = 50 -- средняя мощность, чуть ниже (рад/с). Больше = жёстче.
-local flingTarget = nil
-local flinging = false
-local flingConns = {}
-local flingSavedCF = nil
-local flingT = 0 -- счётчик кадров орбиты
-local TargetLabel = nil -- назначается в GUI (вкладка Флинг)
-
-local function GetTorso(char)
-    if not char then return nil end
-    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-end
-
-local function StopFling(silent, noRestore)
-    flinging = false
-    flingTarget = nil
-    for _, c in ipairs(flingConns) do pcall(function() c:Disconnect() end) end
-    flingConns = {}
-    pcall(function()
-        local c = LocalPlayer.Character
-        if c then
-            for _, v in ipairs(c:GetDescendants()) do
-                if (v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity")) and v.Name == "_GFling" then
-                    v:Destroy()
-                end
-            end
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            local hrp = c:FindFirstChild("HumanoidRootPart")
-            if hum then
-                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-                hum.PlatformStand = false
-                hum.Sit = false
-                hum.AutoRotate = true
-            end
-            if hrp and flingSavedCF and not noRestore then
-                hrp.CFrame = flingSavedCF
-                hrp.Velocity = Vector3.new(0, 0, 0)
-                hrp.RotVelocity = Vector3.new(0, 0, 0)
-            end
-        end
-    end)
-    flingSavedCF = nil
-    pcall(function() if TargetLabel then TargetLabel.Text = "Цель флинга: нет" end end)
-    if not silent then Notify("Fling", "Флинг остановлен") end
-end
-
-local function StartFling(plr)
-    if plr == nil then return end
-    if flinging and flingTarget == plr then StopFling(false) return end
-    StopFling(true)
-    local c = LocalPlayer.Character
-    local hrp = c and c:FindFirstChild("HumanoidRootPart")
-    local hum = c and c:FindFirstChildOfClass("Humanoid")
-    if hrp == nil or hum == nil or hum.Health <= 0 then
-        Notify("Fling", "Нет живого персонажа")
-        return
-    end
-    flingSavedCF = hrp.CFrame
-    flingTarget = plr
-    flinging = true
-    flingT = 0
-    pcall(function()
-        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-        hum.PlatformStand = false
-        hum.Sit = false
-        hum.AutoRotate = false
-    end)
-    local ang = Instance.new("BodyAngularVelocity")
-    ang.Name = "_GFling"
-    ang.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    ang.AngularVelocity = Vector3.new(15, FLING_SPIN, 0)
-    ang.P = 1250
-    ang.Parent = hrp
-    local vel = Instance.new("BodyVelocity")
-    vel.Name = "_GFling"
-    vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    vel.Velocity = Vector3.new(0, 0, 0)
-    vel.Parent = hrp
-    Notify("Fling", "Флингаю: " .. plr.DisplayName .. " (тап снова = стоп)")
-    pcall(function() if TargetLabel then TargetLabel.Text = "Цель флинга: " .. plr.DisplayName end end)
-    local hb = RunService.Heartbeat:Connect(function()
-        if not flinging then return end
-        if flingTarget == nil or flingTarget.Parent == nil then
-            StopFling(false)
-            Notify("Fling", "Цель ушла с сервера")
-            return
-        end
-        local my = LocalPlayer.Character
-        local myHRP = my and my:FindFirstChild("HumanoidRootPart")
-        local myHum = my and my:FindFirstChildOfClass("Humanoid")
-        if myHRP == nil or myHum == nil or myHum.Health <= 0 then return end
-        local tchar = flingTarget.Character
-        local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
-        local torso = GetTorso(tchar)
-        if torso == nil or thum == nil or thum.Health <= 0 then return end
-        flingT = flingT + 1
-        pcall(function()
-            for _, v in ipairs(my:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = false end
-            end
-            myHum.Sit = false
-            myHum.PlatformStand = false
-            myHum.AutoRotate = false
-            -- Дёргаем торс во все 6 сторон сквозь него + ковыляние наклоном.
-            -- Каждый кадр новая точка контакта: хитбокс не успевает "отпустить".
-            local a = flingT * 0.55
-            local ox = math.sin(a) * 2.0 -- влево-вправо
-            local oy = -1.0 + math.sin(a * 1.7) * 1.6 -- вверх-вниз вокруг живота
-            local oz = math.cos(a * 0.8) * 2.0 -- вперёд-назад
-            local tilt = CFrame.Angles(math.rad(30) * math.sin(a * 1.3), flingT * 0.9, math.rad(30) * math.cos(a))
-            myHRP.CFrame = torso.CFrame * CFrame.new(ox, oy, oz) * tilt
-            myHRP.Velocity = torso.Velocity + Vector3.new(ox * 10, 14, oz * 10)
-            myHRP.RotVelocity = Vector3.new(25, FLING_SPIN, 0)
-        end)
-    end)
-    table.insert(flingConns, hb)
-end
-
-LocalPlayer.CharacterAdded:Connect(function()
-    StopFling(true, true)
-end)
+-- Цель убийцы гиганта (назначается тапом по нику / чатом).
+-- Сам цикл убийцы - после GUI (нужен gui).
+local TargetLabel = nil
 
 -- ============ GUI ============
 -- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
@@ -345,7 +223,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -10, 0, 28)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop v9"
+Title.Text = "Giant Raid Hop v11"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
 Title.TextColor3 = Color3.new(1, 1, 1)
@@ -418,7 +296,7 @@ Hints.TextWrapped = true
 Hints.TextXAlignment = Enum.TextXAlignment.Left
 Hints.TextYAlignment = Enum.TextYAlignment.Top
 Hints.Active = false
-Hints.Text = "Чат-команды:\n/hop off | on | now\n/fling ник | /unfling\n\nАвтохоп: 5с, сервера 8+.\nФлинг: вкладка Флинг, тап по нику."
+Hints.Text = "Чат-команды:\n/hop off | on | now\n/kill ник | /killstop\n\nАвтохоп: 5с, сервера 8+.\nУбийца: вкладка Убийца, тап по нику."
 Hints.Parent = PageRaid
 
 local function Btn(txt, y, cb, parent, half)
@@ -483,7 +361,7 @@ local function ShowTab(which)
     if TabFlingBtn then TabFlingBtn.BackgroundColor3 = (not raid) and Color3.fromRGB(90, 70, 130) or Color3.fromRGB(40, 35, 60) end
 end
 TabRaidBtn = Btn("Рейд", 32, function() ShowTab("raid") end, Main, "left")
-TabFlingBtn = Btn("Флинг", 32, function() ShowTab("fling") end, Main, "right")
+TabFlingBtn = Btn("Убийца", 32, function() ShowTab("fling") end, Main, "right")
 ShowTab("raid")
 
 local running = true
@@ -505,9 +383,9 @@ TargetLabel.TextSize = 12
 TargetLabel.TextColor3 = Color3.fromRGB(220, 170, 255)
 TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
 TargetLabel.Active = false
-TargetLabel.Text = "Цель флинга: нет (тап по нику)"
+TargetLabel.Text = "Цель: нет (тап по нику)"
 TargetLabel.Parent = PageFling
-Btn("Стоп флинг", 28, function() StopFling(false) end, PageFling)
+Btn("Стоп убийца", 28, function() killerOn = false; killTarget = nil; Notify("Killer", "Остановлен") end, PageFling)
 
 -- Запасное управление через чат (если тапы по кнопкам не доходят):
 -- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
@@ -524,10 +402,10 @@ LocalPlayer.Chatted:Connect(function(msg)
     elseif m == "/hop now" or m == "/ghop" then
         hopNow = true
         Notify("Giant Raid", "Хопаю сейчас (чат)")
-    elseif m == "/unfling" or m == "/flingstop" then
-        StopFling(false)
+    elseif m == "/killstop" or m == "/unfling" then
+        killerOn = false; killTarget = nil; Notify("Killer", "Остановлен (чат)")
     else
-        local nick = string.match(m, "^/fling%s+(.+)$")
+        local nick = string.match(m, "^/kill%s+(.+)$")
         if nick then
             nick = string.gsub(string.gsub(nick, "^%s+", ""), "%s+$", "")
             local target = nil
@@ -546,9 +424,11 @@ LocalPlayer.Chatted:Connect(function(msg)
                 end
             end
             if target then
-                StartFling(target)
+                killTarget = target; killerOn = true
+                Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью (чат)")
+                pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. target.DisplayName end end)
             else
-                Notify("Fling", "Не нашёл игрока: " .. nick)
+                Notify("Killer", "Не нашёл игрока: " .. nick)
             end
         end
     end
@@ -608,7 +488,7 @@ local function RefreshGiantsList(giants)
             l.TextColor3 = Color3.new(1, 1, 1)
             l.TextWrapped = true
             l.TextTruncate = Enum.TextTruncate.AtEnd
-            local mark = (flinging and flingTarget == g.player) and "> " or ""
+            local mark = (killerOn and killTarget == g.player) and "> " or ""
             l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
             l.Parent = GiantsList
             table.insert(activeRows, l)
@@ -620,10 +500,12 @@ local function RefreshGiantsList(giants)
                 if now - t0 < 0.4 then return end
                 t0 = now
                 if target == nil then return end
-                if flinging and flingTarget == target then
-                    StopFling(false)
+                if killerOn and killTarget == target then
+                    killerOn = false; killTarget = nil; Notify("Killer", "Остановлен")
                 else
-                    StartFling(target)
+                    killTarget = target; killerOn = true
+                    Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью")
+                    pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. target.DisplayName end end)
                 end
             end
             l.Activated:Connect(onTap)
@@ -636,11 +518,261 @@ local function RefreshGiantsList(giants)
     end)
 end
 
+-- ============ УБИЙЦА ГИГАНТА (бита, таргеттинг) ============
+-- Тап по нику = бить этого гиганта пока не умрёт. Вис над головой,
+-- удар только по частям гиганта. Бита кончилась = слетать на спавн
+-- за новой и вернуться. Заразили/схватили = авто-ресет и дальше.
+local KILL_HEIGHT = 3.5 -- высота над головой гиганта
+local KILL_TICK = 0.15 -- темп ударов (без кулдауна)
+local killerOn = false
+local killTarget = nil
+local spawnCF = nil
+local killSweepN = 0
+
+task.spawn(function()
+    pcall(function()
+        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = c:WaitForChild("HumanoidRootPart", 10)
+        if hrp then spawnCF = hrp.CFrame end
+    end)
+end)
+
+local function MyChar() return LocalPlayer.Character end
+local function MyHRP() local c = MyChar() return c and c:FindFirstChild("HumanoidRootPart") end
+local function MyHum() local c = MyChar() return c and c:FindFirstChildOfClass("Humanoid") end
+
+local function ImGrabbed()
+    local c = MyChar()
+    if not c then return false end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Seated then return true end
+    if c:GetAttribute("Grabbed") == true then return true end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        for _, v in ipairs(hrp:GetChildren()) do
+            if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then return true end
+        end
+    end
+    return false
+end
+
+local function RespawnMe()
+    pcall(function()
+        local hum = MyHum()
+        if hum then hum.Health = 0 end
+    end)
+    pcall(function()
+        local c = MyChar()
+        if c then c:BreakJoints() end
+    end)
+end
+
+local function FindBat()
+    local function scan(par)
+        if par then
+            for _, t in ipairs(par:GetChildren()) do
+                if t:IsA("Tool") and string.find(string.lower(t.Name), "bat") then return t end
+            end
+        end
+        return nil
+    end
+    return scan(MyChar()) or scan(LocalPlayer:FindFirstChild("Backpack"))
+end
+
+local function EquipBat(tool)
+    if tool == nil then return end
+    pcall(function()
+        local hum = MyHum()
+        if hum and tool.Parent ~= MyChar() then hum:EquipTool(tool) end
+    end)
+end
+
+local function NoCdBat(tool)
+    pcall(function()
+        for _, an in ipairs({"Cooldown", "AttackCooldown", "CooldownTime", "SwingCooldown", "HitCooldown", "Debounce", "LastAttack", "NextAttack"}) do
+            if tool:GetAttribute(an) ~= nil then tool:SetAttribute(an, 0) end
+        end
+        tool.Enabled = true
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("NumberValue") or v:IsA("IntValue") then
+                local n = string.lower(v.Name)
+                if string.find(n, "cooldown") or string.find(n, "debounce") or string.find(n, "lastattack") or string.find(n, "nextattack") or string.find(n, "swing") or string.find(n, "reload") then
+                    v.Value = 0
+                end
+            elseif v:IsA("BoolValue") then
+                local n = string.lower(v.Name)
+                if string.find(n, "debounce") or string.find(n, "cooldown") or string.find(n, "attacking") then
+                    v.Value = false
+                end
+            end
+        end
+    end)
+end
+
+local function GiantAimPart(plr)
+    local ch = plr and plr.Character
+    if not ch then return nil end
+    return ch:FindFirstChild("Head") or ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso") or ch:FindFirstChild("HumanoidRootPart")
+end
+
+-- Анти-заражение: гасим белые блоки локально (best effort) + авто-ресет при заражении
+local function AntiLightSweep()
+    pcall(function()
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("BasePart") then
+                local n = string.lower(d.Name)
+                if string.find(n, "infect") then
+                    pcall(function() d.CanTouch = false end)
+                end
+            end
+        end
+    end)
+end
+
+-- Слетать на спавн за новой битой
+local function FetchBat()
+    local myHRP = MyHRP()
+    if not myHRP then return false end
+    if spawnCF then pcall(function() myHRP.CFrame = spawnCF + Vector3.new(0, 3, 0) end) end
+    task.wait(0.7)
+    -- 1. стойка выдачи (промпт контейнера оружия)
+    pcall(function()
+        for _, pr in ipairs(workspace:GetDescendants()) do
+            if pr:IsA("ProximityPrompt") then
+                local an = pr.Parent
+                local nm = an and string.lower(an.Name) or ""
+                local pn = an and an.Parent and string.lower(an.Parent.Name) or ""
+                if string.find(nm, "bat") or string.find(nm, "weapon") or string.find(pn, "bat") or string.find(pn, "weapon") then
+                    local part = ((an:IsA("BasePart") and an) or (an and an:FindFirstChildWhichIsA("BasePart")))
+                    if part and part:IsA("BasePart") and (spawnCF == nil or (part.Position - spawnCF.Position).Magnitude < 100) then
+                        myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+                        task.wait(0.3)
+                        if fireproximityprompt then
+                            pcall(function() fireproximityprompt(pr) end)
+                        end
+                        task.wait(0.4)
+                    end
+                    if FindBat() then break end
+                end
+            end
+        end
+    end)
+    if FindBat() then EquipBat(FindBat()) return true end
+    -- 2. лежащие биты: подойти и тронуть
+    pcall(function()
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("Tool") and string.find(string.lower(d.Name), "bat") then
+                local part = d:FindFirstChild("Handle") or d:FindFirstChildWhichIsA("BasePart")
+                if part and part:IsA("BasePart") then
+                    myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+                    task.wait(0.25)
+                    if firetouchinterest then
+                        pcall(function()
+                            firetouchinterest(myHRP, part, 0)
+                            task.wait()
+                            firetouchinterest(myHRP, part, 1)
+                        end)
+                    end
+                    task.wait(0.25)
+                    if FindBat() then break end
+                end
+            end
+        end
+    end)
+    local b = FindBat()
+    if b then EquipBat(b) return true end
+    return false
+end
+
+-- Один удар ТОЛЬКО по гиганту: вис над головой + касания его частей
+local function KillerHitOnce(bat, target)
+    local aim = GiantAimPart(target)
+    local myHRP = MyHRP()
+    if aim == nil or myHRP == nil then return end
+    pcall(function()
+        myHRP.CFrame = aim.CFrame + Vector3.new(0, KILL_HEIGHT, 0)
+        myHRP.Velocity = Vector3.new(0, 0, 0)
+        myHRP.RotVelocity = Vector3.new(0, 0, 0)
+    end)
+    NoCdBat(bat)
+    pcall(function() bat:Activate() end)
+    if firetouchinterest then
+        local handle = bat:FindFirstChild("Handle")
+        local ch = target.Character
+        if handle and ch then
+            for _, pn in ipairs({"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"}) do
+                local part = ch:FindFirstChild(pn)
+                if part and part:IsA("BasePart") then
+                    pcall(function() firetouchinterest(handle, part, 0) end)
+                end
+            end
+            task.wait()
+            for _, pn in ipairs({"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"}) do
+                local part = ch:FindFirstChild(pn)
+                if part and part:IsA("BasePart") then
+                    pcall(function() firetouchinterest(handle, part, 1) end)
+                end
+            end
+        end
+    end
+end
+
+-- Главный цикл убийцы
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(KILL_TICK)
+        if killerOn then
+            pcall(function()
+                if killTarget == nil or killTarget.Parent == nil then
+                    local gs = FindGiants()
+                    if #gs > 0 and gs[1].player then
+                        killTarget = gs[1].player
+                    else
+                        return
+                    end
+                end
+                if not IsPlayerGiant(killTarget) then
+                    local gs = FindGiants()
+                    if #gs > 0 and gs[1].player then
+                        killTarget = gs[1].player
+                        pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. killTarget.DisplayName end end)
+                    else
+                        killTarget = nil
+                    end
+                    return
+                end
+                -- заразили = ресет и дальше мочить
+                if IsSmiler(LocalPlayer) then
+                    RespawnMe()
+                    task.wait(2)
+                    return
+                end
+                -- схватили (гигант или другие) = ресет и дальше
+                if ImGrabbed() then
+                    RespawnMe()
+                    task.wait(2)
+                    return
+                end
+                killSweepN = killSweepN + 1
+                if killSweepN % 30 == 0 then AntiLightSweep() end
+                local bat = FindBat()
+                if bat == nil then
+                    Notify("Killer", "Бита кончилась, лечу на спавн...")
+                    FetchBat()
+                    return
+                end
+                EquipBat(bat)
+                KillerHitOnce(bat, killTarget)
+            end)
+        end
+    end
+end)
+
 -- ============ SERVER HOP (как Infinite Yield) ============
 local function ServerHop()
     QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
     if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
-    StopFling(true) -- снять флинг перед хопом
+    -- убийца сам перевыберет цель на новом сервере
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
@@ -735,7 +867,7 @@ task.spawn(function()
     end
 end)
 
-Notify("Giant Raid", "v9 запущен. Хоп через " .. HOP_DELAY .. "с")
+Notify("Giant Raid", "v11 запущен. Хоп через " .. HOP_DELAY .. "с")
 print("[GiantRaid] loaded, place " .. PLACE_ID)
 
 ]=====]
@@ -885,131 +1017,9 @@ local function FindGiants()
     return found
 end
 
--- ============ ФЛИНГ ПО ТАПУ НА НИК (кастом, в торс) ============
--- Тап по строке = вкл/выкл флинг этой цели. Контакт держится каждый кадр,
--- т.к. хитбокс гиганта капризный и с одного касания не флингает.
-local RunService = game:GetService("RunService")
-local FLING_SPIN = 50 -- средняя мощность, чуть ниже (рад/с). Больше = жёстче.
-local flingTarget = nil
-local flinging = false
-local flingConns = {}
-local flingSavedCF = nil
-local flingT = 0 -- счётчик кадров орбиты
-local TargetLabel = nil -- назначается в GUI (вкладка Флинг)
-
-local function GetTorso(char)
-    if not char then return nil end
-    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-end
-
-local function StopFling(silent, noRestore)
-    flinging = false
-    flingTarget = nil
-    for _, c in ipairs(flingConns) do pcall(function() c:Disconnect() end) end
-    flingConns = {}
-    pcall(function()
-        local c = LocalPlayer.Character
-        if c then
-            for _, v in ipairs(c:GetDescendants()) do
-                if (v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity")) and v.Name == "_GFling" then
-                    v:Destroy()
-                end
-            end
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            local hrp = c:FindFirstChild("HumanoidRootPart")
-            if hum then
-                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-                hum.PlatformStand = false
-                hum.Sit = false
-                hum.AutoRotate = true
-            end
-            if hrp and flingSavedCF and not noRestore then
-                hrp.CFrame = flingSavedCF
-                hrp.Velocity = Vector3.new(0, 0, 0)
-                hrp.RotVelocity = Vector3.new(0, 0, 0)
-            end
-        end
-    end)
-    flingSavedCF = nil
-    pcall(function() if TargetLabel then TargetLabel.Text = "Цель флинга: нет" end end)
-    if not silent then Notify("Fling", "Флинг остановлен") end
-end
-
-local function StartFling(plr)
-    if plr == nil then return end
-    if flinging and flingTarget == plr then StopFling(false) return end
-    StopFling(true)
-    local c = LocalPlayer.Character
-    local hrp = c and c:FindFirstChild("HumanoidRootPart")
-    local hum = c and c:FindFirstChildOfClass("Humanoid")
-    if hrp == nil or hum == nil or hum.Health <= 0 then
-        Notify("Fling", "Нет живого персонажа")
-        return
-    end
-    flingSavedCF = hrp.CFrame
-    flingTarget = plr
-    flinging = true
-    flingT = 0
-    pcall(function()
-        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-        hum.PlatformStand = false
-        hum.Sit = false
-        hum.AutoRotate = false
-    end)
-    local ang = Instance.new("BodyAngularVelocity")
-    ang.Name = "_GFling"
-    ang.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    ang.AngularVelocity = Vector3.new(15, FLING_SPIN, 0)
-    ang.P = 1250
-    ang.Parent = hrp
-    local vel = Instance.new("BodyVelocity")
-    vel.Name = "_GFling"
-    vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    vel.Velocity = Vector3.new(0, 0, 0)
-    vel.Parent = hrp
-    Notify("Fling", "Флингаю: " .. plr.DisplayName .. " (тап снова = стоп)")
-    pcall(function() if TargetLabel then TargetLabel.Text = "Цель флинга: " .. plr.DisplayName end end)
-    local hb = RunService.Heartbeat:Connect(function()
-        if not flinging then return end
-        if flingTarget == nil or flingTarget.Parent == nil then
-            StopFling(false)
-            Notify("Fling", "Цель ушла с сервера")
-            return
-        end
-        local my = LocalPlayer.Character
-        local myHRP = my and my:FindFirstChild("HumanoidRootPart")
-        local myHum = my and my:FindFirstChildOfClass("Humanoid")
-        if myHRP == nil or myHum == nil or myHum.Health <= 0 then return end
-        local tchar = flingTarget.Character
-        local thum = tchar and tchar:FindFirstChildOfClass("Humanoid")
-        local torso = GetTorso(tchar)
-        if torso == nil or thum == nil or thum.Health <= 0 then return end
-        flingT = flingT + 1
-        pcall(function()
-            for _, v in ipairs(my:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = false end
-            end
-            myHum.Sit = false
-            myHum.PlatformStand = false
-            myHum.AutoRotate = false
-            -- Дёргаем торс во все 6 сторон сквозь него + ковыляние наклоном.
-            -- Каждый кадр новая точка контакта: хитбокс не успевает "отпустить".
-            local a = flingT * 0.55
-            local ox = math.sin(a) * 2.0 -- влево-вправо
-            local oy = -1.0 + math.sin(a * 1.7) * 1.6 -- вверх-вниз вокруг живота
-            local oz = math.cos(a * 0.8) * 2.0 -- вперёд-назад
-            local tilt = CFrame.Angles(math.rad(30) * math.sin(a * 1.3), flingT * 0.9, math.rad(30) * math.cos(a))
-            myHRP.CFrame = torso.CFrame * CFrame.new(ox, oy, oz) * tilt
-            myHRP.Velocity = torso.Velocity + Vector3.new(ox * 10, 14, oz * 10)
-            myHRP.RotVelocity = Vector3.new(25, FLING_SPIN, 0)
-        end)
-    end)
-    table.insert(flingConns, hb)
-end
-
-LocalPlayer.CharacterAdded:Connect(function()
-    StopFling(true, true)
-end)
+-- Цель убийцы гиганта (назначается тапом по нику / чатом).
+-- Сам цикл убийцы - после GUI (нужен gui).
+local TargetLabel = nil
 
 -- ============ GUI ============
 -- Убить старые копии окна: без этого висят 2+ цикла сразу (старый продолжает
@@ -1085,7 +1095,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -10, 0, 28)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Giant Raid Hop v9"
+Title.Text = "Giant Raid Hop v11"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
 Title.TextColor3 = Color3.new(1, 1, 1)
@@ -1158,7 +1168,7 @@ Hints.TextWrapped = true
 Hints.TextXAlignment = Enum.TextXAlignment.Left
 Hints.TextYAlignment = Enum.TextYAlignment.Top
 Hints.Active = false
-Hints.Text = "Чат-команды:\n/hop off | on | now\n/fling ник | /unfling\n\nАвтохоп: 5с, сервера 8+.\nФлинг: вкладка Флинг, тап по нику."
+Hints.Text = "Чат-команды:\n/hop off | on | now\n/kill ник | /killstop\n\nАвтохоп: 5с, сервера 8+.\nУбийца: вкладка Убийца, тап по нику."
 Hints.Parent = PageRaid
 
 local function Btn(txt, y, cb, parent, half)
@@ -1223,7 +1233,7 @@ local function ShowTab(which)
     if TabFlingBtn then TabFlingBtn.BackgroundColor3 = (not raid) and Color3.fromRGB(90, 70, 130) or Color3.fromRGB(40, 35, 60) end
 end
 TabRaidBtn = Btn("Рейд", 32, function() ShowTab("raid") end, Main, "left")
-TabFlingBtn = Btn("Флинг", 32, function() ShowTab("fling") end, Main, "right")
+TabFlingBtn = Btn("Убийца", 32, function() ShowTab("fling") end, Main, "right")
 ShowTab("raid")
 
 local running = true
@@ -1245,9 +1255,9 @@ TargetLabel.TextSize = 12
 TargetLabel.TextColor3 = Color3.fromRGB(220, 170, 255)
 TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
 TargetLabel.Active = false
-TargetLabel.Text = "Цель флинга: нет (тап по нику)"
+TargetLabel.Text = "Цель: нет (тап по нику)"
 TargetLabel.Parent = PageFling
-Btn("Стоп флинг", 28, function() StopFling(false) end, PageFling)
+Btn("Стоп убийца", 28, function() killerOn = false; killTarget = nil; Notify("Killer", "Остановлен") end, PageFling)
 
 -- Запасное управление через чат (если тапы по кнопкам не доходят):
 -- /hop off - выкл автохоп, /hop on - вкл, /hop now - хоп сейчас
@@ -1264,10 +1274,10 @@ LocalPlayer.Chatted:Connect(function(msg)
     elseif m == "/hop now" or m == "/ghop" then
         hopNow = true
         Notify("Giant Raid", "Хопаю сейчас (чат)")
-    elseif m == "/unfling" or m == "/flingstop" then
-        StopFling(false)
+    elseif m == "/killstop" or m == "/unfling" then
+        killerOn = false; killTarget = nil; Notify("Killer", "Остановлен (чат)")
     else
-        local nick = string.match(m, "^/fling%s+(.+)$")
+        local nick = string.match(m, "^/kill%s+(.+)$")
         if nick then
             nick = string.gsub(string.gsub(nick, "^%s+", ""), "%s+$", "")
             local target = nil
@@ -1286,9 +1296,11 @@ LocalPlayer.Chatted:Connect(function(msg)
                 end
             end
             if target then
-                StartFling(target)
+                killTarget = target; killerOn = true
+                Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью (чат)")
+                pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. target.DisplayName end end)
             else
-                Notify("Fling", "Не нашёл игрока: " .. nick)
+                Notify("Killer", "Не нашёл игрока: " .. nick)
             end
         end
     end
@@ -1348,7 +1360,7 @@ local function RefreshGiantsList(giants)
             l.TextColor3 = Color3.new(1, 1, 1)
             l.TextWrapped = true
             l.TextTruncate = Enum.TextTruncate.AtEnd
-            local mark = (flinging and flingTarget == g.player) and "> " or ""
+            local mark = (killerOn and killTarget == g.player) and "> " or ""
             l.Text = mark .. i .. ". " .. g.name .. " " .. g.hp .. "/" .. g.maxHp
             l.Parent = GiantsList
             table.insert(activeRows, l)
@@ -1360,10 +1372,12 @@ local function RefreshGiantsList(giants)
                 if now - t0 < 0.4 then return end
                 t0 = now
                 if target == nil then return end
-                if flinging and flingTarget == target then
-                    StopFling(false)
+                if killerOn and killTarget == target then
+                    killerOn = false; killTarget = nil; Notify("Killer", "Остановлен")
                 else
-                    StartFling(target)
+                    killTarget = target; killerOn = true
+                    Notify("Killer", "Цель: " .. target.DisplayName .. " - бью пока не убью")
+                    pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. target.DisplayName end end)
                 end
             end
             l.Activated:Connect(onTap)
@@ -1376,11 +1390,261 @@ local function RefreshGiantsList(giants)
     end)
 end
 
+-- ============ УБИЙЦА ГИГАНТА (бита, таргеттинг) ============
+-- Тап по нику = бить этого гиганта пока не умрёт. Вис над головой,
+-- удар только по частям гиганта. Бита кончилась = слетать на спавн
+-- за новой и вернуться. Заразили/схватили = авто-ресет и дальше.
+local KILL_HEIGHT = 3.5 -- высота над головой гиганта
+local KILL_TICK = 0.15 -- темп ударов (без кулдауна)
+local killerOn = false
+local killTarget = nil
+local spawnCF = nil
+local killSweepN = 0
+
+task.spawn(function()
+    pcall(function()
+        local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = c:WaitForChild("HumanoidRootPart", 10)
+        if hrp then spawnCF = hrp.CFrame end
+    end)
+end)
+
+local function MyChar() return LocalPlayer.Character end
+local function MyHRP() local c = MyChar() return c and c:FindFirstChild("HumanoidRootPart") end
+local function MyHum() local c = MyChar() return c and c:FindFirstChildOfClass("Humanoid") end
+
+local function ImGrabbed()
+    local c = MyChar()
+    if not c then return false end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Seated then return true end
+    if c:GetAttribute("Grabbed") == true then return true end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        for _, v in ipairs(hrp:GetChildren()) do
+            if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("RopeConstraint") then return true end
+        end
+    end
+    return false
+end
+
+local function RespawnMe()
+    pcall(function()
+        local hum = MyHum()
+        if hum then hum.Health = 0 end
+    end)
+    pcall(function()
+        local c = MyChar()
+        if c then c:BreakJoints() end
+    end)
+end
+
+local function FindBat()
+    local function scan(par)
+        if par then
+            for _, t in ipairs(par:GetChildren()) do
+                if t:IsA("Tool") and string.find(string.lower(t.Name), "bat") then return t end
+            end
+        end
+        return nil
+    end
+    return scan(MyChar()) or scan(LocalPlayer:FindFirstChild("Backpack"))
+end
+
+local function EquipBat(tool)
+    if tool == nil then return end
+    pcall(function()
+        local hum = MyHum()
+        if hum and tool.Parent ~= MyChar() then hum:EquipTool(tool) end
+    end)
+end
+
+local function NoCdBat(tool)
+    pcall(function()
+        for _, an in ipairs({"Cooldown", "AttackCooldown", "CooldownTime", "SwingCooldown", "HitCooldown", "Debounce", "LastAttack", "NextAttack"}) do
+            if tool:GetAttribute(an) ~= nil then tool:SetAttribute(an, 0) end
+        end
+        tool.Enabled = true
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("NumberValue") or v:IsA("IntValue") then
+                local n = string.lower(v.Name)
+                if string.find(n, "cooldown") or string.find(n, "debounce") or string.find(n, "lastattack") or string.find(n, "nextattack") or string.find(n, "swing") or string.find(n, "reload") then
+                    v.Value = 0
+                end
+            elseif v:IsA("BoolValue") then
+                local n = string.lower(v.Name)
+                if string.find(n, "debounce") or string.find(n, "cooldown") or string.find(n, "attacking") then
+                    v.Value = false
+                end
+            end
+        end
+    end)
+end
+
+local function GiantAimPart(plr)
+    local ch = plr and plr.Character
+    if not ch then return nil end
+    return ch:FindFirstChild("Head") or ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso") or ch:FindFirstChild("HumanoidRootPart")
+end
+
+-- Анти-заражение: гасим белые блоки локально (best effort) + авто-ресет при заражении
+local function AntiLightSweep()
+    pcall(function()
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("BasePart") then
+                local n = string.lower(d.Name)
+                if string.find(n, "infect") then
+                    pcall(function() d.CanTouch = false end)
+                end
+            end
+        end
+    end)
+end
+
+-- Слетать на спавн за новой битой
+local function FetchBat()
+    local myHRP = MyHRP()
+    if not myHRP then return false end
+    if spawnCF then pcall(function() myHRP.CFrame = spawnCF + Vector3.new(0, 3, 0) end) end
+    task.wait(0.7)
+    -- 1. стойка выдачи (промпт контейнера оружия)
+    pcall(function()
+        for _, pr in ipairs(workspace:GetDescendants()) do
+            if pr:IsA("ProximityPrompt") then
+                local an = pr.Parent
+                local nm = an and string.lower(an.Name) or ""
+                local pn = an and an.Parent and string.lower(an.Parent.Name) or ""
+                if string.find(nm, "bat") or string.find(nm, "weapon") or string.find(pn, "bat") or string.find(pn, "weapon") then
+                    local part = ((an:IsA("BasePart") and an) or (an and an:FindFirstChildWhichIsA("BasePart")))
+                    if part and part:IsA("BasePart") and (spawnCF == nil or (part.Position - spawnCF.Position).Magnitude < 100) then
+                        myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+                        task.wait(0.3)
+                        if fireproximityprompt then
+                            pcall(function() fireproximityprompt(pr) end)
+                        end
+                        task.wait(0.4)
+                    end
+                    if FindBat() then break end
+                end
+            end
+        end
+    end)
+    if FindBat() then EquipBat(FindBat()) return true end
+    -- 2. лежащие биты: подойти и тронуть
+    pcall(function()
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("Tool") and string.find(string.lower(d.Name), "bat") then
+                local part = d:FindFirstChild("Handle") or d:FindFirstChildWhichIsA("BasePart")
+                if part and part:IsA("BasePart") then
+                    myHRP.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+                    task.wait(0.25)
+                    if firetouchinterest then
+                        pcall(function()
+                            firetouchinterest(myHRP, part, 0)
+                            task.wait()
+                            firetouchinterest(myHRP, part, 1)
+                        end)
+                    end
+                    task.wait(0.25)
+                    if FindBat() then break end
+                end
+            end
+        end
+    end)
+    local b = FindBat()
+    if b then EquipBat(b) return true end
+    return false
+end
+
+-- Один удар ТОЛЬКО по гиганту: вис над головой + касания его частей
+local function KillerHitOnce(bat, target)
+    local aim = GiantAimPart(target)
+    local myHRP = MyHRP()
+    if aim == nil or myHRP == nil then return end
+    pcall(function()
+        myHRP.CFrame = aim.CFrame + Vector3.new(0, KILL_HEIGHT, 0)
+        myHRP.Velocity = Vector3.new(0, 0, 0)
+        myHRP.RotVelocity = Vector3.new(0, 0, 0)
+    end)
+    NoCdBat(bat)
+    pcall(function() bat:Activate() end)
+    if firetouchinterest then
+        local handle = bat:FindFirstChild("Handle")
+        local ch = target.Character
+        if handle and ch then
+            for _, pn in ipairs({"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"}) do
+                local part = ch:FindFirstChild(pn)
+                if part and part:IsA("BasePart") then
+                    pcall(function() firetouchinterest(handle, part, 0) end)
+                end
+            end
+            task.wait()
+            for _, pn in ipairs({"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"}) do
+                local part = ch:FindFirstChild(pn)
+                if part and part:IsA("BasePart") then
+                    pcall(function() firetouchinterest(handle, part, 1) end)
+                end
+            end
+        end
+    end
+end
+
+-- Главный цикл убийцы
+task.spawn(function()
+    while gui.Parent and IsCurrentGen() do
+        task.wait(KILL_TICK)
+        if killerOn then
+            pcall(function()
+                if killTarget == nil or killTarget.Parent == nil then
+                    local gs = FindGiants()
+                    if #gs > 0 and gs[1].player then
+                        killTarget = gs[1].player
+                    else
+                        return
+                    end
+                end
+                if not IsPlayerGiant(killTarget) then
+                    local gs = FindGiants()
+                    if #gs > 0 and gs[1].player then
+                        killTarget = gs[1].player
+                        pcall(function() if TargetLabel then TargetLabel.Text = "Цель: " .. killTarget.DisplayName end end)
+                    else
+                        killTarget = nil
+                    end
+                    return
+                end
+                -- заразили = ресет и дальше мочить
+                if IsSmiler(LocalPlayer) then
+                    RespawnMe()
+                    task.wait(2)
+                    return
+                end
+                -- схватили (гигант или другие) = ресет и дальше
+                if ImGrabbed() then
+                    RespawnMe()
+                    task.wait(2)
+                    return
+                end
+                killSweepN = killSweepN + 1
+                if killSweepN % 30 == 0 then AntiLightSweep() end
+                local bat = FindBat()
+                if bat == nil then
+                    Notify("Killer", "Бита кончилась, лечу на спавн...")
+                    FetchBat()
+                    return
+                end
+                EquipBat(bat)
+                KillerHitOnce(bat, killTarget)
+            end)
+        end
+    end
+end)
+
 -- ============ SERVER HOP (как Infinite Yield) ============
 local function ServerHop()
     QueueSelf() -- очередь ПЕРЕД телепортом, иначе авто-запуска не будет
     if not IsCurrentGen() then return end -- нас уже сменила новая копия, не хопаем
-    StopFling(true) -- снять флинг перед хопом
+    -- убийца сам перевыберет цель на новом сервере
     local placeId = PLACE_ID
     local cursor = ""
     local visited = getgenv and getgenv()._GiantRaidVisited or {}
@@ -1475,5 +1739,5 @@ task.spawn(function()
     end
 end)
 
-Notify("Giant Raid", "v9 запущен. Хоп через " .. HOP_DELAY .. "с")
+Notify("Giant Raid", "v11 запущен. Хоп через " .. HOP_DELAY .. "с")
 print("[GiantRaid] loaded, place " .. PLACE_ID)
