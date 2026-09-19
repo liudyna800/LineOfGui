@@ -2250,6 +2250,9 @@ local function sendBotMessage(text)
     -- [SYSTEM:...] — убираем до конца строки (DeepSeek иногда добавляет вложенные скобки)
     text = text:gsub("%[SYSTEM:[^\n]*\n?", "")
     text = text:gsub("%[NEARBY[^%]]*%]%s*", "")
+    -- universal: висячие скобки из имен предметов ("Bottle]" -> "Bottle", "[Bat]" -> "Bat")
+    text = text:gsub("(%w)%]", "%1")
+    text = text:gsub("%[(%w+)%]", "%1")
     -- Шаг 2: убираем НЕЗАКРЫТЫЕ теги — ИИ иногда пишет "[DO:wave" без ]
     text = text:gsub("%[DO:[%w_]*%s*", "")
     text = text:gsub("%[LANG:[%w_]*%s*", "")
@@ -3344,8 +3347,9 @@ function InventoryBeta2.DescribeTool(tool)
 	local tip = ""
 	pcall(function() tip = tostring(tool.ToolTip or "") end)
 	tip = (tip:match("^%s*(.-)%s*$") or "")
+	tip = tip:gsub("[%[%]]", ""):match("^%s*(.-)%s*$") or ""
 	if #tip > 60 then tip = tip:sub(1, 60) end
-	if tip ~= "" then return tool.Name .. " [" .. tip .. "]" end
+	if tip ~= "" then return tool.Name .. " - " .. tip end
 	return tool.Name
 end
 
@@ -4334,7 +4338,7 @@ local function handleQueuedChat(item)
         if okInv and invLine and invLine ~= "" then
             table.insert(apiMessages, {
                 role    = "system",
-                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай. Формат имени: 'Имя [описание]' — в тег копируй ТОЛЬКО имя до скобок. В скобках подсказка ЧТО это за предмет (еда/оружие/напиток) — используй её чтобы понять смысл, а не только буквы."
+                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Name before - is exact tag name.  Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай. Формат имени: 'Имя [описание]' — в тег копируй ТОЛЬКО имя до скобок. В скобках подсказка ЧТО это за предмет (еда/оружие/напиток) — используй её чтобы понять смысл, а не только буквы."
             })
         end
     end
@@ -4630,6 +4634,13 @@ local function handleQueuedChat(item)
         handledByInventoryRoundTrip = true
 
         local iname = (actionArg and actionArg ~= "" and actionArg) or InventoryBeta2.ExtractName(item.cleaned)
+        -- sanitize: ИИ иногда копирует "Bottle - описание" или "Bottle]" / "[Bat]" из снапшота
+        iname = tostring(iname or ""):match("^%s*(.-)%s*$") or ""
+        do
+            local beforeDash = iname:match("^(.-)%s*%-%s*.+$")
+            if beforeDash and beforeDash ~= "" then iname = beforeDash end
+        end
+        iname = iname:gsub("^[%[%(%{\"\']+", ""):gsub("[%]%)%}\"\']+$", ""):match("^%s*(.-)%s*$") or ""
         local iok, isay
 
         if actionName == "take" then
