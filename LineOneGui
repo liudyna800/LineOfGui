@@ -2040,6 +2040,7 @@ local function makeSystemPrompt(settings)
         if gc and gc.text and gc.text ~= "" then
             table.insert(parts,
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
+                .. (((_fandomLead ~= nil and _fandomLead ~= "") and (" Wiki: " .. _fandomLead:sub(1, 300))) or "")
                 .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
                 .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search.")
         else
@@ -3864,69 +3865,132 @@ end
 
 -- v20 Beta 2: Roblox Wiki (fandom) article cache + snippet search, universal per game
 -- All globals on purpose (chunk register limit 200)
-function fetchFandomArticle(pname)
-    pname = tostring(pname or "")
-    if pname == "" or pname == "Unknown Game" then return "" end
-    local title = pname:gsub("[^%w%s%-]", ""):gsub("%s+", "_"):match("^_*(.-)_*$") or ""
-    if title == "" then return "" end
+function findGameWikiDomain(pname)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if not httprequest then return "" end
-    local clean = pname:gsub("[^%w%s%-]", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-    if clean == "" then print("[GAME-DBG] fandom: bad place name") return "" end
+    local slug = tostring(pname or ""):lower():gsub("[^%a%s%-]", ""):gsub("%s+", "-"):match("^[%-]*(.-)[%-]*$") or ""
+    _wikiDomainCache = _wikiDomainCache or {}
+    if _wikiDomainCache[slug] then return _wikiDomainCache[slug] end
     local words = {}
-    for w in clean:gmatch("%S+") do table.insert(words, w) end
-    local variants = {}
-    local function vtitle(n)
+    for w in slug:gmatch("[^%-]+") do table.insert(words, w) end
+    local cands, seen = {}, {}
+    local function addC(n)
         local t = {}
         for i = 1, math.min(n, #words) do table.insert(t, words[i]) end
-        return table.concat(t, "_")
+        local s = table.concat(t, "-")
+        if s ~= "" and not seen[s] then seen[s] = true table.insert(cands, s) end
     end
-    table.insert(variants, vtitle(#words))
-    if #words > 3 then table.insert(variants, vtitle(3)) end
-    if #words > 2 then table.insert(variants, vtitle(2)) end
-    local seenV = {}
-    for _, title in ipairs(variants) do
-        if title ~= "" and not seenV[title] then
-            seenV[title] = true
-            -- 1) MediaWiki API direct (no Jina dependency)
-            local apiUrl = "https://roblox.fandom.com/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&titles=" .. title
-            print("[GAME-DBG] fandom api try: " .. title)
-            local ok, res = pcall(httprequest, { Url = apiUrl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
-            if ok and type(res) == "table" then
-                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
-                if dok and type(data) == "table" and data.query and data.query.pages then
-                    for _, page in pairs(data.query.pages) do
-                        if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 1500 then
-                            local text = page.extract:gsub("%s+", " ")
+    addC(#words)
+    if #words > 3 then addC(3) end
+    if #words > 2 then addC(2) end
+    for _, s in ipairs(cands) do
+        print("[GAME-DBG] wikidomain try: " .. s)
+        local ok, res = pcall(httprequest, { Url = "https://" .. s .. ".fandom.com/api.php?action=query&meta=siteinfo&format=json", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+        if ok and type(res) == "table" then
+            local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+            if dok and type(data) == "table" and data.query and data.query.general then
+                print("[GAME-DBG] wikidomain OK: " .. s)
+                _wikiDomainCache[slug] = "https://" .. s .. ".fandom.com"
+                return "https://" .. s .. ".fandom.com"
+            end
+        end
+    end
+    print("[GAME-DBG] wikidomain fallback: roblox.fandom.com")
+    _wikiDomainCache[slug] = "https://roblox.fandom.com"
+    return "https://roblox.fandom.com"
+end
+
+function cleanWikitext(wt)
+    local t = tostring(wt or "")
+    t = t:gsub("<[^>]+>", " ")
+    t = t:gsub("%b{}", " ")
+    t = t:gsub("%[%[[^%|%]]+%|([^%]]+)%]%]", "%1")
+    t = t:gsub("%[%[([^%]]+)%]%]", "%1")
+    t = t:gsub("'''?", "")
+    t = t:gsub("[=]+", " ")
+    t = t:gsub("%s+", " ")
+    return t:match("^%s*(.-)%s*$") or ""
+end
+
+function fetchWikiPage(domain, title)
+    if domain == "" or title == "" then return "" end
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return "" end
+    local enc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+    local tenc = enc(title):gsub("%%20", "_")
+    local rurl = domain .. "/api.php?action=query&format=json&prop=revisions&rvprop=content&redirects=1&titles=" .. tenc
+    local ok, res = pcall(httprequest, { Url = rurl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+    if ok and type(res) == "table" then
+        local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+        if dok and type(data) == "table" and data.query and data.query.pages then
+            for _, page in pairs(data.query.pages) do
+                if type(page) == "table" and not page.missing and type(page.revisions) == "table" then
+                    local rev = page.revisions[1]
+                    local wt = nil
+                    if type(rev) == "table" then
+                        wt = rev["*"]
+                        if wt == nil and rev.slots and rev.slots.main then wt = rev.slots.main["*"] end
+                    end
+                    if type(wt) == "string" and #wt > 500 then
+                        local text = cleanWikitext(wt)
+                        if #text > 500 then
                             if #text > 6000 then text = text:sub(1, 6000) end
-                            print("[GAME-DBG] fandom api OK: " .. title .. " (" .. #text .. " chars)")
                             return text
                         end
                     end
                 end
-                print("[GAME-DBG] fandom api empty: " .. title)
-            else
-                print("[GAME-DBG] fandom api http fail: " .. title)
             end
-            -- 2) Jina reader fallback
-            local url = "https://r.jina.ai/https://roblox.fandom.com/wiki/" .. title
-            print("[GAME-DBG] fandom jina try: " .. title)
-            local ok2, res2 = pcall(httprequest, { Url = url, Method = "GET", Headers = { ["Accept"] = "text/plain" } })
-            if ok2 and type(res2) == "table" then
-                local body = tostring(res2.Body or res2.body or "")
-                local text = body:gsub("\n+", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-                if #text >= 1500 then
-                    local low = text:lower()
-                    if not low:find("this page does not exist", 1, true) and not low:find("page not found", 1, true) then
-                        if #text > 6000 then text = text:sub(1, 6000) end
-                        print("[GAME-DBG] fandom jina OK: " .. title .. " (" .. #text .. " chars)")
-                        return text
-                    end
+        end
+    end
+    local eurl = domain .. "/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&titles=" .. tenc
+    local ok2, res2 = pcall(httprequest, { Url = eurl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+    if ok2 and type(res2) == "table" then
+        local dok2, data2 = pcall(function() return HttpService:JSONDecode(tostring(res2.Body or res2.body or "")) end)
+        if dok2 and type(data2) == "table" and data2.query and data2.query.pages then
+            for _, page in pairs(data2.query.pages) do
+                if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 500 then
+                    local text = page.extract:gsub("%s+", " ")
+                    if #text > 6000 then text = text:sub(1, 6000) end
+                    return text
                 end
-                print("[GAME-DBG] fandom jina short/missing: " .. title .. " (" .. #text .. ")")
-            else
-                print("[GAME-DBG] fandom jina http fail: " .. title)
             end
+        end
+    end
+    return ""
+end
+
+function fetchFandomArticle(pname)
+    pname = tostring(pname or "")
+    if pname == "" or pname == "Unknown Game" then print("[GAME-DBG] fandom: bad place name") return "" end
+    local domain = findGameWikiDomain(pname)
+    if domain == "" then print("[GAME-DBG] fandom: no domain") return "" end
+    local clean = pname:gsub("[^%w%s%-]", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    local words = {}
+    for w in clean:gmatch("%S+") do table.insert(words, w) end
+    local variants, seenV = {}, {}
+    local function addV(t)
+        if t ~= "" and not seenV[t] then seenV[t] = true table.insert(variants, t) end
+    end
+    addV(table.concat(words, "_"))
+    if #words > 3 then
+        local t = {}
+        for i = 1, 3 do table.insert(t, words[i]) end
+        addV(table.concat(t, "_"))
+    end
+    if #words > 2 then
+        local t = {}
+        for i = 1, 2 do table.insert(t, words[i]) end
+        addV(table.concat(t, "_"))
+    end
+    for _, title in ipairs(variants) do
+        print("[GAME-DBG] fandom try: " .. domain .. " / " .. title)
+        local text = fetchWikiPage(domain, title)
+        if text ~= "" then
+            if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
+            _fandomLead = text:sub(1, 400)
+            print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
+            print("[GAME-DBG] fandom preview: " .. text:sub(1, 150))
+            return text
         end
     end
     print("[GAME-DBG] fandom: no article")
@@ -4016,11 +4080,61 @@ function translateKeywordsAI(words)
     return out
 end
 
+-- full-text search across Roblox Wiki (finds per-item pages when game article lacks detail)
+function searchFandomWiki(pname, kws, enT)
+    local empty = {}
+    local keys, seen = {}, {}
+    for _, w in ipairs(kws or {}) do
+        if w:match("^[%a]+$") and not seen[w] then seen[w] = true table.insert(keys, w) end
+    end
+    for _, w in ipairs(enT or {}) do
+        if not seen[w] then seen[w] = true table.insert(keys, w) end
+    end
+    if #keys == 0 then print("[GAME-DBG] wikisearch: no keys") return empty, "" end
+    local domain = (_gameContext and _gameContext.wikiDomain) or ""
+    if domain == "" then domain = findGameWikiDomain(pname) end
+    if domain == "" then domain = "https://roblox.fandom.com" end
+    local gw = {}
+    for w in tostring(pname or ""):lower():gmatch("[%a]+") do
+        if #w >= 4 and #gw < 2 then table.insert(gw, w) end
+    end
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return empty, "" end
+    local enc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+    local q = enc(table.concat(gw, " ") .. " " .. table.concat(keys, " ")):gsub("%%20", "+")
+    print("[GAME-DBG] wikisearch q: " .. table.concat(gw, " ") .. " " .. table.concat(keys, " "))
+    local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. q .. "&format=json&srlimit=5", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+    if not ok or type(res) ~= "table" then print("[GAME-DBG] wikisearch http fail") return empty, "" end
+    local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+    if not dok or type(data) ~= "table" or not data.query or not data.query.search then
+        print("[GAME-DBG] wikisearch bad json") return empty, ""
+    end
+    local titles = {}
+    for _, r in ipairs(data.query.search) do
+        if type(r) == "table" and r.title and #titles < 3 then
+            print("[GAME-DBG] wikisearch hit: " .. tostring(r.title))
+            table.insert(titles, r.title)
+        end
+    end
+    local out, src = {}, ""
+    for _, t in ipairs(titles) do
+        if #out >= 3 then break end
+        local text = fetchWikiPage(domain, t)
+        if text ~= "" then
+            local sn = findWikiSnippets(text, keys, 3 - #out)
+            for _, s in ipairs(sn) do table.insert(out, s) end
+            if #sn > 0 and src == "" then src = tostring(t) end
+        end
+    end
+    print("[GAME-DBG] wikisearch snips: " .. #out)
+    return out, src
+end
+
 task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki dbg+relguard")
+print("[LOB] build: beta2-gamewiki5 simple-single-wiki")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4673,6 +4787,7 @@ local function handleQueuedChat(item)
                 pcall(function() creator2 = getCreatorName() or "" end)
                 -- 1) Roblox Wiki snippets first (cached article, no extra web spam)
                 local wikiDone = false
+                local wikiDone = false
                 local article = (_gameContext and _gameContext.fandom) or ""
                 print("[GAME-DBG] article cached chars=" .. #article)
                 if article == "" then
@@ -4684,8 +4799,9 @@ local function handleQueuedChat(item)
                     local kws = extractQuestionKeywords(item.cleaned)
                     print("[GAME-DBG] kws: " .. table.concat(kws, ","))
                     local snips = findWikiSnippets(article, kws, 3)
+                    local en = {}
                     if #snips == 0 then
-                        local en = translateKeywordsAI(kws)
+                        en = translateKeywordsAI(kws)
                         print("[GAME-DBG] en: " .. table.concat(en, ","))
                         if #en > 0 then snips = findWikiSnippets(article, en, 3) end
                     end
@@ -4697,6 +4813,18 @@ local function handleQueuedChat(item)
                         })
                         wikiDone = true
                         print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
+                    end
+                    if #snips == 0 then
+                        local wsnips, wsrc = searchFandomWiki(pname2, kws, en)
+                        if #wsnips > 0 then
+                            table.insert(apiMessages, {
+                                role = "system",
+                                content = "[GAME WIKI " .. ((wsrc ~= "") and wsrc or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips, "\n")
+                                    .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. Explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                            })
+                            wikiDone = true
+                            print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
+                        end
                     end
                 end
                 -- 2) fallback: generic web query in requested format
