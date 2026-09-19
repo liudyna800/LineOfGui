@@ -1938,7 +1938,7 @@ local function makeSystemPrompt(settings)
                 "[DO:putaway] убрать из рук.\n" ..
                 "[DO:eat <точное название>] съесть: взять, использовать, убрать.\n" ..
                 "ВАЖНО: take/use/eat/putaway реально могут провалиться (предмета физически нет, не получилось взять) — ты этого заранее не знаешь. Поэтому для этих 4 тегов пиши ОТВЕТ, СОСТОЯЩИЙ ТОЛЬКО ИЗ ТЕГА, без единого слова текста (точно как с [DO:searchanim]). Система сообщит тебе РЕАЛЬНЫЙ результат (успех или причина провала), и ты ответишь игроку СЛЕДУЮЩИМ сообщением, уже зная правду — тогда: если получилось, скажи что взял/использовал; если НЕ получилось — честно скажи что не вышло и почему, не утверждай успех.\n" ..
-                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.\n" .. "Опечатка или обрезанное слово («бутылк», «биту») — тоже предмет: ищи самый похожий из CURRENT INVENTORY и ставь тег с ЕГО точным названием. «Нет» говоришь только если совсем ничего похожего нет.")
+                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.\n" .. "Опечатка или обрезанное слово («бутылк», «биту») — тоже предмет: ищи самый похожий из CURRENT INVENTORY и ставь тег с ЕГО точным названием. «Нет» говоришь только если совсем ничего похожего нет." .. " ВОПРОСЫ ПРО ИГРУ — НЕ ПОВОД ДЛЯ ТЕГА: есть ли, что делает, где найти, что за, какой — отвечай словами из GAME KNOWLEDGE/WIKI, НИКОГДА не ставь take/use/eat. Теги take/use/eat — ТОЛЬКО на прямые просьбы: возьми, дай, используй, съешь.")
         end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -2018,7 +2018,8 @@ local function makeSystemPrompt(settings)
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
-        table.insert(parts, "YOUR CURRENT SETTINGS: Actions=" .. stA .. ", CustomAnims=" .. stU .. ". This is YOUR state right now, not hypothetical. If CustomAnims=off, UGC search/play is DISABLED for you: say UGC disabled in my settings, do NOT say if enabled, do NOT perform it, do NOT substitute a built-in dance. If Actions=off, say actions are disabled and reply text-only with no [DO:] tag.")
+        local stG = settings.GameUnderstanding and "on" or "off"
+        table.insert(parts, "YOUR CURRENT SETTINGS: Actions=" .. stA .. ", CustomAnims=" .. stU .. ", GameUnderstanding=" .. stG .. ". This is YOUR state right now, not hypothetical. If CustomAnims=off, UGC search/play is DISABLED for you: say UGC disabled in my settings, do NOT say if enabled, do NOT perform it, do NOT substitute a built-in dance. If Actions=off, say actions are disabled and reply text-only with no [DO:] tag. If GameUnderstanding=on, game web search runs AUTOMATICALLY on every game question - NEVER say you cannot browse, search or google.")
     end
 
     table.insert(parts,
@@ -4608,6 +4609,8 @@ local function handleQueuedChat(item)
                 or first == "где" or first == "куда" or first == "зачем" or first == "почему"
                 or first == "когда" or first == "кто" or first == "кого" or first == "какой"
                 or first == "какая" or first == "сколько" or first == "расскажи"
+                or first == "есть" or first == "посмотри" or first == "найди"
+                or first == "поищи" or first == "скажи" or first == "подскажи"
                 or first == "what" or first == "how" or first == "where" or first == "why"
                 or first == "when" or first == "who" or first == "which" or first == "does"
                 or first == "do" or first == "is" or first == "are" or first == "can"
@@ -4653,11 +4656,19 @@ local function handleQueuedChat(item)
                 local gc2 = 0
                 while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
                 local gw = gsr or ""
+                local webDone = false
                 if gw ~= "" and (gw:find("%[Wiki%]") or gw:find("%[News") or gw:find("%[Jina%]")) then
+                    webDone = true
                     table.insert(apiMessages, {
                         role = "system",
                         content = "[GAME SEARCH in " .. pname2 .. " for: " .. item.cleaned .. "]\n" .. gw:sub(1, 600)
                             .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. If it answers the question, explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                    })
+                end
+                if not webDone then
+                    table.insert(apiMessages, {
+                        role = "system",
+                        content = "[GAME " .. pname2 .. ": no wiki/search data on '" .. item.cleaned .. "'. The search already ran and found nothing. Say you do not know yet, do NOT invent mechanics, do NOT describe doors/boxes/places you cannot see, and NEVER claim you cannot search - search is automatic.]"
                     })
                 end
                 end
