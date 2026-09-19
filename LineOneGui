@@ -255,6 +255,7 @@ local function saveSettings()
             "ReactToMention="  .. b(cs.ReactToMention,  true),
             "PlayerAwareness=" .. b(cs.PlayerAwareness, true),
             "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
+            "GameUnderstanding=" .. b(cs.GameUnderstanding, false),
             "CameraLook="      .. b(cs.CameraLook,      true),
             "AvatarAwareness=" .. b(cs.AvatarAwareness, false),
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
@@ -319,6 +320,7 @@ local function loadSettings()
         cs.ReactToMention  = getBool("ReactToMention",  true)
         cs.PlayerAwareness = getBool("PlayerAwareness", true)
         cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
+        cs.GameUnderstanding = getBool("GameUnderstanding", false)
         cs.CameraLook      = getBool("CameraLook",      true)
         cs.AvatarAwareness = getBool("AvatarAwareness", false)
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
@@ -654,6 +656,7 @@ ClientSettings = {
     InventoryEnabled = true, -- v20 Beta 2: brat/ispolzovat predmety iz inventarya команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
+    GameUnderstanding = false, -- v20 Beta 2: game understanding
     PlayerAwareness = true, -- v17: ИИ видит кто рядом, с какой стороны, как себя ведёт
     CameraLook = true,
     AvatarAwareness = false, -- v20: avatar look (no face)      -- v17: бот плавно смотрит на говорящего игрока
@@ -714,6 +717,7 @@ do
     if cs2.WorldReactions  == nil then cs2.WorldReactions  = true  end
     if cs2.PlayerAwareness == nil then cs2.PlayerAwareness = true  end
     if cs2.PlaceAwareness  == nil then cs2.PlaceAwareness  = true  end
+    if cs2.GameUnderstanding == nil then cs2.GameUnderstanding = false end
     if cs2.CameraLook      == nil then cs2.CameraLook      = true  end
     if cs2.AvatarAwareness == nil then cs2.AvatarAwareness = false end
     if cs2.StripHash       == nil then cs2.StripHash       = true  end
@@ -1897,7 +1901,10 @@ end
 -- Chat handling functions
 
 -- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
-local _placeInfo = nil           -- { name, placeId, desc } — заполняется при старте
+local _placeInfo = nil -- { name, placeId, desc } — заполняется при старте
+local _gameContext = nil
+local _gameContextFetching = false
+local fetchGameContext = nil
 
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
@@ -2025,6 +2032,19 @@ local function makeSystemPrompt(settings)
             placeStr = placeStr .. ". Game description: " .. info.desc:sub(1,150)
         end
         table.insert(parts, placeStr)
+    end
+
+    if settings.GameUnderstanding then
+        local gc = _gameContext
+        if gc and gc.text and gc.text ~= "" then
+            table.insert(parts,
+                "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
+                .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules.")
+        else
+            table.insert(parts,
+                "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
+            pcall(function() fetchGameContext(false) end)
+        end
     end
 
     -- ── 5. ИГРОКИ РЯДОМ ──────────────────────────────────────────────────
@@ -3779,6 +3799,68 @@ task.spawn(function()
     fetchPlaceInfo()
 end)
 
+-- v20 Beta 2: GAME UNDERSTANDING (session cache, universal, no hardcoded games)
+_gameContext = nil
+_gameContextFetching = false
+
+local function getCreatorName()
+    local name = ""
+    pcall(function()
+        local info = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+        if info and info.Creator and info.Creator.Name then
+            name = tostring(info.Creator.Name)
+        end
+    end)
+    if name == "" then
+        pcall(function()
+            if game.CreatorId and game.CreatorId ~= 0 then
+                name = "id" .. tostring(game.CreatorId)
+            end
+        end)
+    end
+    return name
+end
+
+fetchGameContext = function(force)
+    if not ClientSettings.GameUnderstanding then return nil end
+    local pi = fetchPlaceInfo()
+    local pid = game.PlaceId
+    if _gameContext and _gameContext.placeId == pid and not force then return _gameContext end
+    if _gameContextFetching then return _gameContext end
+    _gameContextFetching = true
+    task.spawn(function()
+        local pname = (pi and pi.name) or "Unknown Game"
+        local pdesc = (pi and pi.desc) or ""
+        local creator = getCreatorName()
+        local query = "roblox " .. pname .. (creator ~= "" and (" by " .. creator) or "") .. " how to play teams goal"
+        local found = ""
+        local done = false
+        task.spawn(function()
+            local ok, res = pcall(doWebSearch, query)
+            if ok and res then found = tostring(res) end
+            done = true
+        end)
+        local w = 0
+        while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
+        if found:find("not found") or found:find("Results not found") then found = "" end
+        if #found > 600 then found = found:sub(1, 600) end
+        local parts = {}
+        table.insert(parts, "Game: " .. pname .. " (placeId " .. tostring(pid) .. ")")
+        if creator ~= "" then table.insert(parts, "Creator: " .. creator) end
+        if pdesc ~= "" then table.insert(parts, "About: " .. pdesc:sub(1, 250)) end
+        if found ~= "" then table.insert(parts, "Web: " .. found) end
+        _gameContext = { text = table.concat(parts, " | "), placeId = pid, at = os.clock() }
+        _gameContextFetching = false
+        print("[LOB] game context ready: " .. tostring(_gameContext.text):sub(1, 120))
+    end)
+    return _gameContext
+end
+
+task.spawn(function()
+    task.wait(4)
+    if ClientSettings.GameUnderstanding then fetchGameContext(true) end
+end)
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
 -- ИИ видит: кто рядом, с какой стороны, двигается ли/стоит/ведёт себя странно
@@ -3987,6 +4069,19 @@ function describeAvatar(player) -- global: chunk register limit 200
     local hasGraphic = char:FindFirstChild("Shirt Graphic") ~= nil
     table.insert(bits, "shirt: " .. (hasShirt and "yes" or "no") .. ", pants: " .. (hasPants and "yes" or "no") .. (hasGraphic and ", graphic print" or ""))
     return table.concat(bits, "; ")
+end
+
+-- v20 Beta 2: team of a player (universal, works in any game with Teams)
+local function getTeamName(p)
+    if not p then return "" end
+    local ok, res = pcall(function()
+        if p.Neutral then return "Neutral" end
+        local t = p.Team
+        if t and t.Name then return tostring(t.Name) end
+        return ""
+    end)
+    if ok and res and res ~= "" then return res end
+    return ""
 end
 
 local function buildPlayerAwarenessContext(settings)
@@ -4317,6 +4412,26 @@ local function handleQueuedChat(item)
                 content = "⚠ TOXIC BEHAVIOR DETECTED: player(s) [" .. table.concat(toxicNames, ", ") 
                     .. "] were repeatedly moving back-and-forth behind you. React naturally — call them out, say you noticed, or warn them."
             })
+        end
+    end
+
+    -- v20 Beta 2: GameUnderstanding - team snapshot (speaker + bot)
+    if settings.GameUnderstanding then
+        local speakerTeam, myTeam = "", ""
+        pcall(function()
+            if item.player then speakerTeam = getTeamName(item.player) or "" end
+        end)
+        pcall(function()
+            myTeam = getTeamName(Players.LocalPlayer) or ""
+        end)
+        if speakerTeam ~= "" or myTeam ~= "" then
+            local tmsg = "TEAMS (live): "
+                .. "speaker " .. tostring(item.displayName or item.name or "?")
+                .. " is [" .. (speakerTeam ~= "" and speakerTeam or "no team") .. "], "
+                .. "you are [" .. (myTeam ~= "" and myTeam or "no team") .. "]. "
+                .. "Know who is ally and who is enemy from GAME KNOWLEDGE (e.g. infected vs survivors). "
+                .. "Never guess a team that is not listed; if no team, treat everyone as neutral."
+            table.insert(apiMessages, { role = "system", content = tmsg })
         end
     end
 
@@ -8102,6 +8217,21 @@ makeToggleRow(
         ClientSettings.PlaceAwareness = state
         saveSettings()
         _placeInfo = nil
+    end
+)
+
+makeToggleRow(
+    automation,
+    "GameUnderstanding",
+    "Bot reads about the place via search and knows teams and goal.",
+    ClientSettings.GameUnderstanding == true,
+    function(state)
+        ClientSettings.GameUnderstanding = state
+        saveSettings()
+        if state then
+            _gameContext = nil
+            fetchGameContext(true)
+        end
     end
 )
 
