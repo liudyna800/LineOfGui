@@ -1902,9 +1902,9 @@ end
 
 -- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
 local _placeInfo = nil -- { name, placeId, desc } — заполняется при старте
-local _gameContext = nil
-local _gameContextFetching = false
-local fetchGameContext = nil
+_gameContext = nil
+_gameContextFetching = false
+fetchGameContext = nil
 
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
@@ -2039,7 +2039,8 @@ local function makeSystemPrompt(settings)
         if gc and gc.text and gc.text ~= "" then
             table.insert(parts,
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
-                .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules.")
+                .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
+                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists.")
         else
             table.insert(parts,
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
@@ -2286,19 +2287,20 @@ local function sendBotMessage(text)
     text = normalizeOneLine(text)
     if text == "" then return end
 
-    local maxLen = Constants.MaxResponseChars  -- 200 по умолчанию
+    local maxLen = 150 -- safety margin under the Roblox 200 chat limit
 
-    if #text <= maxLen then
-        -- Короткий текст — отправляем сразу
+    if charLen(text) <= maxLen then
         showBotChatMessage(text, true)
     else
-        -- Длинный — разбиваем на части
         local parts = splitTextIntoParts(text, maxLen)
+        local sent = 0
         for i, part in ipairs(parts) do
             if part ~= "" then
+                if sent >= 3 then break end
                 showBotChatMessage(part, true)
+                sent = sent + 1
                 if i < #parts then
-                    task.wait(1.2)  -- пауза между частями
+                    task.wait(1.2)
                 end
             end
         end
@@ -3803,7 +3805,7 @@ end)
 _gameContext = nil
 _gameContextFetching = false
 
-local function getCreatorName()
+function getCreatorName()
     local name = ""
     pcall(function()
         local info = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
@@ -4072,7 +4074,7 @@ function describeAvatar(player) -- global: chunk register limit 200
 end
 
 -- v20 Beta 2: team of a player (universal, works in any game with Teams)
-local function getTeamName(p)
+function getTeamName(p)
     if not p then return "" end
     local ok, res = pcall(function()
         if p.Neutral then return "Neutral" end
