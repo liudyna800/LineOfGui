@@ -2042,7 +2042,7 @@ local function makeSystemPrompt(settings)
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
                 .. (((_fandomLead ~= nil and _fandomLead ~= "") and (" Wiki: " .. _fandomLead:sub(1, 300))) or "")
                 .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
-                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search.")
+                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search." .. " If asked about a specific item or mechanic not covered by GAME KNOWLEDGE, GAME WIKI or GAME SEARCH above, say you do not know it - NEVER invent items, potions or weapons." .. " Wiki and search blocks below override your older messages - if you previously guessed wrong about an item, correct yourself now, do not repeat old guesses.")
         else
             table.insert(parts,
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
@@ -2264,6 +2264,28 @@ local function splitTextIntoParts(text, maxLen)
     return parts
 end
 
+local function sendChatChecked(text)
+    -- TextChatService only, returns ok + error (no silent drops)
+    local wok, ok, ferr = pcall(function()
+        local tcs = game:GetService("TextChatService")
+        local channels = tcs:FindFirstChild("TextChannels")
+        if not channels then return false, "no TextChannels" end
+        local channel = channels:FindFirstChild("RBXGeneral")
+            or channels:FindFirstChild(Constants.DefaultChatChannelName)
+        if not channel then
+            for _, ch in ipairs(channels:GetChildren()) do
+                if ch:IsA("TextChannel") then channel = ch break end
+            end
+        end
+        if not channel then return false, "no channel" end
+        local sok, serr = pcall(function() channel:SendAsync(text) end)
+        if sok then return true end
+        return false, tostring(serr)
+    end)
+    if not wok then return false, tostring(ok) end
+    return ok, ferr
+end
+
 local function sendBotMessage(text)
     if type(text) ~= "string" or text == "" then return end
     -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
@@ -2289,17 +2311,36 @@ local function sendBotMessage(text)
     text = normalizeOneLine(text)
     if text == "" then return end
 
-    local maxLen = 150 -- safety margin under the Roblox 200 chat limit
+    local maxLen = 90
+    local function deliver(part, depth)
+        depth = depth or 0
+        local ok, err = sendChatChecked(part)
+        if ok then return true end
+        print("[LOB] part fail len=" .. tostring(charLen(part)) .. ": " .. tostring(err):sub(1, 90))
+        if depth < 3 and charLen(part) > 40 then
+            local halves = splitTextIntoParts(part, math.max(40, math.floor(charLen(part) / 2)))
+            local allOk = true
+            for i, h in ipairs(halves) do
+                if h ~= "" then
+                    if not deliver(h, depth + 1) then allOk = false end
+                    if i < #halves then task.wait(1.2) end
+                end
+            end
+            return allOk
+        end
+        sendChatMessage(part)
+        return false
+    end
 
     if charLen(text) <= maxLen then
-        showBotChatMessage(text, true)
+        deliver(text, 0)
     else
         local parts = splitTextIntoParts(text, maxLen)
         local sent = 0
         for i, part in ipairs(parts) do
             if part ~= "" then
                 if sent >= 3 then break end
-                showBotChatMessage(part, true)
+                deliver(part, 0)
                 sent = sent + 1
                 if i < #parts then
                     task.wait(1.2)
@@ -4134,7 +4175,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki10 send-dbg")
+print("[LOB] build: beta2-gamewiki16 no-lies-override")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4810,7 +4851,7 @@ local function handleQueuedChat(item)
                         table.insert(apiMessages, {
                             role = "system",
                             content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
-                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                         })
                         wikiDone = true
                         print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
@@ -4821,7 +4862,7 @@ local function handleQueuedChat(item)
                             table.insert(apiMessages, {
                                 role = "system",
                                 content = "[GAME WIKI " .. ((wsrc ~= "") and wsrc or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips, "\n")
-                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                             })
                             wikiDone = true
                             print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
