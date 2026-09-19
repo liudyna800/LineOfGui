@@ -1902,9 +1902,9 @@ end
 
 -- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
 local _placeInfo = nil -- { name, placeId, desc } — заполняется при старте
-local _gameContext = nil
-local _gameContextFetching = false
-local fetchGameContext = nil
+_gameContext = nil
+_gameContextFetching = false
+fetchGameContext = nil
 
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
@@ -3803,7 +3803,7 @@ end)
 _gameContext = nil
 _gameContextFetching = false
 
-local function getCreatorName()
+function getCreatorName()
     local name = ""
     pcall(function()
         local info = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
@@ -4072,7 +4072,7 @@ function describeAvatar(player) -- global: chunk register limit 200
 end
 
 -- v20 Beta 2: team of a player (universal, works in any game with Teams)
-local function getTeamName(p)
+function getTeamName(p)
     if not p then return "" end
     local ok, res = pcall(function()
         if p.Neutral then return "Neutral" end
