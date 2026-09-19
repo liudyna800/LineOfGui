@@ -2042,7 +2042,7 @@ local function makeSystemPrompt(settings)
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
                 .. (((_fandomLead ~= nil and _fandomLead ~= "") and (" Wiki: " .. _fandomLead:sub(1, 300))) or "")
                 .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
-                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search.")
+                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search." .. " If asked about a specific item or mechanic not covered by GAME KNOWLEDGE, GAME WIKI or GAME SEARCH above, say you do not know it - NEVER invent items, potions or weapons." .. " Wiki and search blocks below override your older messages - if you previously guessed wrong about an item, correct yourself now, do not repeat old guesses.")
         else
             table.insert(parts,
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
@@ -2311,7 +2311,7 @@ local function sendBotMessage(text)
     text = normalizeOneLine(text)
     if text == "" then return end
 
-    local maxLen = 120
+    local maxLen = 90
     local function deliver(part, depth)
         depth = depth or 0
         local ok, err = sendChatChecked(part)
@@ -4175,7 +4175,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki11 adaptive-send")
+print("[LOB] build: beta2-gamewiki18 followup-Q")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4819,8 +4819,17 @@ local function handleQueuedChat(item)
                 or first == "what" or first == "how" or first == "where" or first == "why"
                 or first == "when" or first == "who" or first == "which" or first == "does"
                 or first == "do" or first == "is" or first == "are" or first == "can"
+                print("[GAME-DBG] isQ=" .. tostring(isQ) .. " first=" .. tostring(first))
+        end
+        -- follow-up: short reply after a game question is still about the game
+        _lastGameQ = _lastGameQ or {}
+        local nowQ = os.clock()
+        if (not isQ) and (nowQ - (_lastGameQ[item.userId] or 0)) < 90 and charLen(item.cleaned) < 40 then
+            isQ = true
+            print("[GAME-DBG] followup-Q")
         end
         if isQ then
+            _lastGameQ[item.userId] = nowQ
             local pi2 = _placeInfo or fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
             print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
@@ -4851,7 +4860,7 @@ local function handleQueuedChat(item)
                         table.insert(apiMessages, {
                             role = "system",
                             content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
-                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                         })
                         wikiDone = true
                         print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
@@ -4862,7 +4871,7 @@ local function handleQueuedChat(item)
                             table.insert(apiMessages, {
                                 role = "system",
                                 content = "[GAME WIKI " .. ((wsrc ~= "") and wsrc or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips, "\n")
-                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                             })
                             wikiDone = true
                             print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
@@ -5608,6 +5617,7 @@ local function processChatMessage(player, rawMessage)
     if (now - _floodLastBatch) < 1 then
         _floodBatchCount = _floodBatchCount + 1
         if _floodBatchCount > maxPerSecond then
+            print("[LOB] drop: flood " .. player.Name)
             return -- Drop message, too many in this second
         end
     else
@@ -5627,6 +5637,7 @@ local function processChatMessage(player, rawMessage)
         local msgLower = rawMessage:lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
         local nowTime = os.clock()
         if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 12 then
+            print("[LOB] drop: antispam-dup " .. player.Name)
             return -- то же сообщение в течение 12 секунд — игнорируем
         end
         _lastMsgPerUser[player.UserId] = { text = msgLower, time = nowTime }
@@ -5650,6 +5661,7 @@ local function processChatMessage(player, rawMessage)
 
     -- ВАЖНО: passesTrigger проверяем на оригинальном сообщении ДО нормализации
     if not mentionHit and not passesTrigger(settings, rawMessage) then
+        print("[LOB] drop: trigger " .. player.Name .. ": " .. tostring(rawMessage):sub(1, 40))
         return
     end
 
@@ -5694,9 +5706,9 @@ local function processChatMessage(player, rawMessage)
         local distXZ = math.sqrt(dx*dx + dz*dz)
 
         -- Горизонтальная дистанция превышает радиус — игрок слишком далеко
-        if distXZ > settings.Range.Studs then return end
+        if distXZ > settings.Range.Studs then print("[LOB] drop: range " .. math.floor(distXZ) .. ">" .. tostring(settings.Range.Studs) .. " " .. player.Name) return end
         -- Если ограничение по высоте включено — проверяем вертикаль
-        if heightRange > 0 and dy > heightRange then return end
+        if heightRange > 0 and dy > heightRange then print("[LOB] drop: height " .. player.Name) return end
 
         -- Wall Check (Line of Sight) — оптимизировано
         if not settings.Range.IgnoreWalls then
@@ -5710,6 +5722,7 @@ local function processChatMessage(player, rawMessage)
             RangeRaycastParams.FilterDescendantsInstances = RangeRaycastFilter
             local result = workspace:Raycast(origin, dir, RangeRaycastParams)
             if result and result.Instance then
+                print("[LOB] drop: wall " .. player.Name)
                 -- Луч что-то задел — стена между нами
                 return
             end
@@ -5722,6 +5735,7 @@ local function processChatMessage(player, rawMessage)
     
     rateLimiter:setCooldown(tonumber(settings.CooldownSecondsPerUser) or 0)
     if not rateLimiter:allow(player.UserId) then
+        print("[LOB] drop: cooldown " .. player.Name)
         return
     end
     
@@ -5744,6 +5758,8 @@ local function processChatMessage(player, rawMessage)
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
+    else
+        print("[LOB] drop: queue-full " .. player.Name)
     end
 end
 
