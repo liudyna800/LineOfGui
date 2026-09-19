@@ -4487,6 +4487,48 @@ local function handleQueuedChat(item)
     end
 
     -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
+    -- v20 Beta 2: GameUnderstanding - follow-up search per gameplay question
+    -- requested format: roblox [place] by [author] <question>
+    if settings.GameUnderstanding and item.cleaned and #item.cleaned > 3 and not item.isWorld then
+        local ql = item.cleaned:lower()
+        local isQ = ql:find("?", 1, true) ~= nil
+        if not isQ then
+            local first = ql:match("^(%S+)") or ""
+            isQ = first == "что" or first == "чего" or first == "чем" or first == "как"
+                or first == "где" or first == "куда" or first == "зачем" or first == "почему"
+                or first == "когда" or first == "кто" or first == "кого" or first == "какой"
+                or first == "какая" or first == "сколько" or first == "расскажи"
+                or first == "what" or first == "how" or first == "where" or first == "why"
+                or first == "when" or first == "who" or first == "which" or first == "does"
+                or first == "do" or first == "is" or first == "are" or first == "can"
+        end
+        if isQ then
+            local pi2 = _placeInfo or fetchPlaceInfo()
+            local pname2 = (pi2 and pi2.name) or ""
+            if pname2 ~= "" and pname2 ~= "Unknown Game" then
+                local creator2 = ""
+                pcall(function() creator2 = getCreatorName() or "" end)
+                local gq = "roblox " .. pname2 .. (creator2 ~= "" and (" by " .. creator2) or "") .. " " .. item.cleaned
+                local gsr, gdone = nil, false
+                task.spawn(function()
+                    local ok, res = pcall(doWebSearch, gq)
+                    gsr = (ok and res) or nil
+                    gdone = true
+                end)
+                local gc2 = 0
+                while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
+                local gw = gsr or ""
+                if gw ~= "" and (gw:find("%[Wiki%]") or gw:find("%[News") or gw:find("%[Jina%]")) then
+                    table.insert(apiMessages, {
+                        role = "system",
+                        content = "[GAME SEARCH in " .. pname2 .. " for: " .. item.cleaned .. "]\n" .. gw:sub(1, 600)
+                            .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. If it answers the question, explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                    })
+                end
+            end
+        end
+    end
+
     local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
     table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
