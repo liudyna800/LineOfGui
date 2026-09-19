@@ -2039,7 +2039,8 @@ local function makeSystemPrompt(settings)
         if gc and gc.text and gc.text ~= "" then
             table.insert(parts,
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
-                .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules.")
+                .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
+                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search.")
         else
             table.insert(parts,
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
@@ -2286,19 +2287,20 @@ local function sendBotMessage(text)
     text = normalizeOneLine(text)
     if text == "" then return end
 
-    local maxLen = Constants.MaxResponseChars  -- 200 по умолчанию
+    local maxLen = 150 -- safety margin under the Roblox 200 chat limit
 
-    if #text <= maxLen then
-        -- Короткий текст — отправляем сразу
+    if charLen(text) <= maxLen then
         showBotChatMessage(text, true)
     else
-        -- Длинный — разбиваем на части
         local parts = splitTextIntoParts(text, maxLen)
+        local sent = 0
         for i, part in ipairs(parts) do
             if part ~= "" then
+                if sent >= 3 then break end
                 showBotChatMessage(part, true)
+                sent = sent + 1
                 if i < #parts then
-                    task.wait(1.2)  -- пауза между частями
+                    task.wait(1.2)
                 end
             end
         end
@@ -3844,16 +3846,126 @@ fetchGameContext = function(force)
         while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
         if found:find("not found") or found:find("Results not found") then found = "" end
         if #found > 600 then found = found:sub(1, 600) end
+        local fandom = ""
+        pcall(function() fandom = fetchFandomArticle(pname) or "" end)
         local parts = {}
         table.insert(parts, "Game: " .. pname .. " (placeId " .. tostring(pid) .. ")")
         if creator ~= "" then table.insert(parts, "Creator: " .. creator) end
         if pdesc ~= "" then table.insert(parts, "About: " .. pdesc:sub(1, 250)) end
         if found ~= "" then table.insert(parts, "Web: " .. found) end
-        _gameContext = { text = table.concat(parts, " | "), placeId = pid, at = os.clock() }
+        if fandom ~= "" then table.insert(parts, "Wiki: fandom article cached") end
+        _gameContext = { text = table.concat(parts, " | "), placeId = pid, at = os.clock(), fandom = fandom }
         _gameContextFetching = false
         print("[LOB] game context ready: " .. tostring(_gameContext.text):sub(1, 120))
     end)
     return _gameContext
+end
+
+-- v20 Beta 2: Roblox Wiki (fandom) article cache + snippet search, universal per game
+-- All globals on purpose (chunk register limit 200)
+function fetchFandomArticle(pname)
+    pname = tostring(pname or "")
+    if pname == "" or pname == "Unknown Game" then return "" end
+    local title = pname:gsub("[^%w%s%-]", ""):gsub("%s+", "_"):match("^_*(.-)_*$") or ""
+    if title == "" then return "" end
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return "" end
+    local url = "https://r.jina.ai/https://roblox.fandom.com/wiki/" .. title
+    local ok, res = pcall(httprequest, { Url = url, Method = "GET", Headers = { ["Accept"] = "text/plain" } })
+    if not ok or type(res) ~= "table" then return "" end
+    local body = tostring(res.Body or res.body or "")
+    local text = body:gsub("\n+", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    if #text < 1500 then return "" end
+    local low = text:lower()
+    if low:find("this page does not exist", 1, true) or low:find("page not found", 1, true) then return "" end
+    local first = ""
+    for w in pname:lower():gmatch("[%a]+") do if #w >= 4 then first = w break end end
+    if first ~= "" and not low:find(first, 1, true) then return "" end
+    if #text > 6000 then text = text:sub(1, 6000) end
+    return text
+end
+
+function extractQuestionKeywords(text)
+    local stops = {
+        ["что"]=1, ["это"]=1, ["как"]=1, ["где"]=1, ["для"]=1, ["или"]=1,
+        ["его"]=1, ["ее"]=1, ["меня"]=1, ["тебя"]=1, ["есть"]=1, ["нет"]=1,
+        ["про"]=1, ["так"]=1, ["вот"]=1, ["уже"]=1, ["можно"]=1, ["почему"]=1,
+        ["зачем"]=1, ["когда"]=1, ["кто"]=1, ["такой"]=1, ["такая"]=1,
+        ["такое"]=1, ["делает"]=1, ["делать"]=1, ["игра"]=1, ["игре"]=1,
+        ["игру"]=1, ["этой"]=1, ["чем"]=1, ["того"]=1, ["очень"]=1,
+        ["просто"]=1, ["скажи"]=1, ["расскажи"]=1, ["пожалуйста"]=1,
+        ["what"]=1, ["how"]=1, ["where"]=1, ["why"]=1, ["when"]=1,
+        ["who"]=1, ["which"]=1, ["does"]=1, ["do"]=1, ["is"]=1,
+        ["are"]=1, ["can"]=1, ["the"]=1, ["and"]=1, ["for"]=1,
+        ["with"]=1, ["about"]=1, ["tell"]=1, ["please"]=1, ["game"]=1,
+        ["whats"]=1,
+    }
+    local out, seen = {}, {}
+    for tok in tostring(text or ""):gmatch("%S+") do
+        local w = tok:lower():gsub("^[%p%c%d]+", ""):gsub("[%p%c%d]+$", "")
+        if w ~= "" and not stops[w] and not seen[w] then
+            local n = (charLen and charLen(w)) or #w
+            if n >= 4 then seen[w] = true table.insert(out, w) end
+        end
+    end
+    return out
+end
+
+function findWikiSnippets(article, keywords, maxSnips)
+    maxSnips = maxSnips or 3
+    local out, used = {}, {}
+    article = tostring(article or "")
+    if article == "" then return out end
+    local low = article:lower()
+    for _, kw in ipairs(keywords or {}) do
+        kw = tostring(kw or ""):lower()
+        if #kw >= 3 and #out < maxSnips then
+            local s = 1
+            while #out < maxSnips do
+                local f = low:find(kw, s, true)
+                if not f then break end
+                local bucket = math.floor(f / 200)
+                if not used[bucket] then
+                    used[bucket] = true
+                    local a = math.max(1, f - 100)
+                    local b = math.min(#article, f + 200)
+                    table.insert(out, article:sub(a, b):gsub("%s+", " "))
+                end
+                s = f + #kw
+            end
+        end
+    end
+    return out
+end
+
+function translateKeywordsAI(words)
+    if not words or #words == 0 then return {} end
+    if not providerRouter then return {} end
+    local model = "openai/gpt-oss-20b"
+    pcall(function() if getModel and ClientSettings then model = getModel(ClientSettings) or model end end)
+    local payload = {
+        model = model, temperature = 0, max_tokens = 30,
+        messages = {
+            { role = "system", content = "Translate search words to English for a Roblox wiki search. Reply with ONLY comma-separated English words, nothing else." },
+            { role = "user", content = "Words: " .. table.concat(words, ", ") },
+        },
+    }
+    if tostring(model):find("^qwen/") then payload.reasoning_effort = "none" payload.temperature = nil end
+    local text, done = nil, false
+    task.spawn(function()
+        local ok, t = pcall(function() return providerRouter:chatCompletions(payload) end)
+        if ok then text = t end
+        done = true
+    end)
+    local w = 0
+    while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
+    local out = {}
+    if text and text ~= "" then
+        for tok in tostring(text):lower():gmatch("[%a]+") do
+            if #tok >= 3 and #out < 6 then table.insert(out, tok) end
+        end
+    end
+    return out
 end
 
 task.spawn(function()
@@ -4485,6 +4597,74 @@ local function handleQueuedChat(item)
     end
 
     -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
+    -- v20 Beta 2: GameUnderstanding - follow-up search per gameplay question
+    -- requested format: roblox [place] by [author] <question>
+    if settings.GameUnderstanding and item.cleaned and #item.cleaned > 3 and not item.isWorld then
+        local ql = item.cleaned:lower()
+        local isQ = ql:find("?", 1, true) ~= nil
+        if not isQ then
+            local first = ql:match("^(%S+)") or ""
+            isQ = first == "что" or first == "чего" or first == "чем" or first == "как"
+                or first == "где" or first == "куда" or first == "зачем" or first == "почему"
+                or first == "когда" or first == "кто" or first == "кого" or first == "какой"
+                or first == "какая" or first == "сколько" or first == "расскажи"
+                or first == "what" or first == "how" or first == "where" or first == "why"
+                or first == "when" or first == "who" or first == "which" or first == "does"
+                or first == "do" or first == "is" or first == "are" or first == "can"
+        end
+        if isQ then
+            local pi2 = _placeInfo or fetchPlaceInfo()
+            local pname2 = (pi2 and pi2.name) or ""
+            if pname2 ~= "" and pname2 ~= "Unknown Game" then
+                local creator2 = ""
+                pcall(function() creator2 = getCreatorName() or "" end)
+                -- 1) Roblox Wiki snippets first (cached article, no extra web spam)
+                local wikiDone = false
+                local article = (_gameContext and _gameContext.fandom) or ""
+                if article == "" then
+                    pcall(function() article = fetchFandomArticle(pname2) or "" end)
+                    if article ~= "" and _gameContext then _gameContext.fandom = article end
+                end
+                if article ~= "" then
+                    local kws = extractQuestionKeywords(item.cleaned)
+                    local snips = findWikiSnippets(article, kws, 3)
+                    if #snips == 0 then
+                        local en = translateKeywordsAI(kws)
+                        if #en > 0 then snips = findWikiSnippets(article, en, 3) end
+                    end
+                    if #snips > 0 then
+                        table.insert(apiMessages, {
+                            role = "system",
+                            content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
+                                .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. Explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                        })
+                        wikiDone = true
+                    end
+                end
+                -- 2) fallback: generic web query in requested format
+                if not wikiDone then
+                local gq = "roblox " .. pname2 .. (creator2 ~= "" and (" by " .. creator2) or "") .. " " .. item.cleaned
+                local gsr, gdone = nil, false
+                task.spawn(function()
+                    local ok, res = pcall(doWebSearch, gq)
+                    gsr = (ok and res) or nil
+                    gdone = true
+                end)
+                local gc2 = 0
+                while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
+                local gw = gsr or ""
+                if gw ~= "" and (gw:find("%[Wiki%]") or gw:find("%[News") or gw:find("%[Jina%]")) then
+                    table.insert(apiMessages, {
+                        role = "system",
+                        content = "[GAME SEARCH in " .. pname2 .. " for: " .. item.cleaned .. "]\n" .. gw:sub(1, 600)
+                            .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. If it answers the question, explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                    })
+                end
+                end
+            end
+        end
+    end
+
     local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
     table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
