@@ -2264,6 +2264,28 @@ local function splitTextIntoParts(text, maxLen)
     return parts
 end
 
+local function sendChatChecked(text)
+    -- TextChatService only, returns ok + error (no silent drops)
+    local wok, ok, ferr = pcall(function()
+        local tcs = game:GetService("TextChatService")
+        local channels = tcs:FindFirstChild("TextChannels")
+        if not channels then return false, "no TextChannels" end
+        local channel = channels:FindFirstChild("RBXGeneral")
+            or channels:FindFirstChild(Constants.DefaultChatChannelName)
+        if not channel then
+            for _, ch in ipairs(channels:GetChildren()) do
+                if ch:IsA("TextChannel") then channel = ch break end
+            end
+        end
+        if not channel then return false, "no channel" end
+        local sok, serr = pcall(function() channel:SendAsync(text) end)
+        if sok then return true end
+        return false, tostring(serr)
+    end)
+    if not wok then return false, tostring(ok) end
+    return ok, ferr
+end
+
 local function sendBotMessage(text)
     if type(text) ~= "string" or text == "" then return end
     -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
@@ -2289,17 +2311,36 @@ local function sendBotMessage(text)
     text = normalizeOneLine(text)
     if text == "" then return end
 
-    local maxLen = 150 -- safety margin under the Roblox 200 chat limit
+    local maxLen = 120
+    local function deliver(part, depth)
+        depth = depth or 0
+        local ok, err = sendChatChecked(part)
+        if ok then return true end
+        print("[LOB] part fail len=" .. tostring(charLen(part)) .. ": " .. tostring(err):sub(1, 90))
+        if depth < 3 and charLen(part) > 40 then
+            local halves = splitTextIntoParts(part, math.max(40, math.floor(charLen(part) / 2)))
+            local allOk = true
+            for i, h in ipairs(halves) do
+                if h ~= "" then
+                    if not deliver(h, depth + 1) then allOk = false end
+                    if i < #halves then task.wait(1.2) end
+                end
+            end
+            return allOk
+        end
+        sendChatMessage(part)
+        return false
+    end
 
     if charLen(text) <= maxLen then
-        showBotChatMessage(text, true)
+        deliver(text, 0)
     else
         local parts = splitTextIntoParts(text, maxLen)
         local sent = 0
         for i, part in ipairs(parts) do
             if part ~= "" then
                 if sent >= 3 then break end
-                showBotChatMessage(part, true)
+                deliver(part, 0)
                 sent = sent + 1
                 if i < #parts then
                     task.wait(1.2)
@@ -4039,8 +4080,8 @@ function findWikiSnippets(article, keywords, maxSnips)
                 local bucket = math.floor(f / 200)
                 if not used[bucket] then
                     used[bucket] = true
-                    local a = math.max(1, f - 100)
-                    local b = math.min(#article, f + 200)
+                    local a = math.max(1, f - 150)
+                    local b = math.min(#article, f + 300)
                     table.insert(out, (article:sub(a, b):gsub("%s+", " ")))
                 end
                 s = f + #kw
@@ -4134,7 +4175,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki8 gsub-fix")
+print("[LOB] build: beta2-gamewiki11 adaptive-send")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4810,7 +4851,7 @@ local function handleQueuedChat(item)
                         table.insert(apiMessages, {
                             role = "system",
                             content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
-                                .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. Explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                         })
                         wikiDone = true
                         print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
@@ -4821,7 +4862,7 @@ local function handleQueuedChat(item)
                             table.insert(apiMessages, {
                                 role = "system",
                                 content = "[GAME WIKI " .. ((wsrc ~= "") and wsrc or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips, "\n")
-                                    .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. Explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                             })
                             wikiDone = true
                             print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
@@ -4973,9 +5014,7 @@ local function handleQueuedChat(item)
         end
     end
     if err or not text or text == "" then
-        if ClientSettings.Debug then
-            print("[LOB] AI error: " .. tostring(err or "empty response"))
-        end
+        print("[LOB] AI error: " .. tostring(err or "empty response"))
         return
     end
 
@@ -5270,9 +5309,11 @@ local function handleQueuedChat(item)
         appendHistory(history, historyUserMsg, cleanText)
     end
 
+    print("[LOB] final chars=" .. tostring(charLen(cleanText or "")) .. " head=" .. tostring(cleanText or ""):sub(1, 90))
     if cleanText and cleanText ~= "" then
         print("[LOB] reply time: " .. string.format("%.1fs", os.clock() - _t0) .. " for: " .. tostring(item.cleaned):sub(1, 40))
-        sendBotMessage(cleanText)
+        local sok, serr = pcall(sendBotMessage, cleanText)
+        if not sok then print("[LOB] send FAIL: " .. tostring(serr)) end
     end
 end
 
