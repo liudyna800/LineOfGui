@@ -4051,7 +4051,11 @@ function extractQuestionKeywords(text)
         ["who"]=1, ["which"]=1, ["does"]=1, ["do"]=1, ["is"]=1,
         ["are"]=1, ["can"]=1, ["the"]=1, ["and"]=1, ["for"]=1,
         ["with"]=1, ["about"]=1, ["tell"]=1, ["please"]=1, ["game"]=1,
-        ["whats"]=1,
+        ["whats"]=1, ["there"]=1, ["their"]=1, ["these"]=1, ["those"]=1,
+        ["this"]=1, ["that"]=1, ["from"]=1, ["have"]=1, ["has"]=1,
+        ["had"]=1, ["was"]=1, ["were"]=1, ["been"]=1, ["will"]=1,
+        ["would"]=1, ["your"]=1, ["they"]=1, ["them"]=1, ["than"]=1,
+        ["then"]=1, ["you"]=1, ["into"]=1, ["know"]=1,
     }
     local out, seen = {}, {}
     for tok in tostring(text or ""):gmatch("%S+") do
@@ -4070,12 +4074,23 @@ function findWikiSnippets(article, keywords, maxSnips)
     article = tostring(article or "")
     if article == "" then return out end
     local low = article:lower()
+    local function stemEn(w)
+        if not w:match("^[%a]+$") then return w end
+        if #w > 4 and w:sub(-3) == "ies" then return w:sub(1, -4) .. "y" end
+        if #w > 4 and w:sub(-2) == "es" then return w:sub(1, -3) end
+        if #w > 3 and w:sub(-1) == "s" then return w:sub(1, -2) end
+        return w
+    end
     for _, kw in ipairs(keywords or {}) do
         kw = tostring(kw or ""):lower()
         if #kw >= 3 and #out < maxSnips then
+            local vars = { kw }
+            local st = stemEn(kw)
+            if st ~= kw then table.insert(vars, st) end
+            for _, v in ipairs(vars) do
             local s = 1
             while #out < maxSnips do
-                local f = low:find(kw, s, true)
+                local f = low:find(v, s, true)
                 if not f then break end
                 local bucket = math.floor(f / 200)
                 if not used[bucket] then
@@ -4084,7 +4099,8 @@ function findWikiSnippets(article, keywords, maxSnips)
                     local b = math.min(#article, f + 300)
                     table.insert(out, (article:sub(a, b):gsub("%s+", " ")))
                 end
-                s = f + #kw
+                s = f + #v
+            end
             end
         end
     end
@@ -4175,7 +4191,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki16 no-lies-override")
+print("[LOB] build: beta2-gamewiki21 restored")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4819,8 +4835,17 @@ local function handleQueuedChat(item)
                 or first == "what" or first == "how" or first == "where" or first == "why"
                 or first == "when" or first == "who" or first == "which" or first == "does"
                 or first == "do" or first == "is" or first == "are" or first == "can"
+                print("[GAME-DBG] isQ=" .. tostring(isQ) .. " first=" .. tostring(first))
+        end
+        -- follow-up: short reply after a game question is still about the game
+        _lastGameQ = _lastGameQ or {}
+        local nowQ = os.clock()
+        if (not isQ) and (nowQ - (_lastGameQ[item.userId] or 0)) < 90 and charLen(item.cleaned) < 40 then
+            isQ = true
+            print("[GAME-DBG] followup-Q")
         end
         if isQ then
+            _lastGameQ[item.userId] = nowQ
             local pi2 = _placeInfo or fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
             print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
@@ -4851,7 +4876,7 @@ local function handleQueuedChat(item)
                         table.insert(apiMessages, {
                             role = "system",
                             content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
-                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                         })
                         wikiDone = true
                         print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
@@ -4862,7 +4887,7 @@ local function handleQueuedChat(item)
                             table.insert(apiMessages, {
                                 role = "system",
                                 content = "[GAME WIKI " .. ((wsrc ~= "") and wsrc or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips, "\n")
-                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                    .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                             })
                             wikiDone = true
                             print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
@@ -5608,6 +5633,7 @@ local function processChatMessage(player, rawMessage)
     if (now - _floodLastBatch) < 1 then
         _floodBatchCount = _floodBatchCount + 1
         if _floodBatchCount > maxPerSecond then
+            print("[LOB] drop: flood " .. player.Name)
             return -- Drop message, too many in this second
         end
     else
@@ -5627,6 +5653,7 @@ local function processChatMessage(player, rawMessage)
         local msgLower = rawMessage:lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
         local nowTime = os.clock()
         if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 12 then
+            print("[LOB] drop: antispam-dup " .. player.Name)
             return -- то же сообщение в течение 12 секунд — игнорируем
         end
         _lastMsgPerUser[player.UserId] = { text = msgLower, time = nowTime }
@@ -5650,6 +5677,7 @@ local function processChatMessage(player, rawMessage)
 
     -- ВАЖНО: passesTrigger проверяем на оригинальном сообщении ДО нормализации
     if not mentionHit and not passesTrigger(settings, rawMessage) then
+        print("[LOB] drop: trigger " .. player.Name .. ": " .. tostring(rawMessage):sub(1, 40))
         return
     end
 
@@ -5694,9 +5722,9 @@ local function processChatMessage(player, rawMessage)
         local distXZ = math.sqrt(dx*dx + dz*dz)
 
         -- Горизонтальная дистанция превышает радиус — игрок слишком далеко
-        if distXZ > settings.Range.Studs then return end
+        if distXZ > settings.Range.Studs then print("[LOB] drop: range " .. math.floor(distXZ) .. ">" .. tostring(settings.Range.Studs) .. " " .. player.Name) return end
         -- Если ограничение по высоте включено — проверяем вертикаль
-        if heightRange > 0 and dy > heightRange then return end
+        if heightRange > 0 and dy > heightRange then print("[LOB] drop: height " .. player.Name) return end
 
         -- Wall Check (Line of Sight) — оптимизировано
         if not settings.Range.IgnoreWalls then
@@ -5710,6 +5738,7 @@ local function processChatMessage(player, rawMessage)
             RangeRaycastParams.FilterDescendantsInstances = RangeRaycastFilter
             local result = workspace:Raycast(origin, dir, RangeRaycastParams)
             if result and result.Instance then
+                print("[LOB] drop: wall " .. player.Name)
                 -- Луч что-то задел — стена между нами
                 return
             end
@@ -5722,6 +5751,7 @@ local function processChatMessage(player, rawMessage)
     
     rateLimiter:setCooldown(tonumber(settings.CooldownSecondsPerUser) or 0)
     if not rateLimiter:allow(player.UserId) then
+        print("[LOB] drop: cooldown " .. player.Name)
         return
     end
     
@@ -5744,6 +5774,8 @@ local function processChatMessage(player, rawMessage)
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
+    else
+        print("[LOB] drop: queue-full " .. player.Name)
     end
 end
 
