@@ -1938,7 +1938,7 @@ local function makeSystemPrompt(settings)
                 "[DO:putaway] убрать из рук.\n" ..
                 "[DO:eat <точное название>] съесть: взять, использовать, убрать.\n" ..
                 "ВАЖНО: take/use/eat/putaway реально могут провалиться (предмета физически нет, не получилось взять) — ты этого заранее не знаешь. Поэтому для этих 4 тегов пиши ОТВЕТ, СОСТОЯЩИЙ ТОЛЬКО ИЗ ТЕГА, без единого слова текста (точно как с [DO:searchanim]). Система сообщит тебе РЕАЛЬНЫЙ результат (успех или причина провала), и ты ответишь игроку СЛЕДУЮЩИМ сообщением, уже зная правду — тогда: если получилось, скажи что взял/использовал; если НЕ получилось — честно скажи что не вышло и почему, не утверждай успех.\n" ..
-                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.\n" .. "Опечатка или обрезанное слово («бутылк», «биту») — тоже предмет: ищи самый похожий из CURRENT INVENTORY и ставь тег с ЕГО точным названием. «Нет» говоришь только если совсем ничего похожего нет.")
+                "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.\n" .. "Опечатка или обрезанное слово («бутылк», «биту») — тоже предмет: ищи самый похожий из CURRENT INVENTORY и ставь тег с ЕГО точным названием. «Нет» говоришь только если совсем ничего похожего нет." .. " ВОПРОСЫ ПРО ИГРУ — НЕ ПОВОД ДЛЯ ТЕГА: есть ли, что делает, где найти, что за, какой — отвечай словами из GAME KNOWLEDGE/WIKI, НИКОГДА не ставь take/use/eat. Теги take/use/eat — ТОЛЬКО на прямые просьбы: возьми, дай, используй, съешь.")
         end
         if settings.TokenEconomy then
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -2018,7 +2018,8 @@ local function makeSystemPrompt(settings)
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
-        table.insert(parts, "YOUR CURRENT SETTINGS: Actions=" .. stA .. ", CustomAnims=" .. stU .. ". This is YOUR state right now, not hypothetical. If CustomAnims=off, UGC search/play is DISABLED for you: say UGC disabled in my settings, do NOT say if enabled, do NOT perform it, do NOT substitute a built-in dance. If Actions=off, say actions are disabled and reply text-only with no [DO:] tag.")
+        local stG = settings.GameUnderstanding and "on" or "off"
+        table.insert(parts, "YOUR CURRENT SETTINGS: Actions=" .. stA .. ", CustomAnims=" .. stU .. ", GameUnderstanding=" .. stG .. ". This is YOUR state right now, not hypothetical. If CustomAnims=off, UGC search/play is DISABLED for you: say UGC disabled in my settings, do NOT say if enabled, do NOT perform it, do NOT substitute a built-in dance. If Actions=off, say actions are disabled and reply text-only with no [DO:] tag. If GameUnderstanding=on, game web search runs AUTOMATICALLY on every game question - NEVER say you cannot browse, search or google.")
     end
 
     table.insert(parts,
@@ -2040,7 +2041,7 @@ local function makeSystemPrompt(settings)
             table.insert(parts,
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
                 .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
-                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists.")
+                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search.")
         else
             table.insert(parts,
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
@@ -3846,16 +3847,173 @@ fetchGameContext = function(force)
         while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
         if found:find("not found") or found:find("Results not found") then found = "" end
         if #found > 600 then found = found:sub(1, 600) end
+        local fandom = ""
+        pcall(function() fandom = fetchFandomArticle(pname) or "" end)
         local parts = {}
         table.insert(parts, "Game: " .. pname .. " (placeId " .. tostring(pid) .. ")")
         if creator ~= "" then table.insert(parts, "Creator: " .. creator) end
         if pdesc ~= "" then table.insert(parts, "About: " .. pdesc:sub(1, 250)) end
         if found ~= "" then table.insert(parts, "Web: " .. found) end
-        _gameContext = { text = table.concat(parts, " | "), placeId = pid, at = os.clock() }
+        if fandom ~= "" then table.insert(parts, "Wiki: fandom article cached") end
+        _gameContext = { text = table.concat(parts, " | "), placeId = pid, at = os.clock(), fandom = fandom }
         _gameContextFetching = false
         print("[LOB] game context ready: " .. tostring(_gameContext.text):sub(1, 120))
     end)
     return _gameContext
+end
+
+-- v20 Beta 2: Roblox Wiki (fandom) article cache + snippet search, universal per game
+-- All globals on purpose (chunk register limit 200)
+function fetchFandomArticle(pname)
+    pname = tostring(pname or "")
+    if pname == "" or pname == "Unknown Game" then return "" end
+    local title = pname:gsub("[^%w%s%-]", ""):gsub("%s+", "_"):match("^_*(.-)_*$") or ""
+    if title == "" then return "" end
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return "" end
+    local clean = pname:gsub("[^%w%s%-]", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    if clean == "" then print("[GAME-DBG] fandom: bad place name") return "" end
+    local words = {}
+    for w in clean:gmatch("%S+") do table.insert(words, w) end
+    local variants = {}
+    local function vtitle(n)
+        local t = {}
+        for i = 1, math.min(n, #words) do table.insert(t, words[i]) end
+        return table.concat(t, "_")
+    end
+    table.insert(variants, vtitle(#words))
+    if #words > 3 then table.insert(variants, vtitle(3)) end
+    if #words > 2 then table.insert(variants, vtitle(2)) end
+    local seenV = {}
+    for _, title in ipairs(variants) do
+        if title ~= "" and not seenV[title] then
+            seenV[title] = true
+            -- 1) MediaWiki API direct (no Jina dependency)
+            local apiUrl = "https://roblox.fandom.com/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&titles=" .. title
+            print("[GAME-DBG] fandom api try: " .. title)
+            local ok, res = pcall(httprequest, { Url = apiUrl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+            if ok and type(res) == "table" then
+                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+                if dok and type(data) == "table" and data.query and data.query.pages then
+                    for _, page in pairs(data.query.pages) do
+                        if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 1500 then
+                            local text = page.extract:gsub("%s+", " ")
+                            if #text > 6000 then text = text:sub(1, 6000) end
+                            print("[GAME-DBG] fandom api OK: " .. title .. " (" .. #text .. " chars)")
+                            return text
+                        end
+                    end
+                end
+                print("[GAME-DBG] fandom api empty: " .. title)
+            else
+                print("[GAME-DBG] fandom api http fail: " .. title)
+            end
+            -- 2) Jina reader fallback
+            local url = "https://r.jina.ai/https://roblox.fandom.com/wiki/" .. title
+            print("[GAME-DBG] fandom jina try: " .. title)
+            local ok2, res2 = pcall(httprequest, { Url = url, Method = "GET", Headers = { ["Accept"] = "text/plain" } })
+            if ok2 and type(res2) == "table" then
+                local body = tostring(res2.Body or res2.body or "")
+                local text = body:gsub("\n+", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+                if #text >= 1500 then
+                    local low = text:lower()
+                    if not low:find("this page does not exist", 1, true) and not low:find("page not found", 1, true) then
+                        if #text > 6000 then text = text:sub(1, 6000) end
+                        print("[GAME-DBG] fandom jina OK: " .. title .. " (" .. #text .. " chars)")
+                        return text
+                    end
+                end
+                print("[GAME-DBG] fandom jina short/missing: " .. title .. " (" .. #text .. ")")
+            else
+                print("[GAME-DBG] fandom jina http fail: " .. title)
+            end
+        end
+    end
+    print("[GAME-DBG] fandom: no article")
+    return ""
+end
+
+function extractQuestionKeywords(text)
+    local stops = {
+        ["что"]=1, ["это"]=1, ["как"]=1, ["где"]=1, ["для"]=1, ["или"]=1,
+        ["его"]=1, ["ее"]=1, ["меня"]=1, ["тебя"]=1, ["есть"]=1, ["нет"]=1,
+        ["про"]=1, ["так"]=1, ["вот"]=1, ["уже"]=1, ["можно"]=1, ["почему"]=1,
+        ["зачем"]=1, ["когда"]=1, ["кто"]=1, ["такой"]=1, ["такая"]=1,
+        ["такое"]=1, ["делает"]=1, ["делать"]=1, ["игра"]=1, ["игре"]=1,
+        ["игру"]=1, ["этой"]=1, ["чем"]=1, ["того"]=1, ["очень"]=1,
+        ["просто"]=1, ["скажи"]=1, ["расскажи"]=1, ["пожалуйста"]=1,
+        ["what"]=1, ["how"]=1, ["where"]=1, ["why"]=1, ["when"]=1,
+        ["who"]=1, ["which"]=1, ["does"]=1, ["do"]=1, ["is"]=1,
+        ["are"]=1, ["can"]=1, ["the"]=1, ["and"]=1, ["for"]=1,
+        ["with"]=1, ["about"]=1, ["tell"]=1, ["please"]=1, ["game"]=1,
+        ["whats"]=1,
+    }
+    local out, seen = {}, {}
+    for tok in tostring(text or ""):gmatch("%S+") do
+        local w = tok:lower():gsub("^[%p%c%d]+", ""):gsub("[%p%c%d]+$", "")
+        if w ~= "" and not stops[w] and not seen[w] then
+            local n = (charLen and charLen(w)) or #w
+            if n >= 4 then seen[w] = true table.insert(out, w) end
+        end
+    end
+    return out
+end
+
+function findWikiSnippets(article, keywords, maxSnips)
+    maxSnips = maxSnips or 3
+    local out, used = {}, {}
+    article = tostring(article or "")
+    if article == "" then return out end
+    local low = article:lower()
+    for _, kw in ipairs(keywords or {}) do
+        kw = tostring(kw or ""):lower()
+        if #kw >= 3 and #out < maxSnips then
+            local s = 1
+            while #out < maxSnips do
+                local f = low:find(kw, s, true)
+                if not f then break end
+                local bucket = math.floor(f / 200)
+                if not used[bucket] then
+                    used[bucket] = true
+                    local a = math.max(1, f - 100)
+                    local b = math.min(#article, f + 200)
+                    table.insert(out, article:sub(a, b):gsub("%s+", " "))
+                end
+                s = f + #kw
+            end
+        end
+    end
+    return out
+end
+
+function translateKeywordsAI(words)
+    if not words or #words == 0 then return {} end
+    if not providerRouter then return {} end
+    local model = "openai/gpt-oss-20b"
+    pcall(function() if getModel and ClientSettings then model = getModel(ClientSettings) or model end end)
+    local payload = {
+        model = model, temperature = 0, max_tokens = 30,
+        messages = {
+            { role = "system", content = "Translate search words to English for a Roblox wiki search. Reply with ONLY comma-separated English words, nothing else." },
+            { role = "user", content = "Words: " .. table.concat(words, ", ") },
+        },
+    }
+    if tostring(model):find("^qwen/") then payload.reasoning_effort = "none" payload.temperature = nil end
+    local text, done = nil, false
+    task.spawn(function()
+        local ok, t = pcall(function() return providerRouter:chatCompletions(payload) end)
+        if ok then text = t end
+        done = true
+    end)
+    local w = 0
+    while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
+    local out = {}
+    if text and text ~= "" then
+        for tok in tostring(text):lower():gmatch("[%a]+") do
+            if #tok >= 3 and #out < 6 then table.insert(out, tok) end
+        end
+    end
+    return out
 end
 
 task.spawn(function()
@@ -4498,6 +4656,8 @@ local function handleQueuedChat(item)
                 or first == "где" or first == "куда" or first == "зачем" or first == "почему"
                 or first == "когда" or first == "кто" or first == "кого" or first == "какой"
                 or first == "какая" or first == "сколько" or first == "расскажи"
+                or first == "есть" or first == "посмотри" or first == "найди"
+                or first == "поищи" or first == "скажи" or first == "подскажи"
                 or first == "what" or first == "how" or first == "where" or first == "why"
                 or first == "when" or first == "who" or first == "which" or first == "does"
                 or first == "do" or first == "is" or first == "are" or first == "can"
@@ -4505,9 +4665,39 @@ local function handleQueuedChat(item)
         if isQ then
             local pi2 = _placeInfo or fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
+            print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
             if pname2 ~= "" and pname2 ~= "Unknown Game" then
                 local creator2 = ""
                 pcall(function() creator2 = getCreatorName() or "" end)
+                -- 1) Roblox Wiki snippets first (cached article, no extra web spam)
+                local wikiDone = false
+                local article = (_gameContext and _gameContext.fandom) or ""
+                if article == "" then
+                    pcall(function() article = fetchFandomArticle(pname2) or "" end)
+                    if article ~= "" and _gameContext then _gameContext.fandom = article end
+                    print("[GAME-DBG] article chars=" .. #article)
+                end
+                if article ~= "" then
+                    local kws = extractQuestionKeywords(item.cleaned)
+                    print("[GAME-DBG] kws: " .. table.concat(kws, ","))
+                    local snips = findWikiSnippets(article, kws, 3)
+                    if #snips == 0 then
+                        local en = translateKeywordsAI(kws)
+                        print("[GAME-DBG] en: " .. table.concat(en, ","))
+                        if #en > 0 then snips = findWikiSnippets(article, en, 3) end
+                    end
+                    if #snips > 0 then
+                        table.insert(apiMessages, {
+                            role = "system",
+                            content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
+                                .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. Explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
+                        })
+                        wikiDone = true
+                        print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
+                    end
+                end
+                -- 2) fallback: generic web query in requested format
+                if not wikiDone then
                 local gq = "roblox " .. pname2 .. (creator2 ~= "" and (" by " .. creator2) or "") .. " " .. item.cleaned
                 local gsr, gdone = nil, false
                 task.spawn(function()
@@ -4518,12 +4708,24 @@ local function handleQueuedChat(item)
                 local gc2 = 0
                 while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
                 local gw = gsr or ""
+                local webDone = false
+                print("[GAME-DBG] web len=" .. #gw .. " marks=" .. tostring((gw:find("%[Wiki%]") and "W" or "-") .. (gw:find("%[News") and "N" or "-") .. (gw:find("%[Jina%]") and "J" or "-")))
                 if gw ~= "" and (gw:find("%[Wiki%]") or gw:find("%[News") or gw:find("%[Jina%]")) then
+                    webDone = true
+                    print("[GAME-DBG] inject: web")
                     table.insert(apiMessages, {
                         role = "system",
                         content = "[GAME SEARCH in " .. pname2 .. " for: " .. item.cleaned .. "]\n" .. gw:sub(1, 600)
                             .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. If it answers the question, explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
                     })
+                end
+                if not webDone then
+                    print("[GAME-DBG] inject: nodata")
+                    table.insert(apiMessages, {
+                        role = "system",
+                        content = "[GAME " .. pname2 .. ": no wiki/search data on '" .. item.cleaned .. "'. The search already ran and found nothing. Say you do not know yet, do NOT invent mechanics, do NOT describe doors/boxes/places you cannot see, and NEVER claim you cannot search - search is automatic.]"
+                    })
+                end
                 end
             end
         end
