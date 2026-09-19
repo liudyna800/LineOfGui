@@ -1923,7 +1923,7 @@ local function makeSystemPrompt(settings)
     if settings.ActionsEnabled then
         if settings.InventoryEnabled ~= false then
             table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
-                "Когда просят предмет: найди его в CURRENT INVENTORY ниже и скопируй ТОЧНОЕ название в тег: просят «бутылку» а там Bottle — тег [DO:take Bottle]; просят «биту» а там Bat — тег [DO:take Bat]. НЕПРАВИЛЬНО: [DO:take бутылку]. ПРАВИЛЬНО: [DO:take Bottle]. Название в теге всегда как в списке, перевод запрещён. Ищешь как анимации через searchanim: список выше = каталог, точное название из него = твой запрос" ..
+                "Когда просят предмет: найди его в CURRENT INVENTORY ниже и скопируй ТОЧНОЕ название в тег: просят «бутылку» а там Bottle — тег [DO:take Bottle]; просят «биту» а там Bat — тег [DO:take Bat]. НЕПРАВИЛЬНО: [DO:take бутылку]. ПРАВИЛЬНО: [DO:take Bottle]. Название в теге всегда как в списке, перевод запрещён. Ты знаешь переводы ЛЮБЫХ слов RU<->EN сам (бутылка=Bottle, бита=бита=Bat, еда=food и т.д.), уменьшительные, множественное число, опечатки — всегда маппи на самый похожий по СМЫСЛУ предмет из списка, а не по буквам. Ищешь как анимации через searchanim: список выше = каталог, точное название из него = твой запрос" ..
                 "[DO:take <точное название>] взять в руки.\n" ..
                 "«Возьми» = ТОЛЬКО [DO:take]: взял и держишь, ничего не активируешь. [DO:eat] только когда просят съесть или «возьми используй и убери».\n" ..
                 "[DO:use <точное название>] взять (если не в руках) и сразу использовать: «используй биту» — [DO:use Bat].\n" ..
@@ -2007,7 +2007,7 @@ local function makeSystemPrompt(settings)
     -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
     -- v20 Beta 2: honesty about abilities (static, fast)
     table.insert(parts,
-        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement. You CANNOT: hear voice chat, see player screen/video/avatar, parkour/climb/build/fight/use items/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
+        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
@@ -3340,15 +3340,92 @@ function InventoryBeta2.ListInventory()
 	return backpack, hands, guiList
 end
 
+function InventoryBeta2.DescribeTool(tool)
+	local tip = ""
+	pcall(function() tip = tostring(tool.ToolTip or "") end)
+	tip = (tip:match("^%s*(.-)%s*$") or "")
+	if #tip > 60 then tip = tip:sub(1, 60) end
+	if tip ~= "" then return tool.Name .. " [" .. tip .. "]" end
+	return tool.Name
+end
+
+function InventoryBeta2.CandidateNames()
+	local names = {}
+	for _, e in ipairs(scanSources()) do
+		if e.where == "hands" or e.where == "backpack" then
+			table.insert(names, e.tool.Name)
+		end
+	end
+	return names
+end
+
+-- УНИВЕРСАЛЬНЫЙ резолвер без словарей: спрашиваем ту же ИИ-модель,
+-- какой предмет из инвентаря имел в виду игрок. Работает для любого
+-- языка, опечаток, уменьшительных (бутылка=Bottle, бита=Bat и т.д.).
+function InventoryBeta2.ResolveNameAI(want, candidates)
+	want = tostring(want or ""):match("^%s*(.-)%s*$") or ""
+	if want == "" or not candidates or #candidates == 0 then return nil end
+	-- быстрый путь уже проверен FindTool — сюда попадаем только при score=99
+	local model = "openai/gpt-oss-20b"
+	pcall(function()
+		if getModel and ClientSettings then model = getModel(ClientSettings) or model end
+	end)
+	if not providerRouter then return nil end
+	local payload = {
+		model = model,
+		temperature = 0,
+		max_tokens = 20,
+		messages = {
+			{ role = "system", content = "You map a wanted item to inventory. Reply with ONLY the exact inventory name or NONE. Consider translations RU<->EN, typos, diminutives, plurals." },
+			{ role = "user", content = "Want: \"" .. want .. "\" Inventory: " .. table.concat(candidates, ", ") .. ". Which one? Exact name or NONE." },
+		},
+	}
+	if tostring(model):find("^qwen/") then
+		payload.reasoning_effort = "none"
+		payload.temperature = nil
+	end
+	local text, err = nil, nil
+	local done = false
+	task.spawn(function()
+		local ok, t, e = pcall(function() return providerRouter:chatCompletions(payload) end)
+		if ok then text, err = t, e else text, err = nil, t end
+		done = true
+	end)
+	local w = 0
+	while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
+	if not done or not text or text == "" then return nil end
+	text = tostring(text):match("^%s*(.-)%s*$") or ""
+	-- чистим кавычки/точки которые любят добавлять маленькие модели
+	text = text:gsub("^[\"'`]+", ""):gsub("[\"'`.]+$", ""):match("^%s*(.-)%s*$") or ""
+	if text == "" or text:upper() == "NONE" then return nil end
+	for _, c in ipairs(candidates) do
+		if c:lower() == text:lower() then return c end
+	end
+	-- модель могла вернуть с лишними словами — ищем вхождение
+	for _, c in ipairs(candidates) do
+		if text:lower():find(c:lower(), 1, true) then return c end
+	end
+	return nil
+end
+
 function InventoryBeta2.InventoryLine()
-	local backpack, hands, guiList = InventoryBeta2.ListInventory()
-	if (not hands) and (#backpack == 0) and (#guiList == 0) then
+	local backpackNames, handsName, guiNames = {}, nil, {}
+	-- enriched: имя + ToolTip чтобы ИИ понимала ЧТО это за предмет, а не только название
+	local function descOf(tool) return InventoryBeta2.DescribeTool(tool) end
+	for _, e in ipairs(scanSources()) do
+		if e.where == "hands" and not handsName then handsName = descOf(e.tool) end
+		if e.where == "backpack" then table.insert(backpackNames, descOf(e.tool)) end
+		if e.where == "gui" then table.insert(guiNames, e.tool.Name) end
+	end
+	table.sort(backpackNames)
+	table.sort(guiNames)
+	if (not handsName) and (#backpackNames == 0) and (#guiNames == 0) then
 		return "INVENTORY: пусто"
 	end
 	local parts = {}
-	if hands then table.insert(parts, "в руках: " .. hands) end
-	if #backpack > 0 then table.insert(parts, "рюкзак: " .. table.concat(backpack, ", ")) end
-	if #guiList > 0 then table.insert(parts, "GUI (обычно взять нельзя): " .. table.concat(guiList, ", ")) end
+	if handsName then table.insert(parts, "в руках: " .. handsName) end
+	if #backpackNames > 0 then table.insert(parts, "рюкзак: " .. table.concat(backpackNames, ", ")) end
+	if #guiNames > 0 then table.insert(parts, "GUI (обычно взять нельзя): " .. table.concat(guiNames, ", ")) end
 	return "INVENTORY: " .. table.concat(parts, " | ")
 end
 
@@ -3402,6 +3479,18 @@ function InventoryBeta2.DoTake(name)
 	end
 	local tool, where, score = InventoryBeta2.FindTool(name)
 	if not tool then
+		-- УНИВЕРСАЛЬНЫЙ фолбэк: локальный скоринг не знает переводы
+		-- (бутылка vs Bottle), поэтому спрашиваем ИИ напрямую.
+		local aiName = nil
+		pcall(function()
+			aiName = InventoryBeta2.ResolveNameAI(name, InventoryBeta2.CandidateNames())
+		end)
+		if aiName then
+			print("[INV] AI-resolved '" .. tostring(name) .. "' -> '" .. tostring(aiName) .. "'")
+			tool, where, score = InventoryBeta2.FindTool(aiName)
+		end
+	end
+	if not tool then
         InventoryBeta2.lastScore = nil
 		print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
 		return false, InventoryBeta2.SayInventory(name)
@@ -3449,6 +3538,17 @@ end
 function InventoryBeta2.DoUse(name)
 	if name and name ~= "" then
 		local tool, where = InventoryBeta2.FindTool(name)
+		if not tool then
+			local aiName = nil
+			pcall(function()
+				aiName = InventoryBeta2.ResolveNameAI(name, InventoryBeta2.CandidateNames())
+			end)
+			if aiName then
+				print("[INV] AI-resolved(use) '" .. tostring(name) .. "' -> '" .. tostring(aiName) .. "'")
+				tool, where = InventoryBeta2.FindTool(aiName)
+				if tool then name = aiName end
+			end
+		end
 		if not tool then
 			print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
 			InventoryBeta2.lastScore = nil
@@ -4234,7 +4334,7 @@ local function handleQueuedChat(item)
         if okInv and invLine and invLine ~= "" then
             table.insert(apiMessages, {
                 role    = "system",
-                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай."
+                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай. Формат имени: 'Имя [описание]' — в тег копируй ТОЛЬКО имя до скобок. В скобках подсказка ЧТО это за предмет (еда/оружие/напиток) — используй её чтобы понять смысл, а не только буквы."
             })
         end
     end
