@@ -3989,7 +3989,7 @@ function fetchFandomArticle(pname)
             if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
             _fandomLead = text:sub(1, 400)
             print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
-            print("[GAME-DBG] fandom preview: " .. text:sub(1, 150))
+            print("[GAME-DBG] fandom preview: " .. text:sub(1, 300))
             return text
         end
     end
@@ -4041,7 +4041,7 @@ function findWikiSnippets(article, keywords, maxSnips)
                     used[bucket] = true
                     local a = math.max(1, f - 100)
                     local b = math.min(#article, f + 200)
-                    table.insert(out, article:sub(a, b):gsub("%s+", " "))
+                    table.insert(out, (article:sub(a, b):gsub("%s+", " ")))
                 end
                 s = f + #kw
             end
@@ -4058,7 +4058,7 @@ function translateKeywordsAI(words)
     local payload = {
         model = model, temperature = 0, max_tokens = 30,
         messages = {
-            { role = "system", content = "Translate search words to English for a Roblox wiki search. Reply with ONLY comma-separated English words, nothing else." },
+            { role = "system", content = "Translate search words to English for a Roblox wiki search. Include synonyms and alternate names (example: thompson means also tommy, tommygun; giant means also big, large). Reply with ONLY comma-separated English words, nothing else." },
             { role = "user", content = "Words: " .. table.concat(words, ", ") },
         },
     }
@@ -4134,7 +4134,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki5 simple-single-wiki")
+print("[LOB] build: beta2-gamewiki8 gsub-fix")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4763,6 +4763,7 @@ local function handleQueuedChat(item)
     -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
     -- v20 Beta 2: GameUnderstanding - follow-up search per gameplay question
     -- requested format: roblox [place] by [author] <question>
+    print("[GAME-DBG] gu=" .. tostring(settings.GameUnderstanding) .. " q=" .. tostring(item.cleaned):sub(1, 50))
     if settings.GameUnderstanding and item.cleaned and #item.cleaned > 3 and not item.isWorld then
         local ql = item.cleaned:lower()
         local isQ = ql:find("?", 1, true) ~= nil
