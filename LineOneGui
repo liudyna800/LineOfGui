@@ -3871,19 +3871,66 @@ function fetchFandomArticle(pname)
     if title == "" then return "" end
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if not httprequest then return "" end
-    local url = "https://r.jina.ai/https://roblox.fandom.com/wiki/" .. title
-    local ok, res = pcall(httprequest, { Url = url, Method = "GET", Headers = { ["Accept"] = "text/plain" } })
-    if not ok or type(res) ~= "table" then return "" end
-    local body = tostring(res.Body or res.body or "")
-    local text = body:gsub("\n+", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-    if #text < 1500 then return "" end
-    local low = text:lower()
-    if low:find("this page does not exist", 1, true) or low:find("page not found", 1, true) then return "" end
-    local first = ""
-    for w in pname:lower():gmatch("[%a]+") do if #w >= 4 then first = w break end end
-    if first ~= "" and not low:find(first, 1, true) then return "" end
-    if #text > 6000 then text = text:sub(1, 6000) end
-    return text
+    local clean = pname:gsub("[^%w%s%-]", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    if clean == "" then print("[GAME-DBG] fandom: bad place name") return "" end
+    local words = {}
+    for w in clean:gmatch("%S+") do table.insert(words, w) end
+    local variants = {}
+    local function vtitle(n)
+        local t = {}
+        for i = 1, math.min(n, #words) do table.insert(t, words[i]) end
+        return table.concat(t, "_")
+    end
+    table.insert(variants, vtitle(#words))
+    if #words > 3 then table.insert(variants, vtitle(3)) end
+    if #words > 2 then table.insert(variants, vtitle(2)) end
+    local seenV = {}
+    for _, title in ipairs(variants) do
+        if title ~= "" and not seenV[title] then
+            seenV[title] = true
+            -- 1) MediaWiki API direct (no Jina dependency)
+            local apiUrl = "https://roblox.fandom.com/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&titles=" .. title
+            print("[GAME-DBG] fandom api try: " .. title)
+            local ok, res = pcall(httprequest, { Url = apiUrl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+            if ok and type(res) == "table" then
+                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+                if dok and type(data) == "table" and data.query and data.query.pages then
+                    for _, page in pairs(data.query.pages) do
+                        if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 1500 then
+                            local text = page.extract:gsub("%s+", " ")
+                            if #text > 6000 then text = text:sub(1, 6000) end
+                            print("[GAME-DBG] fandom api OK: " .. title .. " (" .. #text .. " chars)")
+                            return text
+                        end
+                    end
+                end
+                print("[GAME-DBG] fandom api empty: " .. title)
+            else
+                print("[GAME-DBG] fandom api http fail: " .. title)
+            end
+            -- 2) Jina reader fallback
+            local url = "https://r.jina.ai/https://roblox.fandom.com/wiki/" .. title
+            print("[GAME-DBG] fandom jina try: " .. title)
+            local ok2, res2 = pcall(httprequest, { Url = url, Method = "GET", Headers = { ["Accept"] = "text/plain" } })
+            if ok2 and type(res2) == "table" then
+                local body = tostring(res2.Body or res2.body or "")
+                local text = body:gsub("\n+", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+                if #text >= 1500 then
+                    local low = text:lower()
+                    if not low:find("this page does not exist", 1, true) and not low:find("page not found", 1, true) then
+                        if #text > 6000 then text = text:sub(1, 6000) end
+                        print("[GAME-DBG] fandom jina OK: " .. title .. " (" .. #text .. " chars)")
+                        return text
+                    end
+                end
+                print("[GAME-DBG] fandom jina short/missing: " .. title .. " (" .. #text .. ")")
+            else
+                print("[GAME-DBG] fandom jina http fail: " .. title)
+            end
+        end
+    end
+    print("[GAME-DBG] fandom: no article")
+    return ""
 end
 
 function extractQuestionKeywords(text)
@@ -3973,6 +4020,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
+print("[LOB] build: beta2-gamewiki dbg+relguard")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4023,8 +4071,9 @@ local function startBehaviorMonitor()
         local uid = p.UserId
         _playerBehaviorHistory[uid] = nil
         _toxicAlerts[uid] = nil
-        _lastMsgPerUser[uid] = nil
-        _userLangCache[uid] = nil
+        -- late locals (declared below): guard or handler dies with "index nil"
+        if _lastMsgPerUser ~= nil then _lastMsgPerUser[uid] = nil end
+        if _userLangCache ~= nil then _userLangCache[uid] = nil end
         -- [v19.9.8] ФИКС: очищаем ChatQueue ушедшего игрока
         -- БАГИ ДО: накопленные сообщения продолжали обрабатываться после ухода игрока
         if ChatQueue[uid] then
@@ -4618,21 +4667,26 @@ local function handleQueuedChat(item)
         if isQ then
             local pi2 = _placeInfo or fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
+            print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
             if pname2 ~= "" and pname2 ~= "Unknown Game" then
                 local creator2 = ""
                 pcall(function() creator2 = getCreatorName() or "" end)
                 -- 1) Roblox Wiki snippets first (cached article, no extra web spam)
                 local wikiDone = false
                 local article = (_gameContext and _gameContext.fandom) or ""
+                print("[GAME-DBG] article cached chars=" .. #article)
                 if article == "" then
                     pcall(function() article = fetchFandomArticle(pname2) or "" end)
                     if article ~= "" and _gameContext then _gameContext.fandom = article end
+                    print("[GAME-DBG] article fetched chars=" .. #article)
                 end
                 if article ~= "" then
                     local kws = extractQuestionKeywords(item.cleaned)
+                    print("[GAME-DBG] kws: " .. table.concat(kws, ","))
                     local snips = findWikiSnippets(article, kws, 3)
                     if #snips == 0 then
                         local en = translateKeywordsAI(kws)
+                        print("[GAME-DBG] en: " .. table.concat(en, ","))
                         if #en > 0 then snips = findWikiSnippets(article, en, 3) end
                     end
                     if #snips > 0 then
@@ -4642,6 +4696,7 @@ local function handleQueuedChat(item)
                                 .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. Explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
                         })
                         wikiDone = true
+                        print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
                     end
                 end
                 -- 2) fallback: generic web query in requested format
@@ -4657,15 +4712,35 @@ local function handleQueuedChat(item)
                 while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
                 local gw = gsr or ""
                 local webDone = false
+                print("[GAME-DBG] web len=" .. #gw .. " marks=" .. tostring((gw:find("%[Wiki%]") and "W" or "-") .. (gw:find("%[News") and "N" or "-") .. (gw:find("%[Jina%]") and "J" or "-")))
                 if gw ~= "" and (gw:find("%[Wiki%]") or gw:find("%[News") or gw:find("%[Jina%]")) then
+                    -- relevance: generic "Roblox" articles must not pass as game knowledge
+                    local gwlow = gw:lower()
+                    local wkws = extractQuestionKeywords(item.cleaned)
+                    local whit = false
+                    for _, kw in ipairs(wkws) do
+                        if #kw >= 3 and gwlow:find(kw, 1, true) then whit = true break end
+                    end
+                    if not whit then
+                        local wen = translateKeywordsAI(wkws)
+                        print("[GAME-DBG] web-en: " .. table.concat(wen, ","))
+                        for _, kw in ipairs(wen) do
+                            if gwlow:find(kw, 1, true) then whit = true break end
+                        end
+                    end
+                    print("[GAME-DBG] web relevant=" .. tostring(whit))
+                    if whit then
                     webDone = true
+                    print("[GAME-DBG] inject: web")
                     table.insert(apiMessages, {
                         role = "system",
                         content = "[GAME SEARCH in " .. pname2 .. " for: " .. item.cleaned .. "]\n" .. gw:sub(1, 600)
                             .. "\n[INSTRUCTION: Use this as ground truth for how this game mechanic works. If it answers the question, explain briefly in 1-2 sentences. If it does NOT answer it, honestly say you do not know what it does yet - do NOT invent mechanics.]"
                     })
+                    end
                 end
                 if not webDone then
+                    print("[GAME-DBG] inject: nodata")
                     table.insert(apiMessages, {
                         role = "system",
                         content = "[GAME " .. pname2 .. ": no wiki/search data on '" .. item.cleaned .. "'. The search already ran and found nothing. Say you do not know yet, do NOT invent mechanics, do NOT describe doors/boxes/places you cannot see, and NEVER claim you cannot search - search is automatic.]"
