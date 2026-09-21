@@ -1077,10 +1077,65 @@ end
 -- HTTP Client for direct API calls (Executor Compatible)
 -- §HTTP
 -- [v19.9.9] ФИКС: добавлен pcall вокруг JSONEncode — nil/NaN в payload не крашит скрипт
+-- FIX v20b3: модели иногда рвут многобайтовые символы (эмодзи/кириллицу) пополам —
+-- битый байт ложится в историю, и дальше JSONEncode падает НА КАЖДОМ запросе
+-- ("0:JSONEncodeFailed" навсегда). Чистим всё до кодирования + сам ответ ИИ.
+local function sanitizeUtf8(s)
+    s = tostring(s or "")
+    local res, i, n = {}, 1, #s
+    while i <= n do
+        local b = s:byte(i)
+        local len = 0
+        if b < 0x80 then len = 1
+        elseif b >= 0xC2 and b <= 0xDF then len = 2
+        elseif b >= 0xE0 and b <= 0xEF then len = 3
+        elseif b >= 0xF0 and b <= 0xF4 then len = 4
+        else
+            i = i + 1 -- мусор: одиночный continuation, C0/C1, F5-FF
+        end
+        if len == 1 then
+            table.insert(res, s:sub(i, i))
+            i = i + 1
+        elseif len > 1 then
+            local ok = (i + len - 1 <= n)
+            if ok then
+                for j = i + 1, i + len - 1 do
+                    local c = s:byte(j)
+                    if c < 0x80 or c > 0xBF then ok = false break end
+                end
+            end
+            if ok then
+                table.insert(res, s:sub(i, i + len - 1))
+                i = i + len
+            else
+                i = i + 1 -- битая последовательность — пропускаем первый байт
+            end
+        end
+    end
+    return table.concat(res)
+end
+local function sanitizeForJson(v, depth)
+    depth = depth or 0
+    if type(v) == "string" then return sanitizeUtf8(v) end
+    if type(v) == "number" then
+        if v ~= v or v == math.huge or v == -math.huge then return 0 end
+        return v
+    end
+    if type(v) ~= "table" or depth > 10 then return v end
+    local c = {}
+    local n = #v
+    for i = 1, n do c[i] = sanitizeForJson(v[i], depth + 1) end
+    for k, val in pairs(v) do
+        if not (type(k) == "number" and k >= 1 and k <= n and k == math.floor(k)) then
+            c[k] = sanitizeForJson(val, depth + 1)
+        end
+    end
+    return c
+end
 local function postJson(url, headers, bodyTable)
     local body
     local encOk, encErr = pcall(function()
-        body = HttpService:JSONEncode(bodyTable)
+        body = HttpService:JSONEncode(sanitizeForJson(bodyTable))
     end)
     if not encOk then
         return nil, 0, "JSONEncodeFailed", tostring(encErr):sub(1,100), {}
@@ -5334,6 +5389,7 @@ local function handleQueuedChat(item)
     text = text:gsub("<think>.-</think>%s*", "")
     text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
     text = text:match("^%s*(.-)%s*$") or text
+    text = sanitizeUtf8(text) -- битые байты из ответа модели (иначе JSONEncodeFailed на след. запросе)
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
     if settings.CameraLook and item.player and item.player.Character then
@@ -12839,6 +12895,7 @@ local function ctDoSend()
             text = text:gsub("<think>.-</think>%s*", "")
             text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
             text = text:match("^%s*(.-)%s*$") or text
+            text = sanitizeUtf8(text) -- иначе битый байт убьёт все следующие запросы
         end
         if text and text ~= "" and settings.MemoryEnabled then
             appendHistory(DirectChatHistory, userContent, text)
