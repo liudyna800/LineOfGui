@@ -4068,14 +4068,22 @@ function fetchWikiPage(domain, title)
     return ""
 end
 
+-- БАЗА ФОРМАТОВ roblox.fandom.com (исследовано вживую, v20b3):
+-- Игры лежат НЕ на отдельных доменах, а под roblox.fandom.com/wiki/:
+--   Developer/Game  Uplift_Games/Adopt_Me! | Gamer_Robot_Inc/Blox_Fruits
+--                   YXceptional_Studios/Tower_of_Hell | Digital_Destruction/Insane_Elevator
+--   Flat (ивент)    Egg_hunt | Egg_Hunt_2019:_Scrambled_in_Time | Eggstravaganza
+--   Game/Item       Adopt_Me_toys/Mystery_Pets_Series_1
+--   Студии/таймлайны Derpie_Studios | Timeline_of_the_top_10_most-visited_games_per_month/2025
+-- Отдельные вики (blox-fruits.fandom.com и т.п.) есть лишь у топ-игр,
+-- поэтому ищем ВСЕГДА на обоих: dedicated-домен + roblox.fandom.com.
 function fetchFandomArticle(pname)
     pname = tostring(pname or "")
     if pname == "" or pname == "Unknown Game" then print("[GAME-DBG] fandom: bad place name") return "" end
-    local domain = findGameWikiDomain(pname)
-    if domain == "" then print("[GAME-DBG] fandom: no domain") return "" end
     -- FIX v20b3: [%w] режет кириллицу -> clean="" -> поиск по пустой строке.
     -- [%p%c] чистит только пунктуацию/мусор, буквы всех языков целы.
     local clean = tostring(pname or ""):gsub("[%p%c]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    if clean == "" then print("[GAME-DBG] fandom: empty clean") return "" end
     local words = {}
     for w in clean:gmatch("%S+") do table.insert(words, w) end
     local variants, seenV = {}, {}
@@ -4093,73 +4101,87 @@ function fetchFandomArticle(pname)
         for i = 1, 2 do table.insert(t, words[i]) end
         addV(table.concat(t, "_"))
     end
-    -- OpenSearch: official typo-tolerant title suggest, keyless (tested live)
-    do
-        local ohttp = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    -- FIX v20b3: прямой вариант Creator/Game (главный формат roblox.fandom.com).
+    local creator0 = ""
+    pcall(function() creator0 = getCreatorName() or "" end)
+    if creator0 ~= "" and not creator0:find("^id%d") then
+        local cg = creator0:gsub("[%p%c]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+        if cg ~= "" then
+            addV((cg:gsub(" ", "_") .. "/" .. table.concat(words, "_")))
+        end
+    end
+    -- Домены: dedicated (если есть) + roblox.fandom.com ВСЕГДА.
+    -- Раньше искали только на одном: для Insane Elevator долбили
+    -- insane-elevator.fandom.com (там нет статьи), а правильная
+    -- Digital_Destruction/Insane_Elevator на roblox.fandom.com не проверялась.
+    local domains = { "https://roblox.fandom.com" }
+    local dd = findGameWikiDomain(pname)
+    if dd ~= "" and dd ~= "https://roblox.fandom.com" then
+        table.insert(domains, 1, dd)
+    end
+    local ohttp = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    local oenc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+    -- FIX v20b3: [%a]+ не видит кириллицу -> fw="" -> бралась ПЕРВАЯ
+    -- чужая статья как знание о текущей игре. Теперь слова любые (%S+).
+    local fw = ""
+    for w in clean:lower():gmatch("%S+") do local cw = w:gsub("[%p%d]", ""); if #cw >= 4 then fw = cw break end end
+    local function saveFound(domain, text)
+        if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
+        _fandomLead = text:sub(1, 400)
+        print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
+        return text
+    end
+    for _, domain in ipairs(domains) do
+        -- OpenSearch: official typo-tolerant title suggest, keyless (tested live)
         if ohttp then
-            local oenc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
             local ourl = domain .. "/api.php?action=opensearch&search=" .. oenc(clean):gsub("%%20", "+") .. "&limit=5&format=json"
-            print("[GAME-DBG] fandom opensearch: " .. clean)
+            print("[GAME-DBG] fandom opensearch: " .. domain .. " / " .. clean)
             local ook, ores = pcall(ohttp, { Url = ourl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
             if ook and type(ores) == "table" then
                 local dok, data = pcall(function() return HttpService:JSONDecode(tostring(ores.Body or ores.body or "")) end)
                 if dok and type(data) == "table" and type(data[2]) == "table" then
-                    -- FIX v20b3: [%a]+ не видит кириллицу -> fw="" -> бралась ПЕРВАЯ
-                    -- чужая статья как знание о текущей игре. Теперь слова любые (%S+).
-                    local fw = ""
-                    for w in clean:lower():gmatch("%S+") do local cw = w:gsub("[%p%d]", ""); if #cw >= 4 then fw = cw break end end
                     for _, t in ipairs(data[2]) do
-                        if type(t) == "string" and t ~= "" and (fw == "" or t:lower():find(fw, 1, true)) then
+                        -- пропускаем заглавную страницу вики ("X Wiki") — это не статья
+                        if type(t) == "string" and t ~= "" and not t:find(" Wiki$") and (fw == "" or t:lower():find(fw, 1, true)) then
                             print("[GAME-DBG] fandom opensearch-hit: " .. t)
                             local text = fetchWikiPage(domain, t)
                             if text ~= "" then
-                                if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
-                                _fandomLead = text:sub(1, 400)
-                                print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
-                                return text
+                                return saveFound(domain, text)
                             end
                         end
                     end
                 end
             end
         end
-    end
-    for _, title in ipairs(variants) do
-        print("[GAME-DBG] fandom try: " .. domain .. " / " .. title)
-        local text = fetchWikiPage(domain, title)
-        if text ~= "" then
-            if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
-            _fandomLead = text:sub(1, 400)
-            print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
-            print("[GAME-DBG] fandom preview: " .. text:sub(1, 300))
-            return text
+        for _, title in ipairs(variants) do
+            print("[GAME-DBG] fandom try: " .. domain .. " / " .. title)
+            local text = fetchWikiPage(domain, title)
+            if text ~= "" then
+                print("[GAME-DBG] fandom preview: " .. text:sub(1, 300))
+                return saveFound(domain, text)
+            end
         end
     end
-    -- creator-namespaced pages (e.g. CleanMeanBeans/Daycare Classrooms on roblox.fandom.com)
-    if domain == "https://roblox.fandom.com" then
-        local creator = ""
-        pcall(function() creator = getCreatorName() or "" end)
+    -- creator full-text search на roblox.fandom.com (последний шанс)
+    do
+        local domain = "https://roblox.fandom.com"
         local senc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
-        local sq = senc(clean .. " " .. creator):gsub("%%20", "+")
-        print("[GAME-DBG] fandom creator-search: " .. clean .. " " .. creator)
-        local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        local sq = senc(clean .. " " .. creator0):gsub("%%20", "+")
+        print("[GAME-DBG] fandom creator-search: " .. clean .. " " .. creator0)
+        local httprequest = ohttp
         if httprequest then
             local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. sq .. "&format=json&srlimit=3", Method = "GET", Headers = { ["Accept"] = "application/json" } })
             if ok and type(res) == "table" then
                 local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
                 if dok and type(data) == "table" and data.query and data.query.search then
                     -- FIX v20b3: см. выше — [%a]+ пропускал кириллицу и давал чужую статью.
-                    local firstWord = ""
-                    for w in clean:lower():gmatch("%S+") do local c2 = w:gsub("[%p%d]", ""); if #c2 >= 4 then firstWord = c2 break end end
+                    local firstWord = fw
                     for _, r in ipairs(data.query.search) do
                         if type(r) == "table" and r.title and (firstWord == "" or tostring(r.title):lower():find(firstWord, 1, true)) then
                             print("[GAME-DBG] fandom creator-hit: " .. tostring(r.title))
                             local text = fetchWikiPage(domain, r.title)
                             if text ~= "" then
-                                if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
-                                _fandomLead = text:sub(1, 400)
-                                print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
-                                return text
+                                return saveFound(domain, text)
                             end
                             break
                         end
@@ -5045,6 +5067,29 @@ local function handleQueuedChat(item)
                             wikiDone = true
                             print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
                         end
+                    end
+                end
+                -- FIX v20b3: статьи в кэше нет (fetchFandomArticle не нашёл с первого
+                -- раза) — всё равно делаем полнотекстовый list=search по
+                -- roblox.fandom.com. Раньше этот путь пропускался и бот сразу
+                -- падал в "nodata", хотя статья (напр. Digital_Destruction/Insane_Elevator) есть.
+                if not wikiDone and article == "" then
+                    local kws0 = extractQuestionKeywords(item.cleaned)
+                    print("[GAME-DBG] kws0: " .. table.concat(kws0, ","))
+                    local en0 = {}
+                    if #kws0 > 0 then
+                        en0 = translateKeywordsAI(kws0)
+                        print("[GAME-DBG] en0: " .. table.concat(en0, ","))
+                    end
+                    local wsnips0, wsrc0 = searchFandomWiki(pname2, kws0, en0)
+                    if #wsnips0 > 0 then
+                        table.insert(apiMessages, {
+                            role = "system",
+                            content = "[GAME WIKI " .. ((wsrc0 ~= "") and wsrc0 or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips0, "\n")
+                                .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                        })
+                        wikiDone = true
+                        print("[GAME-DBG] inject: wikisearch-nocache (" .. #wsnips0 .. " from " .. tostring(wsrc0) .. ")")
                     end
                 end
                 -- 2) fallback: generic web query in requested format
