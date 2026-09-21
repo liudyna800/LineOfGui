@@ -4048,6 +4048,18 @@ function findGameWikiDomain(pname)
     addC(#words)
     if #words > 3 then addC(3) end
     if #words > 2 then addC(2) end
+    -- отдельные режимы общей игры ("Piggy Build Mode" -> piggy.fandom.com):
+    -- пробуем также первое и последнее значимое слово (мин. 4 буквы от мусора)
+    if #words > 1 then
+        if #words[1] >= 4 then
+            local s1 = words[1]
+            if not seen[s1] then seen[s1] = true table.insert(cands, s1) end
+        end
+        local last = words[#words]
+        if #last >= 4 and last ~= words[1] then
+            if not seen[last] then seen[last] = true table.insert(cands, last) end
+        end
+    end
     for _, s in ipairs(cands) do
         print("[GAME-DBG] wikidomain try: " .. s)
         local ok, res = pcall(httprequest, { Url = "https://" .. s .. ".fandom.com/api.php?action=query&meta=siteinfo&format=json", Method = "GET", Headers = { ["Accept"] = "application/json" } })
@@ -4236,6 +4248,7 @@ function fetchFandomArticle(pname)
     -- и каждый висяк суммировался. Теперь общий бюджет ~8с на всё сразу.
     local domain = "https://roblox.fandom.com"
     local foundText, foundDomain, foundLock = "", domain, false
+    local foundDedi, foundDediDomain = "", ""
     local function grab(t, hook)
         if foundLock then return end
         if type(t) ~= "string" or t == "" then return end
@@ -4310,10 +4323,64 @@ function fetchFandomArticle(pname)
             end
         end
     end)
+    -- воркер 5: dedicated-вики <слаг>.fandom.com (piggy, infectious-smile...).
+    -- Запасной: используется лишь если roblox-вики пуста (см. возврат ниже),
+    -- поэтому старые форки актуальную статью не перебивают.
+    -- Однословные названия ("Hotel") сюда не пускаем: слаг слишком общий,
+    -- легко попасть на вики про другое, а roblox-вики такие покрывает.
+    task.spawn(function()
+        if not ohttp or #words < 2 then return end
+        local dd = ""
+        pcall(function() dd = findGameWikiDomain(pname) or "" end)
+        if dd == "" or dd == domain then return end
+        print("[GAME-DBG] fandom dedi-domain: " .. dd)
+        local function grabD(t, hook)
+            if foundText ~= "" or foundDedi ~= "" then return end
+            if type(t) ~= "string" or t == "" or t:find(" Wiki$") then return end
+            print("[GAME-DBG] fandom dedi try: " .. tostring(t):sub(1, 80))
+            local text = fetchWikiPage(dd, t)
+            if text ~= "" and foundText == "" and foundDedi == "" then
+                foundDedi, foundDediDomain = text, dd
+                print("[GAME-DBG] fandom dedi grabbed (" .. tostring(hook or "?") .. "): " .. tostring(t):sub(1, 80))
+            end
+        end
+        for _, title in ipairs(variants) do
+            if foundText ~= "" or foundDedi ~= "" then break end
+            grabD(title, "variant")
+        end
+        if foundText == "" and foundDedi == "" then
+            local ook, ores = pcall(ohttp, { Url = dd .. "/api.php?action=opensearch&search=" .. oenc(clean):gsub("%%20", "+") .. "&limit=5&format=json", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+            if ook and type(ores) == "table" then
+                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(ores.Body or ores.body or "")) end)
+                if dok and type(data) == "table" and type(data[2]) == "table" then
+                    for _, t in ipairs(data[2]) do
+                        if foundText ~= "" or foundDedi ~= "" then break end
+                        grabD(t, "opensearch")
+                    end
+                end
+            end
+        end
+        if foundText == "" and foundDedi == "" then
+            local ok, res = pcall(ohttp, { Url = dd .. "/api.php?action=query&list=search&srsearch=" .. oenc(clean .. " " .. creator0):gsub("%%20", "+") .. "&format=json&srlimit=5", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+            if ok and type(res) == "table" then
+                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+                if dok and type(data) == "table" and data.query and data.query.search then
+                    for _, r in ipairs(data.query.search) do
+                        if foundText ~= "" or foundDedi ~= "" then break end
+                        if type(r) == "table" and r.title then grabD(r.title, "srsearch") end
+                    end
+                end
+            end
+        end
+    end)
     local fw8 = 0
-    while foundText == "" and fw8 < 8 do task.wait(0.25) fw8 = fw8 + 0.25 end
+    while foundText == "" and foundDedi == "" and fw8 < 10 do task.wait(0.25) fw8 = fw8 + 0.25 end
     if foundText ~= "" then
         return saveFound(foundDomain, foundText)
+    end
+    if foundDedi ~= "" then
+        print("[GAME-DBG] fandom via dedi-wiki (roblox-вики пуста)")
+        return saveFound(foundDediDomain, foundDedi)
     end
     print("[GAME-DBG] fandom: no article")
     return ""
@@ -4552,6 +4619,52 @@ function searchFandomWiki(pname, kws, enT)
                             local sn = findWikiSnippets(text, keys, 3 - #out)
                             for _, s in ipairs(sn) do table.insert(out, s) end
                             if #sn > 0 and src == "" then src = tostring(e.title) end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- dedicated-вики (piggy.fandom.com и т.п.): только если роблокс-вики пуста.
+    -- На своей вики всё про эту игру — сверка мягкая (ключ или слово из
+    -- названия в заголовке). Однословные названия не пускаем (см. воркер 5).
+    if #out == 0 then
+        local pw = 0
+        for _ in tostring(pname or ""):gmatch("%S+") do pw = pw + 1 end
+        if pw >= 2 then
+            local dd = ""
+            pcall(function() dd = findGameWikiDomain(pname) or "" end)
+            if dd ~= "" and dd ~= "https://roblox.fandom.com" then
+                print("[GAME-DBG] wikisearch dedi on: " .. dd)
+                local dok, res = pcall(httprequest, { Url = dd .. "/api.php?action=query&list=search&srsearch=" .. q .. "&format=json&srlimit=5", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+                if dok and type(res) == "table" then
+                    local okd, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+                    if okd and type(data) == "table" and data.query and data.query.search then
+                        for _, r in ipairs(data.query.search) do
+                            if #out >= 3 then break end
+                            if type(r) == "table" and r.title and not tostring(r.title):find(" Wiki$") then
+                                local tl = tostring(r.title):lower()
+                                local relD = false
+                                for _, k in ipairs(keys) do
+                                    if k ~= "" and tl:find(tostring(k):lower(), 1, true) then relD = true break end
+                                end
+                                if not relD then
+                                    for _, gwd in ipairs(gw) do
+                                        if gwd ~= "" and tl:find(gwd, 1, true) then relD = true break end
+                                    end
+                                end
+                                if relD then
+                                    print("[GAME-DBG] wikisearch dedi hit: " .. tostring(r.title))
+                                    local text = fetchWikiPage(dd, r.title)
+                                    if text ~= "" then
+                                        local sn = findWikiSnippets(text, keys, 3 - #out)
+                                        for _, s in ipairs(sn) do table.insert(out, s) end
+                                        if #sn > 0 and src == "" then src = tostring(r.title) end
+                                    end
+                                else
+                                    print("[GAME-DBG] wikisearch dedi skip: " .. tostring(r.title))
+                                end
+                            end
                         end
                     end
                 end
