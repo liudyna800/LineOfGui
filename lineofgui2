@@ -1080,7 +1080,8 @@ end
 -- FIX v20b3: модели иногда рвут многобайтовые символы (эмодзи/кириллицу) пополам —
 -- битый байт ложится в историю, и дальше JSONEncode падает НА КАЖДОМ запросе
 -- ("0:JSONEncodeFailed" навсегда). Чистим всё до кодирования + сам ответ ИИ.
-local function sanitizeUtf8(s)
+-- Глобальные БЕЗ local: в чанке лимит 200 локалок, иначе скрипт не компилируется.
+function sanitizeUtf8(s)
     s = tostring(s or "")
     local res, i, n = {}, 1, #s
     while i <= n do
@@ -1114,7 +1115,7 @@ local function sanitizeUtf8(s)
     end
     return table.concat(res)
 end
-local function sanitizeForJson(v, depth)
+function sanitizeForJson(v, depth)
     depth = depth or 0
     if type(v) == "string" then return sanitizeUtf8(v) end
     if type(v) == "number" then
@@ -4132,15 +4133,45 @@ function fetchWikiPage(domain, title)
     return ""
 end
 
--- БАЗА ФОРМАТОВ roblox.fandom.com (исследовано вживую, v20b3):
--- Игры лежат НЕ на отдельных доменах, а под roblox.fandom.com/wiki/:
---   Developer/Game  Uplift_Games/Adopt_Me! | Gamer_Robot_Inc/Blox_Fruits
---                   YXceptional_Studios/Tower_of_Hell | Digital_Destruction/Insane_Elevator
---   Flat (ивент)    Egg_hunt | Egg_Hunt_2019:_Scrambled_in_Time | Eggstravaganza
---   Game/Item       Adopt_Me_toys/Mystery_Pets_Series_1
+-- БАЗА ФОРМАТОВ roblox.fandom.com (исследовано вживую, ~70 тайтлов, v20b3):
+-- Единого формата НЕТ, поэтому URL не угадываем, а ищем через API (ns=0|2|114):
+--   Developer/Game   LSPLASH/DOORS | ROLVe/Arsenal | Easy.gg/BedWars
+--                    Piggy Dev Team/Piggy | Hexagon Development Community/Evade
+--                    Gamer_Robot_Inc/Blox_Fruits | Uplift_Games/Adopt_Me!
+--                    YXceptional_Studios/Tower_of_Hell | Digital_Destruction/Insane_Elevator
+--   X by Y/Game      Brookhaven by Voldex/Brookhaven RP (by — часть неймспейса!)
+--   Player:Автор/Игра Player:SamsonXVI/Hotel | Player:SamsonXVI/Camping
+--                    Player:Nikilis/Murder Mystery 2 | Player:MiniToon/Piggy:_Intercity_(DEMO)
+--   Вложенные        Player:SamsonXVI/Camping/Daniel | Savant_Games/Crazy_Stairs_+_VR
+--                    User:JackRBLXYTmbfan/JD_Studios/Doors_But_Is_Cart_Ride
+--   Flat (ивент)     Egg_hunt | Egg_Hunt_2019:_Scrambled_in_Time | Eggstravaganza
+--   Game/Item        Adopt_Me_toys/Mystery_Pets_Series_1
 --   Студии/таймлайны Derpie_Studios | Timeline_of_the_top_10_most-visited_games_per_month/2025
+--   С пунктуацией    Murder_Mystery_Sandbox's/Murder_Mystery_3 (апостроф!), Micro_Plush
+--   Регистр важен    LSPLASH/DOORS (не Doors) — брать подсказки API дословно
+--   Эмодзи           User:SashaNot/Brookhaven_?_RP_Zombie_Invasion
 -- Отдельные dedicated-вики (старый формат) не используем вообще —
 -- только roblox.fandom.com.
+-- Сверка заголовка (глобалы: лимит локалок чанка). use=false = чужая игра.
+function lobNormTitle(s)
+    return tostring(s or ""):lower():gsub("[%p]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+end
+function lobTitleIsOurs(title, normGame, creatorWords)
+    local tl = tostring(title or ""):lower()
+    if tl:find(" wiki$") then return false, false end -- заглавная страница вики
+    tl = tl:gsub("^player:", ""):gsub("^user:", "")
+    local part = tl:match(".*/([^/]*)$") or tl
+    part = lobNormTitle(part)
+    local strong, use = false, false
+    for _, c0 in ipairs(creatorWords or {}) do
+        if c0 ~= "" and tl:find(c0, 1, true) then strong = true break end
+    end
+    if normGame ~= "" and part ~= "" and part == normGame then use = true end
+    -- составное название встречается целиком и в подстраницах (Brookhaven RP/Vehicles)
+    if not use and normGame ~= "" and normGame:find(" ") and tl:find(normGame, 1, true) then use = true end
+    if strong then use = true end
+    return use, strong
+end
 function fetchFandomArticle(pname)
     pname = tostring(pname or "")
     if pname == "" or pname == "Unknown Game" then print("[GAME-DBG] fandom: bad place name") return "" end
@@ -4171,81 +4202,118 @@ function fetchFandomArticle(pname)
     if creator0 ~= "" and not creator0:find("^id%d") then
         local cg = creator0:gsub("[%p%c]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
         if cg ~= "" then
-            addV((cg:gsub(" ", "_") .. "/" .. table.concat(words, "_")))
+            local cgu = cg:gsub(" ", "_")
+            addV((cgu .. "/" .. table.concat(words, "_")))
+            -- игры отдельных авторов живут в неймспейсе Player: (ns=114):
+            -- Player:SamsonXVI/Hotel — обычный поиск его не видит, идём напрямую
+            addV(("Player:" .. cgu .. "/" .. table.concat(words, "_")))
         end
     end
     -- Только roblox.fandom.com. Dedicated-домены (старый формат) не трогаем вообще.
     local domains = { "https://roblox.fandom.com" }
     local ohttp = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     local oenc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
-    -- FIX v20b3: [%a]+ не видит кириллицу -> fw="" -> бралась ПЕРВАЯ
-    -- чужая статья как знание о текущей игре. Теперь слова любые (%S+).
-    local fw = ""
-    for w in clean:lower():gmatch("%S+") do local cw = w:gsub("[%p%d]", ""); if #cw >= 4 then fw = cw break end end
+    -- Слова создателя для сверки заголовков (lobTitleIsOurs).
+    local normGame = lobNormTitle(clean)
+    local cw0 = {}
+    do
+        local c0src = tostring(creator0 or "")
+        if c0src ~= "" and not c0src:find("^id%d") then
+            for w in c0src:lower():gmatch("%S+") do
+                local c0 = w:gsub("[%p%d]", "")
+                if #c0 >= 3 then table.insert(cw0, c0) end
+            end
+        end
+    end
     local function saveFound(domain, text)
         if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
         _fandomLead = text:sub(1, 400)
         print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
         return text
     end
-    for _, domain in ipairs(domains) do
-        -- OpenSearch: official typo-tolerant title suggest, keyless (tested live)
-        if ohttp then
-            local ourl = domain .. "/api.php?action=opensearch&search=" .. oenc(clean):gsub("%%20", "+") .. "&limit=5&format=json"
-            print("[GAME-DBG] fandom opensearch: " .. domain .. " / " .. clean)
-            local ook, ores = pcall(ohttp, { Url = ourl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
-            if ook and type(ores) == "table" then
-                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(ores.Body or ores.body or "")) end)
-                if dok and type(data) == "table" and type(data[2]) == "table" then
-                    for _, t in ipairs(data[2]) do
-                        -- пропускаем заглавную страницу вики ("X Wiki") — это не статья
-                        if type(t) == "string" and t ~= "" and not t:find(" Wiki$") and (fw == "" or t:lower():find(fw, 1, true)) then
-                            print("[GAME-DBG] fandom opensearch-hit: " .. t)
-                            local text = fetchWikiPage(domain, t)
-                            if text ~= "" then
-                                return saveFound(domain, text)
-                            end
-                        end
-                    end
-                end
-            end
+    -- ВСЕ способы ОДНОВРЕМЕННО (task.spawn), кто первый принёс СВОЮ статью — победил.
+    -- Раньше было последовательно: подсказки -> варианты по одному -> srsearch,
+    -- и каждый висяк суммировался. Теперь общий бюджет ~8с на всё сразу.
+    local domain = "https://roblox.fandom.com"
+    local foundText, foundDomain, foundLock = "", domain, false
+    local function grab(t, hook)
+        if foundLock then return end
+        if type(t) ~= "string" or t == "" then return end
+        local use = lobTitleIsOurs(t, normGame, cw0)
+        if not use then
+            print("[GAME-DBG] fandom skip (чужая): " .. tostring(t):sub(1, 80))
+            return
         end
-        for _, title in ipairs(variants) do
-            print("[GAME-DBG] fandom try: " .. domain .. " / " .. title)
-            local text = fetchWikiPage(domain, title)
-            if text ~= "" then
-                print("[GAME-DBG] fandom preview: " .. text:sub(1, 300))
-                return saveFound(domain, text)
-            end
+        print("[GAME-DBG] fandom try: " .. tostring(t):sub(1, 80))
+        local text = fetchWikiPage(domain, t)
+        if text ~= "" and not foundLock then
+            foundLock = true
+            foundText = text
+            print("[GAME-DBG] fandom grabbed (" .. tostring(hook or "?") .. "): " .. tostring(t):sub(1, 80))
         end
     end
-    -- creator full-text search на roblox.fandom.com (последний шанс)
-    do
-        local domain = "https://roblox.fandom.com"
-        local senc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
-        local sq = senc(clean .. " " .. creator0):gsub("%%20", "+")
-        print("[GAME-DBG] fandom creator-search: " .. clean .. " " .. creator0)
-        local httprequest = ohttp
-        if httprequest then
-            local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. sq .. "&format=json&srlimit=3", Method = "GET", Headers = { ["Accept"] = "application/json" } })
-            if ok and type(res) == "table" then
-                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
-                if dok and type(data) == "table" and data.query and data.query.search then
-                    -- FIX v20b3: см. выше — [%a]+ пропускал кириллицу и давал чужую статью.
-                    local firstWord = fw
-                    for _, r in ipairs(data.query.search) do
-                        if type(r) == "table" and r.title and (firstWord == "" or tostring(r.title):lower():find(firstWord, 1, true)) then
-                            print("[GAME-DBG] fandom creator-hit: " .. tostring(r.title))
-                            local text = fetchWikiPage(domain, r.title)
-                            if text ~= "" then
-                                return saveFound(domain, text)
-                            end
-                            break
-                        end
-                    end
+    -- воркер 1: opensearch-подсказки (дословные заголовки: регистр DOORS, апострофы, эмодзи)
+    task.spawn(function()
+        if not ohttp or foundLock then return end
+        local ourl = domain .. "/api.php?action=opensearch&search=" .. oenc(clean):gsub("%%20", "+") .. "&limit=8&format=json&namespace=0%7C2%7C114"
+        print("[GAME-DBG] fandom opensearch: " .. clean)
+        local ook, ores = pcall(ohttp, { Url = ourl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+        if ook and type(ores) == "table" then
+            local dok, data = pcall(function() return HttpService:JSONDecode(tostring(ores.Body or ores.body or "")) end)
+            if dok and type(data) == "table" and type(data[2]) == "table" then
+                for _, t in ipairs(data[2]) do
+                    if foundLock then break end
+                    grab(t, "opensearch")
                 end
             end
         end
+    end)
+    -- воркер 2: прямые варианты (flat, Creator/Game, Player:Creator/Game)
+    task.spawn(function()
+        for _, title in ipairs(variants) do
+            if foundLock then break end
+            grab(title, "variant")
+        end
+    end)
+    -- воркер 3: полнотекст (ловит вложенные Game/Item и Player:-страницы)
+    task.spawn(function()
+        if not ohttp or foundLock then return end
+        local sq = oenc(clean .. " " .. creator0):gsub("%%20", "+")
+        print("[GAME-DBG] fandom srsearch: " .. clean .. " " .. creator0)
+        local ok, res = pcall(ohttp, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. sq .. "&format=json&srlimit=5&srnamespace=0%7C2%7C114", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+        if ok and type(res) == "table" then
+            local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+            if dok and type(data) == "table" and data.query and data.query.search then
+                for _, r in ipairs(data.query.search) do
+                    if foundLock then break end
+                    if type(r) == "table" and r.title then grab(r.title, "srsearch") end
+                end
+            end
+        end
+    end)
+    -- воркер 4: прямое API фандома (Mercury v1 suggestions, другой индекс).
+    -- Проверено живьём: wikia.php-контроллеры мертвы (404), v1 слабый (только
+    -- префиксы, без URL, SamsonXVI/Hotel не находит) — поэтому НЕ замена, а лишь
+    -- дополнительный источник заголовков. Мусор отсекает lobTitleIsOurs в grab().
+    task.spawn(function()
+        if not ohttp or foundLock then return end
+        local vurl = domain .. "/api/v1/SearchSuggestions/List?query=" .. oenc(clean):gsub("%%20", "+")
+        print("[GAME-DBG] fandom v1suggest: " .. clean)
+        local vok, vres = pcall(ohttp, { Url = vurl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+        if vok and type(vres) == "table" then
+            local dok, data = pcall(function() return HttpService:JSONDecode(tostring(vres.Body or vres.body or "")) end)
+            if dok and type(data) == "table" and type(data.items) == "table" then
+                for _, it in ipairs(data.items) do
+                    if foundLock then break end
+                    if type(it) == "table" and it.title then grab(it.title, "v1suggest") end
+                end
+            end
+        end
+    end)
+    local fw8 = 0
+    while foundText == "" and fw8 < 8 do task.wait(0.25) fw8 = fw8 + 0.25 end
+    if foundText ~= "" then
+        return saveFound(foundDomain, foundText)
     end
     print("[GAME-DBG] fandom: no article")
     return ""
@@ -4256,7 +4324,10 @@ function extractQuestionKeywords(text)
         ["что"]=1, ["это"]=1, ["как"]=1, ["где"]=1, ["для"]=1, ["или"]=1,
         ["его"]=1, ["ее"]=1, ["меня"]=1, ["тебя"]=1, ["есть"]=1, ["нет"]=1,
         ["про"]=1, ["так"]=1, ["вот"]=1, ["уже"]=1, ["можно"]=1, ["почему"]=1,
-        ["зачем"]=1, ["когда"]=1, ["кто"]=1, ["такой"]=1, ["такая"]=1,
+        ["зачем"]=1, ["когда"]=1, ["кто"]=1, ["кого"]=1,
+        ["какой"]=1, ["какая"]=1, ["какое"]=1, ["какие"]=1, ["какого"]=1,
+        ["какую"]=1, ["каких"]=1, ["каком"]=1, ["каким"]=1, ["какими"]=1,
+        ["такой"]=1, ["такая"]=1,
         ["такое"]=1, ["делает"]=1, ["делать"]=1, ["игра"]=1, ["игре"]=1,
         ["игру"]=1, ["этой"]=1, ["чем"]=1, ["того"]=1, ["очень"]=1,
         ["просто"]=1, ["скажи"]=1, ["расскажи"]=1, ["пожалуйста"]=1,
@@ -4446,7 +4517,7 @@ function searchFandomWiki(pname, kws, enT)
     for _, domain in ipairs(domains) do
         if #out >= 3 then break end
         print("[GAME-DBG] wikisearch on: " .. domain)
-        local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. q .. "&format=json&srlimit=5", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+        local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. q .. "&format=json&srlimit=5&srnamespace=0%7C2%7C114", Method = "GET", Headers = { ["Accept"] = "application/json" } })
         if ok and type(res) == "table" then
             local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
             if dok and type(data) == "table" and data.query and data.query.search then
@@ -4455,28 +4526,23 @@ function searchFandomWiki(pname, kws, enT)
                 -- названия/автора), чужие игры (Ro-Skating, Combat Initiation,
                 -- Regretevator) пропускаем — иначе бот отвечает фактами чужой игры
                 -- ("скейтбордов в Брукхейвене нет" по статье Ro-Skating).
+                -- Сверка через lobTitleIsOurs: точное совпадение части после "/"
+                -- (LSPLASH/DOORS == Doors, но Hotel Simulator != Hotel) или имя
+                -- автора в заголовке. Чужие игры скипаем.
+                local normGameP = lobNormTitle(pname)
                 local ordered = {}
                 for _, r in ipairs(data.query.search) do
                     if type(r) == "table" and r.title then
-                        local tl = tostring(r.title):lower()
-                        local rel = false
-                        for _, gword in ipairs(gw) do
-                            if gword ~= "" and tl:find(gword, 1, true) then rel = true break end
-                        end
-                        if not rel then
-                            for _, cword in ipairs(cw) do
-                                if cword ~= "" and tl:find(cword, 1, true) then rel = true break end
-                            end
-                        end
-                        table.insert(ordered, { title = r.title, rel = rel })
+                        local use, strong = lobTitleIsOurs(r.title, normGameP, cw)
+                        table.insert(ordered, { title = r.title, use = use, strong = strong })
                     end
                 end
-                table.sort(ordered, function(a, b) return a.rel and not b.rel end)
+                table.sort(ordered, function(a, b) return (a.strong and not b.strong) or (a.use and not b.use) end)
                 for _, e in ipairs(ordered) do
                     -- FIX v20b3: раньше лимит 3 попытки СЧИТАЯ ПРОВАЛЫ — правильная
                     -- статья могла не успеть провериться. Даём до 5 попыток.
                     if #out >= 3 or fetched >= 5 then break end
-                    if not e.rel then
+                    if not e.use then
                         print("[GAME-DBG] wikisearch skip (чужая игра): " .. tostring(e.title))
                     else
                         print("[GAME-DBG] wikisearch hit: " .. tostring(e.title))
@@ -5138,7 +5204,8 @@ local function handleQueuedChat(item)
             isQ = first == "что" or first == "чего" or first == "чем" or first == "как"
                 or first == "где" or first == "куда" or first == "зачем" or first == "почему"
                 or first == "когда" or first == "кто" or first == "кого" or first == "какой"
-                or first == "какая" or first == "сколько" or first == "расскажи"
+                or first == "какая" or first == "какое" or first == "какие" or first == "каких"
+                or first == "сколько" or first == "расскажи"
                 or first == "есть" or first == "посмотри" or first == "найди"
                 or first == "поищи" or first == "скажи" or first == "подскажи"
                 or first == "what" or first == "how" or first == "where" or first == "why"
