@@ -1267,7 +1267,13 @@ local function doWebSearch(query)
 
     -- ── 1. Wikipedia Summary API ──────────────────────────────────
     -- Точные факты и энциклопедические описания
-    local wikiTerm = (query:match("^([%w%s%-]+)") or query):match("^%s*(.-)%s*$") or query
+    -- FIX v20b3: старый match("^([%w%s%-]+)") брал ВСЁ длинное предложение
+    -- ("roblox Blox Fruits by ... how to play...") как имя статьи -> всегда 404.
+    -- Берём первые 5 слов — это и есть название/тема.
+    local _wq = {}
+    for w in tostring(query or ""):gmatch("%S+") do table.insert(_wq, w) if #_wq >= 5 then break end end
+    local wikiTerm = table.concat(_wq, " "):match("^%s*(.-)%s*$") or query
+    if wikiTerm == "" then wikiTerm = query end
     local ok1, res1 = pcall(httprequest, {
         Url    = "https://en.wikipedia.org/api/rest_v1/page/summary/" .. urlEncodePath(wikiTerm),
         Method = "GET",
@@ -2042,7 +2048,7 @@ local function makeSystemPrompt(settings)
                 "GAME KNOWLEDGE (session cache, ground truth, do not invent rules): " .. gc.text:sub(1, 600)
                 .. (((_fandomLead ~= nil and _fandomLead ~= "") and (" Wiki: " .. _fandomLead:sub(1, 300))) or "")
                 .. " Use this to know the goal and how teams work (e.g. infected infect, survivors defend). If the cache does not describe a rule, do NOT invent game rules."
-                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search." .. " If asked about a specific item or mechanic not covered by GAME KNOWLEDGE, GAME WIKI or GAME SEARCH above, say you do not know it - NEVER invent items, potions or weapons." .. " Wiki and search blocks below override your older messages - if you previously guessed wrong about an item, correct yourself now, do not repeat old guesses.")
+                .. " When asked what to do in the game or what an item does, answer in 1-2 SHORT sentences under 150 characters total - this is Roblox chat, long messages get rejected. Never write guides or lists." .. " You DO have automatic game search for Roblox questions - use GAME SEARCH and GAME WIKI results when provided, never claim you cannot search." .. " If asked about a specific item or mechanic not covered by GAME KNOWLEDGE, GAME WIKI or GAME SEARCH above, say you do not know it - NEVER invent items, potions or weapons." .. " Wiki and search blocks below override your older messages - if you previously guessed wrong about an item, correct yourself now, do not repeat old guesses." .. " You can search the wiki yourself: if the blocks above lack the fact you need, reply with ONLY [DO:wikisearch <english keywords>] and nothing else (example: [DO:wikisearch green key door]). You will get wiki text, then answer.")
         else
             table.insert(parts,
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
@@ -3809,32 +3815,67 @@ end
 
 -- (_placeInfo объявлена выше — перед makeSystemPrompt)
 
--- §PLACE
+-- §PLACE (FIX v20b3: универсальное определение плейса для ВСЕХ игр)
+_placeInfoAt = 0
+function lobHttpGetJson(url)
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return nil end
+    local ok, res = pcall(httprequest, { Url = url, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+    if not ok or type(res) ~= "table" then return nil end
+    local body = tostring(res.Body or res.body or "")
+    if body == "" then return nil end
+    local dok, data = pcall(function() return HttpService:JSONDecode(body) end)
+    if dok then return data end
+    return nil
+end
 local function fetchPlaceInfo()
-    if _placeInfo then return _placeInfo end
-
-    local placeId = game.PlaceId
-    local placeName = "Unknown Game"
+    local pid = game.PlaceId
+    -- кэш валиден только для текущего placeId и только если имя реально получено
+    if _placeInfo and _placeInfo.placeId == pid and _placeInfo.name ~= nil and _placeInfo.name ~= "" and _placeInfo.name ~= "Unknown Game" then
+        return _placeInfo
+    end
+    -- битый кэш (Unknown) моложе 30с — не спамим, возвращаем как есть
+    if _placeInfo and _placeInfo.placeId == pid and _placeInfo.name == "Unknown Game" and (os.clock() - (_placeInfoAt or 0)) < 30 then
+        return _placeInfo
+    end
+    local placeName = ""
     local placeDesc = ""
-
-    -- Пробуем получить название через MarketplaceService
-    pcall(function()
-        local info = game:GetService("MarketplaceService"):GetProductInfo(placeId)
-        if info then
-            placeName = tostring(info.Name or "Unknown Game")
-            placeDesc = tostring(info.Description or "")
-            -- Обрезаем описание до 300 символов чтобы не засорять промпт
-            if #placeDesc > 300 then
-                placeDesc = placeDesc:sub(1, 300) .. "..."
+    -- попытки 1-3: MarketplaceService (первый вызов часто падает на старте игры)
+    for att = 1, 3 do
+        pcall(function()
+            local info = game:GetService("MarketplaceService"):GetProductInfo(pid)
+            if info then
+                if info.Name and tostring(info.Name) ~= "" then placeName = tostring(info.Name) end
+                if info.Description and tostring(info.Description) ~= "" then placeDesc = tostring(info.Description) end
             end
-        end
-    end)
-
-    _placeInfo = {
-        name    = placeName,
-        placeId = placeId,
-        desc    = placeDesc,
-    }
+        end)
+        if placeName ~= "" then break end
+        if att < 3 then task.wait(1) end
+    end
+    -- попытка 4: официальный Universe API — работает ДЛЯ ВСЕХ плейсов
+    if placeName == "" then
+        pcall(function()
+            local u = lobHttpGetJson("https://apis.roblox.com/universes/v1/places/" .. tostring(pid) .. "/universe")
+            local uid = u and u.universeId
+            if uid then
+                local g = lobHttpGetJson("https://games.roblox.com/v1/games?universeIds=" .. tostring(uid))
+                local d = g and g.data and g.data[1]
+                if d then
+                    if d.name and tostring(d.name) ~= "" then placeName = tostring(d.name) end
+                    if d.description and tostring(d.description) ~= "" then placeDesc = tostring(d.description) end
+                end
+            end
+        end)
+    end
+    if placeDesc ~= "" and #placeDesc > 300 then
+        placeDesc = placeDesc:sub(1, 300) .. "..."
+    end
+    -- НЕ кэшируем провал: возвращаем временную таблицу, следующий вызов попробует снова
+    if placeName == "" then
+        return { name = "Unknown Game", placeId = pid, desc = placeDesc }
+    end
+    _placeInfo = { name = placeName, placeId = pid, desc = placeDesc }
+    _placeInfoAt = os.clock()
     return _placeInfo
 end
 
@@ -3842,6 +3883,12 @@ end
 task.spawn(function()
     task.wait(2)
     fetchPlaceInfo()
+    task.wait(3)
+    -- повторная попытка если первый раз не вышло (игра ещё грузилась)
+    if not _placeInfo or _placeInfo.name == "Unknown Game" then
+        _placeInfoAt = 0
+        fetchPlaceInfo()
+    end
 end)
 
 -- v20 Beta 2: GAME UNDERSTANDING (session cache, universal, no hardcoded games)
@@ -3868,31 +3915,42 @@ end
 
 fetchGameContext = function(force)
     if not ClientSettings.GameUnderstanding then return nil end
-    local pi = fetchPlaceInfo()
     local pid = game.PlaceId
     if _gameContext and _gameContext.placeId == pid and not force then return _gameContext end
     if _gameContextFetching then return _gameContext end
     _gameContextFetching = true
     task.spawn(function()
-        local pname = (pi and pi.name) or "Unknown Game"
+        -- FIX v20b3: имя берём ВНУТРИ потока (свежее), короткий запрос для вики.
+        -- Старый код брал длинное предложение в Wikipedia summary -> всегда 404.
+        local pi = fetchPlaceInfo()
+        local pname = (pi and pi.name) or ""
+        if pname == "" or pname == "Unknown Game" then
+            task.wait(3)
+            pi = fetchPlaceInfo()
+            pname = (pi and pi.name) or ""
+        end
         local pdesc = (pi and pi.desc) or ""
         local creator = getCreatorName()
-        local query = "roblox " .. pname .. (creator ~= "" and (" by " .. creator) or "") .. " how to play teams goal"
         local found = ""
-        local done = false
-        task.spawn(function()
-            local ok, res = pcall(doWebSearch, query)
-            if ok and res then found = tostring(res) end
-            done = true
-        end)
-        local w = 0
-        while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
-        if found:find("not found") or found:find("Results not found") then found = "" end
-        if #found > 600 then found = found:sub(1, 600) end
+        if pname ~= "" and pname ~= "Unknown Game" then
+            local done = false
+            task.spawn(function()
+                local ok, res = pcall(doWebSearch, "roblox " .. pname)
+                if ok and res then found = tostring(res) end
+                done = true
+            end)
+            local w = 0
+            while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
+            if found:find("not found") or found:find("Results not found") then found = "" end
+            if #found > 600 then found = found:sub(1, 600) end
+        end
         local fandom = ""
-        pcall(function() fandom = fetchFandomArticle(pname) or "" end)
+        if pname ~= "" and pname ~= "Unknown Game" then
+            pcall(function() fandom = fetchFandomArticle(pname) or "" end)
+        end
         local parts = {}
-        table.insert(parts, "Game: " .. pname .. " (placeId " .. tostring(pid) .. ")")
+        -- placeId пишем ВСЕГДА: даже без вики у ИИ есть точный идентификатор места
+        table.insert(parts, "Game: " .. (pname ~= "" and pname or ("placeId " .. tostring(pid))) .. " (placeId " .. tostring(pid) .. ")")
         if creator ~= "" then table.insert(parts, "Creator: " .. creator) end
         if pdesc ~= "" then table.insert(parts, "About: " .. pdesc:sub(1, 250)) end
         if found ~= "" then table.insert(parts, "Web: " .. found) end
@@ -3909,7 +3967,17 @@ end
 function findGameWikiDomain(pname)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if not httprequest then return "" end
-    local slug = tostring(pname or ""):lower():gsub("[^%a%s%-]", ""):gsub("%s+", "-"):match("^[%-]*(.-)[%-]*$") or ""
+    local raw = tostring(pname or ""):lower()
+    local slug = raw:gsub("[^%a%s%-]", ""):gsub("%s+", "-"):match("^[%-]*(.-)[%-]*$") or ""
+    -- FIX v20b3 (Delta): не-ASCII имена (русские и т.п.) не могут быть поддоменом
+    -- fandom — сразу идём в общий roblox.fandom.com поиск, без 3 пустых HTTP.
+    -- Старый код давал slug="" и всё равно долбил сеть + потом брал ПЕРВУЮ
+    -- попавшуюся статью (чужую игру) как знание о текущей.
+    if slug == "" or #slug < 3 or raw:find("[\128-\255]") then
+        _wikiDomainCache = _wikiDomainCache or {}
+        _wikiDomainCache[slug] = "https://roblox.fandom.com"
+        return "https://roblox.fandom.com"
+    end
     _wikiDomainCache = _wikiDomainCache or {}
     if _wikiDomainCache[slug] then return _wikiDomainCache[slug] end
     local words = {}
@@ -3944,7 +4012,11 @@ end
 function cleanWikitext(wt)
     local t = tostring(wt or "")
     t = t:gsub("<[^>]+>", " ")
-    t = t:gsub("%b{}", " ")
+    -- FIX v20b3: раньше %b{} вырезал шаблоны ЦЕЛИКОМ вместе с данными —
+    -- таблицы транспорта/предметов/этажей (там лежат скейты, самокаты и т.п.)
+    -- исчезали из текста и сниппеты не находились. Теперь скобки/пайпы
+    -- превращаем в пробелы, а СЛОВА внутри оставляем.
+    t = t:gsub("%b{}", function(b) return " " .. b:gsub("[{}|=%-#*:;]", " ") .. " " end)
     t = t:gsub("%[%[[^%|%]]+%|([^%]]+)%]%]", "%1")
     t = t:gsub("%[%[([^%]]+)%]%]", "%1")
     t = t:gsub("'''?", "")
@@ -3972,9 +4044,11 @@ function fetchWikiPage(domain, title)
                         wt = rev["*"]
                         if wt == nil and rev.slots and rev.slots.main then wt = rev.slots.main["*"] end
                     end
-                    if type(wt) == "string" and #wt > 500 then
+                    -- Стабы (как Insane Elevator: инфобокс + абзац) тоже годятся:
+                    -- из них бот возьмёт хотя бы жанр/создателя/описание.
+                    if type(wt) == "string" and #wt > 300 then
                         local text = cleanWikitext(wt)
-                        if #text > 500 then
+                        if #text > 150 then
                             if #text > 6000 then text = text:sub(1, 6000) end
                             return text
                         end
@@ -3989,7 +4063,7 @@ function fetchWikiPage(domain, title)
         local dok2, data2 = pcall(function() return HttpService:JSONDecode(tostring(res2.Body or res2.body or "")) end)
         if dok2 and type(data2) == "table" and data2.query and data2.query.pages then
             for _, page in pairs(data2.query.pages) do
-                if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 500 then
+                if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 150 then
                     local text = page.extract:gsub("%s+", " ")
                     if #text > 6000 then text = text:sub(1, 6000) end
                     return text
@@ -4000,12 +4074,22 @@ function fetchWikiPage(domain, title)
     return ""
 end
 
+-- БАЗА ФОРМАТОВ roblox.fandom.com (исследовано вживую, v20b3):
+-- Игры лежат НЕ на отдельных доменах, а под roblox.fandom.com/wiki/:
+--   Developer/Game  Uplift_Games/Adopt_Me! | Gamer_Robot_Inc/Blox_Fruits
+--                   YXceptional_Studios/Tower_of_Hell | Digital_Destruction/Insane_Elevator
+--   Flat (ивент)    Egg_hunt | Egg_Hunt_2019:_Scrambled_in_Time | Eggstravaganza
+--   Game/Item       Adopt_Me_toys/Mystery_Pets_Series_1
+--   Студии/таймлайны Derpie_Studios | Timeline_of_the_top_10_most-visited_games_per_month/2025
+-- Отдельные dedicated-вики (старый формат) не используем вообще —
+-- только roblox.fandom.com.
 function fetchFandomArticle(pname)
     pname = tostring(pname or "")
     if pname == "" or pname == "Unknown Game" then print("[GAME-DBG] fandom: bad place name") return "" end
-    local domain = findGameWikiDomain(pname)
-    if domain == "" then print("[GAME-DBG] fandom: no domain") return "" end
-    local clean = pname:gsub("[^%w%s%-]", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    -- FIX v20b3: [%w] режет кириллицу -> clean="" -> поиск по пустой строке.
+    -- [%p%c] чистит только пунктуацию/мусор, буквы всех языков целы.
+    local clean = tostring(pname or ""):gsub("[%p%c]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    if clean == "" then print("[GAME-DBG] fandom: empty clean") return "" end
     local words = {}
     for w in clean:gmatch("%S+") do table.insert(words, w) end
     local variants, seenV = {}, {}
@@ -4023,15 +4107,86 @@ function fetchFandomArticle(pname)
         for i = 1, 2 do table.insert(t, words[i]) end
         addV(table.concat(t, "_"))
     end
-    for _, title in ipairs(variants) do
-        print("[GAME-DBG] fandom try: " .. domain .. " / " .. title)
-        local text = fetchWikiPage(domain, title)
-        if text ~= "" then
-            if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
-            _fandomLead = text:sub(1, 400)
-            print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
-            print("[GAME-DBG] fandom preview: " .. text:sub(1, 300))
-            return text
+    -- FIX v20b3: прямой вариант Creator/Game (главный формат roblox.fandom.com).
+    local creator0 = ""
+    pcall(function() creator0 = getCreatorName() or "" end)
+    if creator0 ~= "" and not creator0:find("^id%d") then
+        local cg = creator0:gsub("[%p%c]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+        if cg ~= "" then
+            addV((cg:gsub(" ", "_") .. "/" .. table.concat(words, "_")))
+        end
+    end
+    -- Только roblox.fandom.com. Dedicated-домены (старый формат) не трогаем вообще.
+    local domains = { "https://roblox.fandom.com" }
+    local ohttp = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    local oenc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+    -- FIX v20b3: [%a]+ не видит кириллицу -> fw="" -> бралась ПЕРВАЯ
+    -- чужая статья как знание о текущей игре. Теперь слова любые (%S+).
+    local fw = ""
+    for w in clean:lower():gmatch("%S+") do local cw = w:gsub("[%p%d]", ""); if #cw >= 4 then fw = cw break end end
+    local function saveFound(domain, text)
+        if _gameContext then _gameContext.wikiDomain = domain _gameContext.fandom = text end
+        _fandomLead = text:sub(1, 400)
+        print("[GAME-DBG] fandom OK (" .. #text .. " chars)")
+        return text
+    end
+    for _, domain in ipairs(domains) do
+        -- OpenSearch: official typo-tolerant title suggest, keyless (tested live)
+        if ohttp then
+            local ourl = domain .. "/api.php?action=opensearch&search=" .. oenc(clean):gsub("%%20", "+") .. "&limit=5&format=json"
+            print("[GAME-DBG] fandom opensearch: " .. domain .. " / " .. clean)
+            local ook, ores = pcall(ohttp, { Url = ourl, Method = "GET", Headers = { ["Accept"] = "application/json" } })
+            if ook and type(ores) == "table" then
+                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(ores.Body or ores.body or "")) end)
+                if dok and type(data) == "table" and type(data[2]) == "table" then
+                    for _, t in ipairs(data[2]) do
+                        -- пропускаем заглавную страницу вики ("X Wiki") — это не статья
+                        if type(t) == "string" and t ~= "" and not t:find(" Wiki$") and (fw == "" or t:lower():find(fw, 1, true)) then
+                            print("[GAME-DBG] fandom opensearch-hit: " .. t)
+                            local text = fetchWikiPage(domain, t)
+                            if text ~= "" then
+                                return saveFound(domain, text)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        for _, title in ipairs(variants) do
+            print("[GAME-DBG] fandom try: " .. domain .. " / " .. title)
+            local text = fetchWikiPage(domain, title)
+            if text ~= "" then
+                print("[GAME-DBG] fandom preview: " .. text:sub(1, 300))
+                return saveFound(domain, text)
+            end
+        end
+    end
+    -- creator full-text search на roblox.fandom.com (последний шанс)
+    do
+        local domain = "https://roblox.fandom.com"
+        local senc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+        local sq = senc(clean .. " " .. creator0):gsub("%%20", "+")
+        print("[GAME-DBG] fandom creator-search: " .. clean .. " " .. creator0)
+        local httprequest = ohttp
+        if httprequest then
+            local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. sq .. "&format=json&srlimit=3", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+            if ok and type(res) == "table" then
+                local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+                if dok and type(data) == "table" and data.query and data.query.search then
+                    -- FIX v20b3: см. выше — [%a]+ пропускал кириллицу и давал чужую статью.
+                    local firstWord = fw
+                    for _, r in ipairs(data.query.search) do
+                        if type(r) == "table" and r.title and (firstWord == "" or tostring(r.title):lower():find(firstWord, 1, true)) then
+                            print("[GAME-DBG] fandom creator-hit: " .. tostring(r.title))
+                            local text = fetchWikiPage(domain, r.title)
+                            if text ~= "" then
+                                return saveFound(domain, text)
+                            end
+                            break
+                        end
+                    end
+                end
+            end
         end
     end
     print("[GAME-DBG] fandom: no article")
@@ -4051,7 +4206,11 @@ function extractQuestionKeywords(text)
         ["who"]=1, ["which"]=1, ["does"]=1, ["do"]=1, ["is"]=1,
         ["are"]=1, ["can"]=1, ["the"]=1, ["and"]=1, ["for"]=1,
         ["with"]=1, ["about"]=1, ["tell"]=1, ["please"]=1, ["game"]=1,
-        ["whats"]=1,
+        ["whats"]=1, ["there"]=1, ["their"]=1, ["these"]=1, ["those"]=1,
+        ["this"]=1, ["that"]=1, ["from"]=1, ["have"]=1, ["has"]=1,
+        ["had"]=1, ["was"]=1, ["were"]=1, ["been"]=1, ["will"]=1,
+        ["would"]=1, ["your"]=1, ["they"]=1, ["them"]=1, ["than"]=1,
+        ["then"]=1, ["you"]=1, ["into"]=1, ["know"]=1,
     }
     local out, seen = {}, {}
     for tok in tostring(text or ""):gmatch("%S+") do
@@ -4070,12 +4229,23 @@ function findWikiSnippets(article, keywords, maxSnips)
     article = tostring(article or "")
     if article == "" then return out end
     local low = article:lower()
+    local function stemEn(w)
+        if not w:match("^[%a]+$") then return w end
+        if #w > 4 and w:sub(-3) == "ies" then return w:sub(1, -4) .. "y" end
+        if #w > 4 and w:sub(-2) == "es" then return w:sub(1, -3) end
+        if #w > 3 and w:sub(-1) == "s" then return w:sub(1, -2) end
+        return w
+    end
     for _, kw in ipairs(keywords or {}) do
         kw = tostring(kw or ""):lower()
         if #kw >= 3 and #out < maxSnips then
+            local vars = { kw }
+            local st = stemEn(kw)
+            if st ~= kw then table.insert(vars, st) end
+            for _, v in ipairs(vars) do
             local s = 1
             while #out < maxSnips do
-                local f = low:find(kw, s, true)
+                local f = low:find(v, s, true)
                 if not f then break end
                 local bucket = math.floor(f / 200)
                 if not used[bucket] then
@@ -4084,13 +4254,44 @@ function findWikiSnippets(article, keywords, maxSnips)
                     local b = math.min(#article, f + 300)
                     table.insert(out, (article:sub(a, b):gsub("%s+", " ")))
                 end
-                s = f + #kw
+                s = f + #v
+            end
             end
         end
     end
     return out
 end
 
+
+-- FIX v20b3: словарик RU->EN как страховка, когда ИИ-перевод пустой/упал
+-- (в логе: en пусто -> поиск только по русскому слову в английской вики -> 0 сниппетов).
+-- Детерминированно, без сети. Ключи — нижний регистр.
+LOB_RU_EN = {
+    ["скейт"]="skateboard", ["скейтборд"]="skateboard", ["самокат"]="scooter",
+    ["велосипед"]="bike bicycle", ["велик"]="bike", ["машина"]="car vehicle",
+    ["машинка"]="car", ["вертолет"]="helicopter", ["вертолёт"]="helicopter",
+    ["самолет"]="plane", ["самолёт"]="plane", ["лодка"]="boat", ["корабль"]="ship",
+    ["мотоцикл"]="motorcycle", ["мотик"]="motorcycle", ["поезд"]="train",
+    ["автобус"]="bus", ["грузовик"]="truck", ["трактор"]="tractor",
+    ["монстр"]="monster", ["монстры"]="monster monsters", ["оружие"]="weapon gun",
+    ["меч"]="sword", ["пистолет"]="gun pistol", ["нож"]="knife",
+    ["вип"]="vip gamepass", ["питомец"]="pet", ["питомцы"]="pet pets",
+    ["дом"]="house", ["дома"]="house", ["работа"]="job", ["деньги"]="money cash",
+    ["полиция"]="police", ["дверь"]="door", ["ключ"]="key", ["ключи"]="key keys",
+    ["этаж"]="floor", ["этажи"]="floor floors", ["лифт"]="elevator",
+    ["убийца"]="murderer", ["шериф"]="sheriff", ["невиновный"]="innocent",
+    ["выживший"]="survivor", ["зараженный"]="infected", ["заражённый"]="infected",
+    ["башня"]="tower", ["ад"]="hell", ["фрукт"]="fruit", ["яйцо"]="egg",
+    ["охота"]="hunt", ["ивент"]="event", ["событие"]="event",
+    ["обновление"]="update", ["обнова"]="update", ["код"]="code", ["коды"]="code codes",
+    ["админ"]="admin", ["бан"]="ban", ["сервер"]="server", ["серверы"]="server",
+    ["торговля"]="trade trading", ["трейд"]="trade", ["редкий"]="rare",
+    ["легендарный"]="legendary", ["легендарка"]="legendary", ["эпический"]="epic",
+    ["обычный"]="common", ["босс"]="boss", ["магазин"]="shop store",
+    ["скин"]="skin", ["одежда"]="clothes outfit", ["волосы"]="hair",
+    ["лицо"]="face", ["голова"]="head", ["тело"]="body", ["аура"]="aura",
+    ["крылья"]="wings", ["шапка"]="hat", ["шляпа"]="hat",
+}
 function translateKeywordsAI(words)
     if not words or #words == 0 then return {} end
     if not providerRouter then return {} end
@@ -4118,53 +4319,79 @@ function translateKeywordsAI(words)
             if #tok >= 3 and #out < 6 then table.insert(out, tok) end
         end
     end
+    -- страховка: ИИ молчит -> берём из словарика (скейт->skateboard и т.д.)
+    if #out == 0 and type(LOB_RU_EN) == "table" then
+        for _, w in ipairs(words) do
+            local dict = LOB_RU_EN[tostring(w or ""):lower()]
+            if dict then
+                for tok in tostring(dict):gmatch("[%a]+") do
+                    if #tok >= 3 and #out < 6 then table.insert(out, tok) end
+                end
+            end
+        end
+        if #out > 0 then print("[GAME-DBG] dict-en: " .. table.concat(out, ",")) end
+    end
     return out
 end
 
--- full-text search across Roblox Wiki (finds per-item pages when game article lacks detail)
+-- full-text search: dedicated game wiki first, then roblox.fandom.com (covers thin wikis)
 function searchFandomWiki(pname, kws, enT)
     local empty = {}
     local keys, seen = {}, {}
+    -- FIX v20b3: старый фильтр ^[%a]+$ выкидывал ВСЕ русские ключевые слова ->
+    -- поиск возвращал "no keys" для любого вопроса по-русски.
     for _, w in ipairs(kws or {}) do
-        if w:match("^[%a]+$") and not seen[w] then seen[w] = true table.insert(keys, w) end
+        local cw = tostring(w or ""):gsub("[%p%d]", "")
+        if #cw >= 3 and not seen[w] then seen[w] = true table.insert(keys, w) end
     end
     for _, w in ipairs(enT or {}) do
         if not seen[w] then seen[w] = true table.insert(keys, w) end
     end
     if #keys == 0 then print("[GAME-DBG] wikisearch: no keys") return empty, "" end
-    local domain = (_gameContext and _gameContext.wikiDomain) or ""
-    if domain == "" then domain = findGameWikiDomain(pname) end
-    if domain == "" then domain = "https://roblox.fandom.com" end
+    -- Только roblox.fandom.com, без dedicated (старый формат).
+    local domains = { "https://roblox.fandom.com" }
     local gw = {}
-    for w in tostring(pname or ""):lower():gmatch("[%a]+") do
-        if #w >= 4 and #gw < 2 then table.insert(gw, w) end
+    for w in tostring(pname or ""):lower():gmatch("%S+") do
+        local cgw = w:gsub("[%p%d]", "")
+        if #cgw >= 4 and #gw < 2 then table.insert(gw, cgw) end
     end
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if not httprequest then return empty, "" end
     local enc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
-    local q = enc(table.concat(gw, " ") .. " " .. table.concat(keys, " ")):gsub("%%20", "+")
-    print("[GAME-DBG] wikisearch q: " .. table.concat(gw, " ") .. " " .. table.concat(keys, " "))
-    local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. q .. "&format=json&srlimit=5", Method = "GET", Headers = { ["Accept"] = "application/json" } })
-    if not ok or type(res) ~= "table" then print("[GAME-DBG] wikisearch http fail") return empty, "" end
-    local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
-    if not dok or type(data) ~= "table" or not data.query or not data.query.search then
-        print("[GAME-DBG] wikisearch bad json") return empty, ""
+    local cw = {}
+    local creator0 = ""
+    pcall(function() creator0 = getCreatorName() or "" end)
+    for w in tostring(creator0):lower():gmatch("%S+") do
+        local c2 = w:gsub("[%p%d]", "")
+        if #c2 >= 3 and #cw < 2 then table.insert(cw, c2) end
     end
-    local titles = {}
-    for _, r in ipairs(data.query.search) do
-        if type(r) == "table" and r.title and #titles < 3 then
-            print("[GAME-DBG] wikisearch hit: " .. tostring(r.title))
-            table.insert(titles, r.title)
-        end
-    end
+    local q = enc(table.concat(gw, " ") .. " " .. table.concat(cw, " ") .. " " .. table.concat(keys, " ")):gsub("%%20", "+")
+    print("[GAME-DBG] wikisearch q: " .. table.concat(gw, " ") .. " " .. table.concat(cw, " ") .. " " .. table.concat(keys, " "))
     local out, src = {}, ""
-    for _, t in ipairs(titles) do
+    for _, domain in ipairs(domains) do
         if #out >= 3 then break end
-        local text = fetchWikiPage(domain, t)
-        if text ~= "" then
-            local sn = findWikiSnippets(text, keys, 3 - #out)
-            for _, s in ipairs(sn) do table.insert(out, s) end
-            if #sn > 0 and src == "" then src = tostring(t) end
+        print("[GAME-DBG] wikisearch on: " .. domain)
+        local ok, res = pcall(httprequest, { Url = domain .. "/api.php?action=query&list=search&srsearch=" .. q .. "&format=json&srlimit=5", Method = "GET", Headers = { ["Accept"] = "application/json" } })
+        if ok and type(res) == "table" then
+            local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
+            if dok and type(data) == "table" and data.query and data.query.search then
+                local fetched = 0
+                for _, r in ipairs(data.query.search) do
+                    -- FIX v20b3: раньше лимит 3 попытки СЧИТАЯ ПРОВАЛЫ — правильная
+                    -- статья могла не успеть провериться. Даём до 5 попыток.
+                    if #out >= 3 or fetched >= 5 then break end
+                    if type(r) == "table" and r.title then
+                        print("[GAME-DBG] wikisearch hit: " .. tostring(r.title))
+                        fetched = fetched + 1
+                        local text = fetchWikiPage(domain, r.title)
+                        if text ~= "" then
+                            local sn = findWikiSnippets(text, keys, 3 - #out)
+                            for _, s in ipairs(sn) do table.insert(out, s) end
+                            if #sn > 0 and src == "" then src = tostring(r.title) end
+                        end
+                    end
+                end
+            end
         end
     end
     print("[GAME-DBG] wikisearch snips: " .. #out)
@@ -4175,7 +4402,7 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
-print("[LOB] build: beta2-gamewiki18 followup-Q")
+print("[LOB] build: beta2-gamewiki26 model-search")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
@@ -4830,10 +5057,14 @@ local function handleQueuedChat(item)
         end
         if isQ then
             _lastGameQ[item.userId] = nowQ
-            local pi2 = _placeInfo or fetchPlaceInfo()
+            local pi2 = fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
             print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
-            if pname2 ~= "" and pname2 ~= "Unknown Game" then
+            -- FIX v20b3: работаем для ВСЕХ плейсов. Даже без вики у ИИ есть
+            -- официальное About + placeId из fetchPlaceInfo/Universe API.
+            -- Если имя ещё Unknown — ищем по placeId, а не молчим.
+            if pname2 == "" or pname2 == "Unknown Game" then pname2 = "placeId " .. tostring(game.PlaceId) end
+            do
                 local creator2 = ""
                 pcall(function() creator2 = getCreatorName() or "" end)
                 -- 1) Roblox Wiki snippets first (cached article, no extra web spam)
@@ -4860,7 +5091,7 @@ local function handleQueuedChat(item)
                         table.insert(apiMessages, {
                             role = "system",
                             content = "[GAME WIKI " .. pname2 .. " on: " .. item.cleaned .. "]\n" .. table.concat(snips, "\n")
-                                .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                         })
                         wikiDone = true
                         print("[GAME-DBG] inject: wiki (" .. #snips .. " snips)")
@@ -4871,11 +5102,34 @@ local function handleQueuedChat(item)
                             table.insert(apiMessages, {
                                 role = "system",
                                 content = "[GAME WIKI " .. ((wsrc ~= "") and wsrc or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips, "\n")
-                                    .. "\n[ORDER: Answer the player's question in Russian in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                                    .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
                             })
                             wikiDone = true
                             print("[GAME-DBG] inject: wikisearch (" .. #wsnips .. " from " .. tostring(wsrc) .. ")")
                         end
+                    end
+                end
+                -- FIX v20b3: статьи в кэше нет (fetchFandomArticle не нашёл с первого
+                -- раза) — всё равно делаем полнотекстовый list=search по
+                -- roblox.fandom.com. Раньше этот путь пропускался и бот сразу
+                -- падал в "nodata", хотя статья (напр. Digital_Destruction/Insane_Elevator) есть.
+                if not wikiDone and article == "" then
+                    local kws0 = extractQuestionKeywords(item.cleaned)
+                    print("[GAME-DBG] kws0: " .. table.concat(kws0, ","))
+                    local en0 = {}
+                    if #kws0 > 0 then
+                        en0 = translateKeywordsAI(kws0)
+                        print("[GAME-DBG] en0: " .. table.concat(en0, ","))
+                    end
+                    local wsnips0, wsrc0 = searchFandomWiki(pname2, kws0, en0)
+                    if #wsnips0 > 0 then
+                        table.insert(apiMessages, {
+                            role = "system",
+                            content = "[GAME WIKI " .. ((wsrc0 ~= "") and wsrc0 or pname2) .. " on: " .. item.cleaned .. "]\n" .. table.concat(wsnips0, "\n")
+                                .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY the facts above. Copy the purpose and use straight from the facts. If the facts do not contain it, say you do not know. Never invent.]"
+                        })
+                        wikiDone = true
+                        print("[GAME-DBG] inject: wikisearch-nocache (" .. #wsnips0 .. " from " .. tostring(wsrc0) .. ")")
                     end
                 end
                 -- 2) fallback: generic web query in requested format
@@ -4922,7 +5176,7 @@ local function handleQueuedChat(item)
                     print("[GAME-DBG] inject: nodata")
                     table.insert(apiMessages, {
                         role = "system",
-                        content = "[GAME " .. pname2 .. ": no wiki/search data on '" .. item.cleaned .. "'. The search already ran and found nothing. Say you do not know yet, do NOT invent mechanics, do NOT describe doors/boxes/places you cannot see, and NEVER claim you cannot search - search is automatic.]"
+                        content = "[GAME " .. pname2 .. ": no wiki/search data on '" .. item.cleaned .. "'. The automatic search found nothing. Either say you do not know yet, or try your own search: reply with ONLY [DO:wikisearch <english keywords>] and nothing else. Do NOT invent mechanics and NEVER claim you cannot search.]"
                     })
                 end
                 end
@@ -5170,6 +5424,79 @@ local function handleQueuedChat(item)
 
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
+    -- v20 Beta 2: MODEL-DRIVEN wiki search ([DO:wikisearch ...])
+    -- The model itself formulates the query when automatic search missed.
+    -- Same round-trip pattern as searchanim. One shot, no recursion.
+    do
+        local wsQuery = text:match("%[%s*[Dd][Oo]:%s*[Ww]ikisearch%s+([^%]\n]+)%]?")
+        if wsQuery and settings.GameUnderstanding then
+            wsQuery = wsQuery:gsub("%s+$", "")
+            print("[GAME-DBG] model-wikisearch: " .. wsQuery)
+            local mkeys = {}
+            for tok in tostring(wsQuery):lower():gmatch("[%a]+") do
+                if #tok >= 3 and #mkeys < 8 then table.insert(mkeys, tok) end
+            end
+            local piw = _placeInfo or fetchPlaceInfo()
+            local pnamew = (piw and piw.name) or ""
+            local wresults = {}
+            if pnamew ~= "" and pnamew ~= "Unknown Game" then
+                local articleW = (_gameContext and _gameContext.fandom) or ""
+                if articleW == "" then
+                    pcall(function() articleW = fetchFandomArticle(pnamew) or "" end)
+                end
+                if articleW ~= "" then
+                    for _, s in ipairs(findWikiSnippets(articleW, mkeys, 3)) do table.insert(wresults, s) end
+                end
+                if #wresults == 0 then
+                    local wsn, wsrc = searchFandomWiki(pnamew, mkeys, mkeys)
+                    for _, s in ipairs(wsn) do table.insert(wresults, s) end
+                    if #wsn > 0 then print("[GAME-DBG] model-wikisearch hits from " .. tostring(wsrc)) end
+                end
+            end
+            if #wresults == 0 then
+                local gok, gres = pcall(doWebSearch, "roblox " .. pnamew .. " " .. wsQuery)
+                if gok and gres and tostring(gres) ~= "" then
+                    local gw2 = tostring(gres)
+                    if gw2:find("%[Wiki%]") or gw2:find("%[News") or gw2:find("%[Jina%]") then
+                        table.insert(wresults, gw2:sub(1, 600))
+                    end
+                end
+            end
+            local wsText
+            if #wresults > 0 then
+                wsText = "[GAME WIKI results for \"" .. wsQuery .. "\"]:\n" .. table.concat(wresults, "\n")
+                    .. "\n[ORDER: Answer the player's question in the player's language (follow the LANG tag) in 1-2 short sentences, MAX 100 characters total, using ONLY these facts. If they do not answer it, say you do not know. Never invent.]"
+            else
+                wsText = "[GAME WIKI: nothing found for \"" .. wsQuery .. "\". Say you do not know, do NOT invent.]"
+            end
+            local secondMessagesW = {}
+            for _, m in ipairs(apiMessages) do table.insert(secondMessagesW, m) end
+            table.insert(secondMessagesW, { role = "assistant", content = text })
+            table.insert(secondMessagesW, { role = "system", content = wsText })
+            local secondPayloadW = { model = model, temperature = payload.temperature, max_tokens = maxTok, messages = secondMessagesW }
+            if model:find("^qwen/") then secondPayloadW.reasoning_effort = "none" secondPayloadW.temperature = nil end
+            local textW, errW, doneW = nil, nil, false
+            task.spawn(function()
+                textW, errW = providerRouter:chatCompletions(secondPayloadW)
+                doneW = true
+            end)
+            local waitedW = 0
+            while not doneW and waitedW < timeoutSec do task.wait(0.5) waitedW = waitedW + 0.5 end
+            if not doneW then textW = nil end
+            if textW and textW ~= "" then
+                textW = textW:match("^%s*(.-)%s*$") or textW
+                textW = textW:gsub("%[NAME:[^%]]*%]%s*", "")
+                textW = textW:gsub("<think>.-</think>%s*", "")
+                textW = textW:gsub("%[%s*[Dd][Oo]:%s*[%w_]+[^%]]-%]?", "")
+                textW = textW:match("^%s*(.-)%s*$") or textW
+                if textW ~= "" then text = textW end
+                print("[GAME-DBG] model-wikisearch done")
+            else
+                print("[GAME-DBG] model-wikisearch fail: " .. tostring(errW or "empty/timeout"))
+            end
+        end
+    end
+
     local actionName, cleanText, actionArg = parseActionTag(text)
 
     -- ═══════════════════════════════════════════════════════════════════
@@ -8669,6 +8996,7 @@ makeToggleRow(
         ClientSettings.PlaceAwareness = state
         saveSettings()
         _placeInfo = nil
+        _placeInfoAt = 0
     end
 )
 
