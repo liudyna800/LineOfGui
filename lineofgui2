@@ -256,6 +256,7 @@ local function saveSettings()
             "PlayerAwareness=" .. b(cs.PlayerAwareness, true),
             "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
             "GameUnderstanding=" .. b(cs.GameUnderstanding, false),
+            "DangerSense="    .. b(cs.DangerSense,    false),
             "CameraLook="      .. b(cs.CameraLook,      true),
             "AvatarAwareness=" .. b(cs.AvatarAwareness, false),
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
@@ -321,6 +322,7 @@ local function loadSettings()
         cs.PlayerAwareness = getBool("PlayerAwareness", true)
         cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
         cs.GameUnderstanding = getBool("GameUnderstanding", false)
+        cs.DangerSense = getBool("DangerSense", false)
         cs.CameraLook      = getBool("CameraLook",      true)
         cs.AvatarAwareness = getBool("AvatarAwareness", false)
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
@@ -657,6 +659,7 @@ ClientSettings = {
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     GameUnderstanding = false, -- v20 Beta 2: game understanding
+    DangerSense = false, -- v20 Beta 2: чувство опасности (только с GameUnderstanding)
     PlayerAwareness = true, -- v17: ИИ видит кто рядом, с какой стороны, как себя ведёт
     CameraLook = true,
     AvatarAwareness = false, -- v20: avatar look (no face)      -- v17: бот плавно смотрит на говорящего игрока
@@ -718,6 +721,7 @@ do
     if cs2.PlayerAwareness == nil then cs2.PlayerAwareness = true  end
     if cs2.PlaceAwareness  == nil then cs2.PlaceAwareness  = true  end
     if cs2.GameUnderstanding == nil then cs2.GameUnderstanding = false end
+    if cs2.DangerSense == nil then cs2.DangerSense = false end
     if cs2.CameraLook      == nil then cs2.CameraLook      = true  end
     if cs2.AvatarAwareness == nil then cs2.AvatarAwareness = false end
     if cs2.StripHash       == nil then cs2.StripHash       = true  end
@@ -2110,6 +2114,15 @@ local function makeSystemPrompt(settings)
                 "GAME KNOWLEDGE is loading (web search in progress). Until it arrives, use only the game description above. Do NOT invent teams, roles or rules.")
             pcall(function() fetchGameContext(false) end)
         end
+        if lobDangerActive() then
+            table.insert(parts,
+                "DANGER SENSE (live threat awareness). TEAMS block tells you everyone's side; THREAT block tells you live harm: your HP, who hurt you, ragdoll/weld/teleport, armed players near, threat words.\n" ..
+                "The game may be asymmetric (infected vs survivors, killer vs innocents, cops vs criminals). Treat other-team players as DANGEROUS.\n" ..
+                "If a dangerous player asks you to come closer, follow them, or stay ([DO:goto], [DO:follow] or any implied movement), REFUSE in character with a short concrete reason (examples: you are infected and will infect me; you hold a weapon; you just hurt me). Do NOT add any movement [DO:] tag when refusing.\n" ..
+                "If YOU are the dangerous one (you are infected, the killer, or armed) and someone asks you to come close, also refuse briefly — you could hurt them.\n" ..
+                "React to THREAT facts briefly in character (pain, alarm, callout). Never print [THREAT] or [DO:] tags literally in your reply.\n" ..
+                "If the wiki/game data says nothing about danger, use generic caution only: keep distance from armed strangers, do not follow anyone right after being hurt. NEVER invent game rules, roles, endings or win conditions.")
+        end
     end
 
     -- ── 5. ИГРОКИ РЯДОМ ──────────────────────────────────────────────────
@@ -2946,6 +2959,11 @@ end
 local function gotoPlayer(targetPlayer)
     if not ClientSettings.ActionsEnabled then return end
     if not targetPlayer then return end
+    -- v20 Beta 2 DangerSense: к врагу/подозреваемому не подходим (ИИ откажет текстом)
+    if lobIsDangerTarget(targetPlayer) then
+        print("[LOB] danger veto: goto " .. tostring(targetPlayer and targetPlayer.Name))
+        return
+    end
 
     -- Останавливаем предыдущее следование
     stopFollowing()
@@ -2969,6 +2987,11 @@ end
 -- [DO:follow] — бесконечно следовать за игроком
 local function startFollowingPlayer(targetPlayer)
     if not ClientSettings.ActionsEnabled then return end
+    -- v20 Beta 2 DangerSense: за врагом/подозреваемым не следуем
+    if lobIsDangerTarget(targetPlayer) then
+        print("[LOB] danger veto: follow " .. tostring(targetPlayer and targetPlayer.Name))
+        return
+    end
     stopFollowing()
     -- Ставим флаги ПОСЛЕ stopFollowing
     _isGoing     = false
@@ -4955,6 +4978,283 @@ end
 startBehaviorMonitor()
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- v20 Beta 2: DANGER SENSE (чувство опасности). Работает только в паре с
+-- GameUnderstanding (тумблер "Опасность" без него спит).
+-- Сигналы: урон/подозреваемый, рагдолл, телепорт против воли, weld/freeze,
+-- вооружённые рядом, слова угрозы в чате, враг просит подойти.
+-- ВСЁ на верхнем уровне — ГЛОБАЛЫ (в чанке лимит 200 локалок!).
+-- ═══════════════════════════════════════════════════════════════════════════
+_danger = { hp = 100, maxHp = 100, lastDamageAt = 0, lastDamageAmt = 0,
+    suspectUid = nil, suspectName = "", ragdoll = false, welded = false,
+    teleAt = 0, threatUid = nil, threatName = "", threatAt = 0 }
+_dangerCD = {}
+_THREAT_WORDS = {
+    ["убью"]=1, ["убьет"]=1, ["убьёт"]=1, ["убил"]=1, ["убила"]=1, ["убей"]=1,
+    ["поймал"]=1, ["поймала"]=1, ["поймаю"]=1, ["поймаем"]=1, ["ловлю"]=1, ["лови"]=1,
+    ["попался"]=1, ["попалась"]=1, ["заражу"]=1, ["съем"]=1, ["убейте"]=1,
+    ["kill"]=1, ["killed"]=1, ["killer"]=1, ["killing"]=1, ["captured"]=1,
+    ["caught"]=1, ["catch"]=1, ["infect"]=1, ["infected"]=1, ["dead"]=1,
+    ["die"]=1, ["died"]=1, ["murder"]=1, ["murderer"]=1, ["kidnap"]=1, ["kidnapped"]=1,
+}
+function lobDangerActive()
+    return ClientSettings.DangerSense == true and ClientSettings.GameUnderstanding == true
+end
+function lobHasThreatWords(msg)
+    for tok in tostring(msg or ""):lower():gmatch("%S+") do
+        local w = tok:gsub("^[%p%c%d]+", ""):gsub("[%p%c%d]+$", "")
+        if w ~= "" and _THREAT_WORDS[w] then return true end
+    end
+    return false
+end
+function lobIsEnemyOf(targetPlayer)
+    if not targetPlayer then return false end
+    local myT, thT, myN, thN = "", "", false, false
+    pcall(function()
+        local lp = Players.LocalPlayer
+        if lp.Neutral then myN = true end
+        if lp.Team and lp.Team.Name then myT = tostring(lp.Team.Name) end
+    end)
+    pcall(function()
+        if targetPlayer.Neutral then thN = true end
+        if targetPlayer.Team and targetPlayer.Team.Name then thT = tostring(targetPlayer.Team.Name) end
+    end)
+    if myN or thN then return false end
+    if myT == "" or thT == "" then return false end
+    return myT ~= thT
+end
+function lobIsDangerTarget(targetPlayer)
+    if not lobDangerActive() then return false end
+    if not targetPlayer then return false end
+    if lobIsEnemyOf(targetPlayer) then return true end
+    if _danger.suspectUid and targetPlayer.UserId == _danger.suspectUid
+        and (os.clock() - (_danger.lastDamageAt or -999)) < 120 then
+        return true
+    end
+    return false
+end
+function lobDangerCan(key, cd)
+    local now = os.clock()
+    if ((_dangerCD[key] or 0) + (cd or 60)) > now then return false end
+    _dangerCD[key] = now
+    return true
+end
+function lobDangerEvent(text, key, cd, queueKey)
+    if not lobDangerActive() then return end
+    if not lobDangerCan(key, cd or 60) then return end
+    local qk = queueKey or 0
+    local okQ = enqueueChatItem(qk, {
+        player = nil, userId = qk, name = "SYSTEM",
+        displayName = "SYSTEM", cleaned = text, isWorld = true,
+    }, 2)
+    if okQ then runChatQueue(qk) end
+end
+function lobFindArmedSuspect()
+    local myRoot = nil
+    pcall(function() myRoot = getLocalRootPart() end)
+    if not myRoot then return nil, "" end
+    local best, bestD, bestN = nil, 22, ""
+    pcall(function()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= Players.LocalPlayer and p.Character then
+                local hr = p.Character:FindFirstChild("HumanoidRootPart")
+                local tool = p.Character:FindFirstChildOfClass("Tool")
+                if hr and tool then
+                    local d = (hr.Position - myRoot.Position).Magnitude
+                    if d < bestD then
+                        best, bestD = p, d
+                        bestN = p.DisplayName or p.Name
+                    end
+                end
+            end
+        end
+    end)
+    return best, bestN
+end
+function lobWatchDangerHumanoid(hum)
+    if not hum then return end
+    hum.HealthChanged:Connect(function(hp)
+        local max = 100
+        pcall(function() max = hum.MaxHealth or 100 end)
+        local prev = _danger.hp
+        if prev == nil then prev = max end
+        _danger.hp, _danger.maxHp = hp, max
+        if hp < prev - 0.5 then
+            local amt = prev - hp
+            _danger.lastDamageAt = os.clock()
+            _danger.lastDamageAmt = amt
+            local sus, sname = lobFindArmedSuspect()
+            _danger.suspectUid = sus and sus.UserId or nil
+            _danger.suspectName = sname or ""
+            if lobDangerActive() then
+                local tail = " (now " .. math.floor(hp) .. "/" .. math.floor(max) .. ")"
+                if sname ~= "" then tail = tail .. ", likely by " .. sname end
+                lobDangerEvent("[SYSTEM: You were just hurt (-" .. math.floor(amt) .. " HP" .. tail .. "). React briefly in 1 sentence: pain, surprise or callout, stay in character.]", "dmg", 45, 0)
+            end
+        end
+    end)
+end
+function lobBuildThreatContext(item)
+    if not lobDangerActive() then return "" end
+    local bits = {}
+    table.insert(bits, "your HP " .. math.floor(_danger.hp or 100) .. "/" .. math.floor(_danger.maxHp or 100))
+    local now = os.clock()
+    if _danger.lastDamageAt > 0 and (now - _danger.lastDamageAt) < 120 then
+        local s = "hurt -" .. math.floor(_danger.lastDamageAmt or 0) .. " " .. math.floor(now - _danger.lastDamageAt) .. "s ago"
+        if _danger.suspectName ~= "" then s = s .. " (likely by " .. _danger.suspectName .. ")" end
+        table.insert(bits, s)
+    end
+    if _danger.ragdoll then table.insert(bits, "RAGDOLLED right now") end
+    if _danger.welded then table.insert(bits, "WELDED/FROZEN, cannot move") end
+    if _danger.teleAt > 0 and (now - _danger.teleAt) < 120 then
+        table.insert(bits, "teleported against will " .. math.floor(now - _danger.teleAt) .. "s ago")
+    end
+    if _danger.threatUid and (now - (_danger.threatAt or 0)) < 120 then
+        table.insert(bits, "threat words from " .. tostring(_danger.threatName or "?") .. " " .. math.floor(now - _danger.threatAt) .. "s ago")
+    end
+    local myRoot = nil
+    pcall(function() myRoot = getLocalRootPart() end)
+    if myRoot then
+        local armed = {}
+        pcall(function()
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= Players.LocalPlayer and p.Character and #armed < 3 then
+                    local hr = p.Character:FindFirstChild("HumanoidRootPart")
+                    local tool = p.Character:FindFirstChildOfClass("Tool")
+                    if hr and tool and (hr.Position - myRoot.Position).Magnitude <= 25 then
+                        local nm = p.DisplayName or p.Name
+                        if lobIsEnemyOf(p) then nm = nm .. "(ENEMY)" end
+                        table.insert(armed, nm .. ":" .. tostring(tool.Name):sub(1, 20))
+                    end
+                end
+            end
+        end)
+        if #armed > 0 then table.insert(bits, "armed near: " .. table.concat(armed, ", ")) end
+    end
+    if item and item.player and lobIsEnemyOf(item.player) then
+        table.insert(bits, "SPEAKER IS ENEMY (" .. tostring(item.displayName or item.name or "?") .. ")")
+    end
+    -- всегда есть хотя бы HP — блок не пустой, модель заземлена фактами
+    return "[THREAT: " .. table.concat(bits, "; ") .. "]"
+end
+-- хуки HP на текущий и будущие персонажи
+Players.LocalPlayer.CharacterAdded:Connect(function(char)
+    _danger.hp, _danger.maxHp = 100, 100
+    _danger.ragdoll, _danger.welded = false, false
+    _danger.suspectUid, _danger.suspectName = nil, ""
+    task.spawn(function()
+        local hum = char:WaitForChild("Humanoid", 5)
+        if hum then lobWatchDangerHumanoid(hum) end
+    end)
+end)
+if Players.LocalPlayer.Character then
+    lobWatchDangerHumanoid(Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"))
+end
+-- монитор: телепорт против воли, рагдолл, weld/freeze, враг-цель следования
+task.spawn(function()
+    local lastPos, lastT, ragStart = nil, 0, 0
+    while true do
+        task.wait(0.3)
+        if lobDangerActive() then
+            local myRoot, hum = nil, nil
+            pcall(function() myRoot = getLocalRootPart() end)
+            pcall(function() hum = getLocalHumanoid() end)
+            if not myRoot or not hum then
+                lastPos = nil
+            else
+                local now = os.clock()
+                local seated = false
+                pcall(function() seated = hum.Seated end)
+                -- телепорт: скачок >40 за тик без нашего движения (респавн исключён: новый char сбрасывает lastPos=nil через CharacterAdded? нет — сбрасываем здесь при смене персонажа не выйдет; порог 40 + интервал <1.5с достаточно, респавн даёт d от старой точки но lastT старый -> интервал большой -> пропуск)
+                local selfMoving = _isGoing or _isFollowing
+                    or (type(FollowManager) == "table" and FollowManager.Active)
+                if lastPos and not selfMoving and (now - lastT) < 1.5 then
+                    local d = 0
+                    pcall(function() d = (myRoot.Position - lastPos).Magnitude end)
+                    if d > 40 then
+                        _danger.teleAt = now
+                        lobDangerEvent("[SYSTEM: You were suddenly teleported far away against your will (possible kidnapping). React briefly: confusion and alarm, stay in character. Do NOT invent who did it.]", "tele", 90, 0)
+                    end
+                end
+                lastPos, lastT = myRoot.Position, now
+                -- рагдолл: состояние + PlatformStand, с дебаунсом 0.6с (прыжки не считаем)
+                local st = nil
+                pcall(function() st = hum:GetState() end)
+                local pstand = false
+                pcall(function() pstand = hum.PlatformStand end)
+                local rag = (st == Enum.HumanoidStateType.Ragdoll
+                    or st == Enum.HumanoidStateType.FallingDown
+                    or st == Enum.HumanoidStateType.Physics)
+                    or (pstand and true or false)
+                if st == Enum.HumanoidStateType.Seated then rag = false end
+                if rag and not seated then
+                    if ragStart == 0 then ragStart = now end
+                    if (now - ragStart) > 0.6 and not _danger.ragdoll then
+                        _danger.ragdoll = true
+                        lobDangerEvent("[SYSTEM: You were ragdolled / knocked down and are recovering. React briefly in 1 sentence, stay in character.]", "rag", 90, 0)
+                    end
+                else
+                    ragStart = 0
+                    _danger.ragdoll = false
+                end
+                -- weld/freeze: якорь, нулевая скорость ходьбы, чужой weld (сидя в транспорте — норма)
+                local stuck, why = false, ""
+                if not seated then
+                    pcall(function()
+                        if myRoot.Anchored then stuck, why = true, "anchored" end
+                    end)
+                    pcall(function()
+                        if not stuck and hum.WalkSpeed ~= nil and hum.WalkSpeed <= 0.1 and hum.Health > 0 then
+                            stuck, why = true, "frozen"
+                        end
+                    end)
+                    if not stuck then
+                        pcall(function()
+                            local char = Players.LocalPlayer.Character
+                            if char then
+                                for _, dd in ipairs(char:GetDescendants()) do
+                                    if dd:IsA("Weld") or dd:IsA("WeldConstraint") then
+                                        local o = dd.Part0
+                                        if o == nil then o = dd.Part1 end
+                                        if o ~= nil and not o:IsDescendantOf(char) then
+                                            stuck, why = true, "welded"
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                end
+                if stuck and not _danger.welded then
+                    _danger.welded = true
+                    lobDangerEvent("[SYSTEM: You are stuck and cannot move (" .. why .. ", possible trap or kidnapping). React briefly in 1 sentence, stay in character.]", "weld", 90, 0)
+                elseif not stuck then
+                    _danger.welded = false
+                end
+                -- шли за игроком, а он оказался врагом — отходим
+                -- (_isFollowing/_followTarget — локалки выше, захватываются корректно)
+                if _isFollowing and _followTarget then
+                    local okE, isE = pcall(lobIsEnemyOf, _followTarget)
+                    if okE and isE then
+                        pcall(stopFollowing)
+                        lobDangerEvent("[SYSTEM: You backed away: the player you followed turned out hostile. Say briefly you keep your distance, stay in character.]", "backaway", 120, 0)
+                    end
+                end
+                if type(FollowManager) == "table" and FollowManager.Active and FollowManager.Target then
+                    local okE2, isE2 = pcall(lobIsEnemyOf, FollowManager.Target)
+                    if okE2 and isE2 then
+                        FollowManager.Active = false
+                        FollowManager.Target = nil
+                    end
+                end
+            end
+        else
+            lastPos = nil
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- v17: CAMERA LOOK SYSTEM
 -- Бот плавно поворачивает голову/тело к говорящему игроку
 -- НЕ работает во время: ходьбы, прыжков, спина
@@ -5253,6 +5553,14 @@ local function handleQueuedChat(item)
                 .. "Know who is ally and who is enemy from GAME KNOWLEDGE (e.g. infected vs survivors). "
                 .. "Never guess a team that is not listed; if no team, treat everyone as neutral."
             table.insert(apiMessages, { role = "system", content = tmsg })
+        end
+    end
+
+    -- v20 Beta 2 DangerSense: живой снапшот угроз на каждое сообщение
+    if lobDangerActive() then
+        local thr = lobBuildThreatContext(item)
+        if thr ~= "" then
+            table.insert(apiMessages, { role = "system", content = thr })
         end
     end
 
@@ -6257,6 +6565,17 @@ local function processChatMessage(player, rawMessage)
                 if not Players:GetPlayerByUserId(uid) then _userLangCache[uid] = nil end
             end
         end
+    end
+
+    -- v20 Beta 2 DangerSense: слова угрозы (сообщение НЕ блокируем — ИИ увидит THREAT-контекст)
+    if ClientSettings.DangerSense then
+        pcall(function()
+            if lobHasThreatWords(rawMessage) then
+                _danger.threatUid = player.UserId
+                _danger.threatName = player.DisplayName or player.Name
+                _danger.threatAt = os.clock()
+            end
+        end)
     end
 
     -- v17.5: ReactToMention — кешируем имена один раз (не пересоздаём на каждом сообщении)
@@ -9291,6 +9610,18 @@ makeToggleRow(
             _gameContext = nil
             fetchGameContext(true)
         end
+    end
+)
+
+-- v20 Beta 2: чувство опасности (спит без GameUnderstanding)
+makeToggleRow(
+    automation,
+    "⚠️ Чувство опасности",
+    "Только с GameUnderstanding. ИИ знает команды, отказывает врагам с причиной, реагирует на урон/рагдолл/телепорт/оружие рядом.",
+    ClientSettings.DangerSense == true,
+    function(state)
+        ClientSettings.DangerSense = state
+        saveSettings()
     end
 )
 
