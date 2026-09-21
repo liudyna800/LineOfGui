@@ -4012,7 +4012,11 @@ end
 function cleanWikitext(wt)
     local t = tostring(wt or "")
     t = t:gsub("<[^>]+>", " ")
-    t = t:gsub("%b{}", " ")
+    -- FIX v20b3: раньше %b{} вырезал шаблоны ЦЕЛИКОМ вместе с данными —
+    -- таблицы транспорта/предметов/этажей (там лежат скейты, самокаты и т.п.)
+    -- исчезали из текста и сниппеты не находились. Теперь скобки/пайпы
+    -- превращаем в пробелы, а СЛОВА внутри оставляем.
+    t = t:gsub("%b{}", function(b) return " " .. b:gsub("[{}|=%-#*:;]", " ") .. " " end)
     t = t:gsub("%[%[[^%|%]]+%|([^%]]+)%]%]", "%1")
     t = t:gsub("%[%[([^%]]+)%]%]", "%1")
     t = t:gsub("'''?", "")
@@ -4040,10 +4044,15 @@ function fetchWikiPage(domain, title)
                         wt = rev["*"]
                         if wt == nil and rev.slots and rev.slots.main then wt = rev.slots.main["*"] end
                     end
-                    if type(wt) == "string" and #wt > 500 then
+                    -- Стабы (как Insane Elevator: инфобокс + абзац) тоже годятся:
+                    -- из них бот возьмёт хотя бы жанр/создателя/описание.
+                    if type(wt) == "string" and #wt > 300 then
                         local text = cleanWikitext(wt)
-                        if #text > 500 then
-                            if #text > 6000 then text = text:sub(1, 6000) end
+                        if #text > 150 then
+                            -- FIX: было 6000 — у больших статей (Brookhaven) списки
+                            -- транспорта/мест лежат ДАЛЬШЕ и сниппеты их не видели.
+                            -- На токены не влияет: в промпт идут только 3 сниппета.
+                            if #text > 14000 then text = text:sub(1, 14000) end
                             return text
                         end
                     end
@@ -4057,9 +4066,9 @@ function fetchWikiPage(domain, title)
         local dok2, data2 = pcall(function() return HttpService:JSONDecode(tostring(res2.Body or res2.body or "")) end)
         if dok2 and type(data2) == "table" and data2.query and data2.query.pages then
             for _, page in pairs(data2.query.pages) do
-                if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 500 then
+                if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 150 then
                     local text = page.extract:gsub("%s+", " ")
-                    if #text > 6000 then text = text:sub(1, 6000) end
+                    if #text > 14000 then text = text:sub(1, 14000) end
                     return text
                 end
             end
@@ -4075,8 +4084,8 @@ end
 --   Flat (ивент)    Egg_hunt | Egg_Hunt_2019:_Scrambled_in_Time | Eggstravaganza
 --   Game/Item       Adopt_Me_toys/Mystery_Pets_Series_1
 --   Студии/таймлайны Derpie_Studios | Timeline_of_the_top_10_most-visited_games_per_month/2025
--- Отдельные вики (blox-fruits.fandom.com и т.п.) есть лишь у топ-игр,
--- поэтому ищем ВСЕГДА на обоих: dedicated-домен + roblox.fandom.com.
+-- Отдельные dedicated-вики (старый формат) не используем вообще —
+-- только roblox.fandom.com.
 function fetchFandomArticle(pname)
     pname = tostring(pname or "")
     if pname == "" or pname == "Unknown Game" then print("[GAME-DBG] fandom: bad place name") return "" end
@@ -4110,15 +4119,8 @@ function fetchFandomArticle(pname)
             addV((cg:gsub(" ", "_") .. "/" .. table.concat(words, "_")))
         end
     end
-    -- Домены: dedicated (если есть) + roblox.fandom.com ВСЕГДА.
-    -- Раньше искали только на одном: для Insane Elevator долбили
-    -- insane-elevator.fandom.com (там нет статьи), а правильная
-    -- Digital_Destruction/Insane_Elevator на roblox.fandom.com не проверялась.
+    -- Только roblox.fandom.com. Dedicated-домены (старый формат) не трогаем вообще.
     local domains = { "https://roblox.fandom.com" }
-    local dd = findGameWikiDomain(pname)
-    if dd ~= "" and dd ~= "https://roblox.fandom.com" then
-        table.insert(domains, 1, dd)
-    end
     local ohttp = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     local oenc = function(s) return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", string.byte(c)) end)) end
     -- FIX v20b3: [%a]+ не видит кириллицу -> fw="" -> бралась ПЕРВАЯ
@@ -4264,6 +4266,52 @@ function findWikiSnippets(article, keywords, maxSnips)
 end
 
 
+-- FIX v20b3: словарик RU->EN как страховка, когда ИИ-перевод пустой/упал
+-- (в логе: en пусто -> поиск только по русскому слову в английской вики -> 0 сниппетов).
+-- Детерминированно, без сети. Ключи — нижний регистр.
+LOB_RU_EN = {
+    ["скейт"]="skateboard", ["скейтборд"]="skateboard", ["самокат"]="scooter",
+    ["велосипед"]="bike bicycle", ["велик"]="bike", ["машина"]="car vehicle",
+    ["машинка"]="car", ["вертолет"]="helicopter", ["вертолёт"]="helicopter",
+    ["самолет"]="plane", ["самолёт"]="plane", ["лодка"]="boat", ["корабль"]="ship",
+    ["мотоцикл"]="motorcycle", ["мотик"]="motorcycle", ["поезд"]="train",
+    ["автобус"]="bus", ["грузовик"]="truck", ["трактор"]="tractor",
+    ["монстр"]="monster", ["монстры"]="monster monsters", ["оружие"]="weapon gun",
+    ["меч"]="sword", ["пистолет"]="gun pistol", ["нож"]="knife",
+    ["вип"]="vip gamepass", ["питомец"]="pet", ["питомцы"]="pet pets",
+    ["дом"]="house", ["дома"]="house", ["работа"]="job", ["деньги"]="money cash",
+    ["полиция"]="police", ["дверь"]="door", ["ключ"]="key", ["ключи"]="key keys",
+    ["этаж"]="floor", ["этажи"]="floor floors", ["лифт"]="elevator",
+    ["убийца"]="murderer", ["шериф"]="sheriff", ["невиновный"]="innocent",
+    ["выживший"]="survivor", ["зараженный"]="infected", ["заражённый"]="infected",
+    ["башня"]="tower", ["ад"]="hell", ["фрукт"]="fruit", ["яйцо"]="egg",
+    ["охота"]="hunt", ["ивент"]="event", ["событие"]="event",
+    ["обновление"]="update", ["обнова"]="update", ["код"]="code", ["коды"]="code codes",
+    ["админ"]="admin", ["бан"]="ban", ["сервер"]="server", ["серверы"]="server",
+    ["торговля"]="trade trading", ["трейд"]="trade", ["редкий"]="rare",
+    ["легендарный"]="legendary", ["легендарка"]="legendary", ["эпический"]="epic",
+    ["обычный"]="common", ["босс"]="boss", ["магазин"]="shop store",
+    ["скин"]="skin", ["одежда"]="clothes outfit", ["волосы"]="hair",
+    ["лицо"]="face", ["голова"]="head", ["тело"]="body", ["аура"]="aura",
+    ["крылья"]="wings", ["шапка"]="hat", ["шляпа"]="hat",
+    -- места в городе (Brookhaven и т.п.): прилагательные тоже маппим,
+    -- иначе "детский" не переводится и поиск идёт по русскому слову в англовики
+    ["детский"]="daycare kindergarten child", ["детская"]="daycare child kids",
+    ["детсад"]="daycare kindergarten", ["садик"]="daycare kindergarten",
+    ["школа"]="school", ["школьный"]="school", ["больница"]="hospital",
+    ["банк"]="bank", ["отель"]="hotel", ["аэропорт"]="airport",
+    ["пляж"]="beach", ["бассейн"]="pool", ["кино"]="cinema movie",
+    ["кинотеатр"]="cinema", ["ресторан"]="restaurant", ["кафе"]="cafe",
+    ["пиццерия"]="pizzeria", ["парикмахерская"]="salon barber",
+    ["автосалон"]="dealership", ["пожарный"]="fire", ["пожарная"]="fire station",
+    ["ферма"]="farm", ["тюрьма"]="prison jail", ["церковь"]="church",
+    ["мэрия"]="town hall", ["кладбище"]="graveyard cemetery",
+    ["конюшня"]="stable horse", ["библиотека"]="library", ["музей"]="museum",
+    ["зоопарк"]="zoo", ["парк"]="park", ["лагерь"]="camp", ["остров"]="island",
+    ["вулкан"]="volcano", ["пещера"]="cave", ["мост"]="bridge",
+    ["озеро"]="lake", ["река"]="river", ["лес"]="forest", ["гора"]="mountain",
+    ["пустыня"]="desert", ["снег"]="snow winter", ["пляжный"]="beach",
+}
 function translateKeywordsAI(words)
     if not words or #words == 0 then return {} end
     if not providerRouter then return {} end
@@ -4291,10 +4339,22 @@ function translateKeywordsAI(words)
             if #tok >= 3 and #out < 6 then table.insert(out, tok) end
         end
     end
+    -- страховка: ИИ молчит -> берём из словарика (скейт->skateboard и т.д.)
+    if #out == 0 and type(LOB_RU_EN) == "table" then
+        for _, w in ipairs(words) do
+            local dict = LOB_RU_EN[tostring(w or ""):lower()]
+            if dict then
+                for tok in tostring(dict):gmatch("[%a]+") do
+                    if #tok >= 3 and #out < 6 then table.insert(out, tok) end
+                end
+            end
+        end
+        if #out > 0 then print("[GAME-DBG] dict-en: " .. table.concat(out, ",")) end
+    end
     return out
 end
 
--- full-text search: dedicated game wiki first, then roblox.fandom.com (covers thin wikis)
+-- full-text search по roblox.fandom.com; сниппеты только из статей СВОЕЙ игры
 function searchFandomWiki(pname, kws, enT)
     local empty = {}
     local keys, seen = {}, {}
@@ -4308,10 +4368,8 @@ function searchFandomWiki(pname, kws, enT)
         if not seen[w] then seen[w] = true table.insert(keys, w) end
     end
     if #keys == 0 then print("[GAME-DBG] wikisearch: no keys") return empty, "" end
+    -- Только roblox.fandom.com, без dedicated (старый формат).
     local domains = { "https://roblox.fandom.com" }
-    local d1 = (_gameContext and _gameContext.wikiDomain) or ""
-    if d1 == "" then d1 = findGameWikiDomain(pname) end
-    if d1 ~= "" and d1 ~= "https://roblox.fandom.com" then table.insert(domains, d1) end
     local gw = {}
     for w in tostring(pname or ""):lower():gmatch("%S+") do
         local cgw = w:gsub("[%p%d]", "")
@@ -4338,16 +4396,41 @@ function searchFandomWiki(pname, kws, enT)
             local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
             if dok and type(data) == "table" and data.query and data.query.search then
                 local fetched = 0
+                -- FIX: сначала статьи СВОЕЙ игры (в заголовке есть слово из
+                -- названия/автора), чужие игры (Ro-Skating, Combat Initiation,
+                -- Regretevator) пропускаем — иначе бот отвечает фактами чужой игры
+                -- ("скейтбордов в Брукхейвене нет" по статье Ro-Skating).
+                local ordered = {}
                 for _, r in ipairs(data.query.search) do
-                    if #out >= 3 or fetched >= 3 then break end
                     if type(r) == "table" and r.title then
-                        print("[GAME-DBG] wikisearch hit: " .. tostring(r.title))
+                        local tl = tostring(r.title):lower()
+                        local rel = false
+                        for _, gword in ipairs(gw) do
+                            if gword ~= "" and tl:find(gword, 1, true) then rel = true break end
+                        end
+                        if not rel then
+                            for _, cword in ipairs(cw) do
+                                if cword ~= "" and tl:find(cword, 1, true) then rel = true break end
+                            end
+                        end
+                        table.insert(ordered, { title = r.title, rel = rel })
+                    end
+                end
+                table.sort(ordered, function(a, b) return a.rel and not b.rel end)
+                for _, e in ipairs(ordered) do
+                    -- FIX v20b3: раньше лимит 3 попытки СЧИТАЯ ПРОВАЛЫ — правильная
+                    -- статья могла не успеть провериться. Даём до 5 попыток.
+                    if #out >= 3 or fetched >= 5 then break end
+                    if not e.rel then
+                        print("[GAME-DBG] wikisearch skip (чужая игра): " .. tostring(e.title))
+                    else
+                        print("[GAME-DBG] wikisearch hit: " .. tostring(e.title))
                         fetched = fetched + 1
-                        local text = fetchWikiPage(domain, r.title)
+                        local text = fetchWikiPage(domain, e.title)
                         if text ~= "" then
                             local sn = findWikiSnippets(text, keys, 3 - #out)
                             for _, s in ipairs(sn) do table.insert(out, s) end
-                            if #sn > 0 and src == "" then src = tostring(r.title) end
+                            if #sn > 0 and src == "" then src = tostring(e.title) end
                         end
                     end
                 end
