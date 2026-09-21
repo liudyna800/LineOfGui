@@ -1077,10 +1077,66 @@ end
 -- HTTP Client for direct API calls (Executor Compatible)
 -- §HTTP
 -- [v19.9.9] ФИКС: добавлен pcall вокруг JSONEncode — nil/NaN в payload не крашит скрипт
+-- FIX v20b3: модели иногда рвут многобайтовые символы (эмодзи/кириллицу) пополам —
+-- битый байт ложится в историю, и дальше JSONEncode падает НА КАЖДОМ запросе
+-- ("0:JSONEncodeFailed" навсегда). Чистим всё до кодирования + сам ответ ИИ.
+-- Глобальные БЕЗ local: в чанке лимит 200 локалок, иначе скрипт не компилируется.
+function sanitizeUtf8(s)
+    s = tostring(s or "")
+    local res, i, n = {}, 1, #s
+    while i <= n do
+        local b = s:byte(i)
+        local len = 0
+        if b < 0x80 then len = 1
+        elseif b >= 0xC2 and b <= 0xDF then len = 2
+        elseif b >= 0xE0 and b <= 0xEF then len = 3
+        elseif b >= 0xF0 and b <= 0xF4 then len = 4
+        else
+            i = i + 1 -- мусор: одиночный continuation, C0/C1, F5-FF
+        end
+        if len == 1 then
+            table.insert(res, s:sub(i, i))
+            i = i + 1
+        elseif len > 1 then
+            local ok = (i + len - 1 <= n)
+            if ok then
+                for j = i + 1, i + len - 1 do
+                    local c = s:byte(j)
+                    if c < 0x80 or c > 0xBF then ok = false break end
+                end
+            end
+            if ok then
+                table.insert(res, s:sub(i, i + len - 1))
+                i = i + len
+            else
+                i = i + 1 -- битая последовательность — пропускаем первый байт
+            end
+        end
+    end
+    return table.concat(res)
+end
+function sanitizeForJson(v, depth)
+    depth = depth or 0
+    if type(v) == "string" then return sanitizeUtf8(v) end
+    if type(v) == "number" then
+        if v ~= v or v == math.huge or v == -math.huge then return 0 end
+        return v
+    end
+    if type(v) ~= "table" or depth > 10 then return v end
+    local c = {}
+    local n = #v
+    for i = 1, n do c[i] = sanitizeForJson(v[i], depth + 1) end
+    for k, val in pairs(v) do
+        if not (type(k) == "number" and k >= 1 and k <= n and k == math.floor(k)) then
+            c[k] = sanitizeForJson(val, depth + 1)
+        end
+    end
+    return c
+end
 local function postJson(url, headers, bodyTable)
     local body
     local encOk, encErr = pcall(function()
-        body = HttpService:JSONEncode(bodyTable)
+        body = HttpService:JSONEncode(sanitizeForJson(bodyTable))
     end)
     if not encOk then
         return nil, 0, "JSONEncodeFailed", tostring(encErr):sub(1,100), {}
@@ -4049,7 +4105,10 @@ function fetchWikiPage(domain, title)
                     if type(wt) == "string" and #wt > 300 then
                         local text = cleanWikitext(wt)
                         if #text > 150 then
-                            if #text > 6000 then text = text:sub(1, 6000) end
+                            -- FIX: было 6000 — у больших статей (Brookhaven) списки
+                            -- транспорта/мест лежат ДАЛЬШЕ и сниппеты их не видели.
+                            -- На токены не влияет: в промпт идут только 3 сниппета.
+                            if #text > 14000 then text = text:sub(1, 14000) end
                             return text
                         end
                     end
@@ -4065,7 +4124,7 @@ function fetchWikiPage(domain, title)
             for _, page in pairs(data2.query.pages) do
                 if type(page) == "table" and type(page.extract) == "string" and not page.missing and #page.extract > 150 then
                     local text = page.extract:gsub("%s+", " ")
-                    if #text > 6000 then text = text:sub(1, 6000) end
+                    if #text > 14000 then text = text:sub(1, 14000) end
                     return text
                 end
             end
@@ -4291,6 +4350,23 @@ LOB_RU_EN = {
     ["скин"]="skin", ["одежда"]="clothes outfit", ["волосы"]="hair",
     ["лицо"]="face", ["голова"]="head", ["тело"]="body", ["аура"]="aura",
     ["крылья"]="wings", ["шапка"]="hat", ["шляпа"]="hat",
+    -- места в городе (Brookhaven и т.п.): прилагательные тоже маппим,
+    -- иначе "детский" не переводится и поиск идёт по русскому слову в англовики
+    ["детский"]="daycare kindergarten child", ["детская"]="daycare child kids",
+    ["детсад"]="daycare kindergarten", ["садик"]="daycare kindergarten",
+    ["школа"]="school", ["школьный"]="school", ["больница"]="hospital",
+    ["банк"]="bank", ["отель"]="hotel", ["аэропорт"]="airport",
+    ["пляж"]="beach", ["бассейн"]="pool", ["кино"]="cinema movie",
+    ["кинотеатр"]="cinema", ["ресторан"]="restaurant", ["кафе"]="cafe",
+    ["пиццерия"]="pizzeria", ["парикмахерская"]="salon barber",
+    ["автосалон"]="dealership", ["пожарный"]="fire", ["пожарная"]="fire station",
+    ["ферма"]="farm", ["тюрьма"]="prison jail", ["церковь"]="church",
+    ["мэрия"]="town hall", ["кладбище"]="graveyard cemetery",
+    ["конюшня"]="stable horse", ["библиотека"]="library", ["музей"]="museum",
+    ["зоопарк"]="zoo", ["парк"]="park", ["лагерь"]="camp", ["остров"]="island",
+    ["вулкан"]="volcano", ["пещера"]="cave", ["мост"]="bridge",
+    ["озеро"]="lake", ["река"]="river", ["лес"]="forest", ["гора"]="mountain",
+    ["пустыня"]="desert", ["снег"]="snow winter", ["пляжный"]="beach",
 }
 function translateKeywordsAI(words)
     if not words or #words == 0 then return {} end
@@ -4334,7 +4410,7 @@ function translateKeywordsAI(words)
     return out
 end
 
--- full-text search: dedicated game wiki first, then roblox.fandom.com (covers thin wikis)
+-- full-text search по roblox.fandom.com; сниппеты только из статей СВОЕЙ игры
 function searchFandomWiki(pname, kws, enT)
     local empty = {}
     local keys, seen = {}, {}
@@ -4376,18 +4452,41 @@ function searchFandomWiki(pname, kws, enT)
             local dok, data = pcall(function() return HttpService:JSONDecode(tostring(res.Body or res.body or "")) end)
             if dok and type(data) == "table" and data.query and data.query.search then
                 local fetched = 0
+                -- FIX: сначала статьи СВОЕЙ игры (в заголовке есть слово из
+                -- названия/автора), чужие игры (Ro-Skating, Combat Initiation,
+                -- Regretevator) пропускаем — иначе бот отвечает фактами чужой игры
+                -- ("скейтбордов в Брукхейвене нет" по статье Ro-Skating).
+                local ordered = {}
                 for _, r in ipairs(data.query.search) do
+                    if type(r) == "table" and r.title then
+                        local tl = tostring(r.title):lower()
+                        local rel = false
+                        for _, gword in ipairs(gw) do
+                            if gword ~= "" and tl:find(gword, 1, true) then rel = true break end
+                        end
+                        if not rel then
+                            for _, cword in ipairs(cw) do
+                                if cword ~= "" and tl:find(cword, 1, true) then rel = true break end
+                            end
+                        end
+                        table.insert(ordered, { title = r.title, rel = rel })
+                    end
+                end
+                table.sort(ordered, function(a, b) return a.rel and not b.rel end)
+                for _, e in ipairs(ordered) do
                     -- FIX v20b3: раньше лимит 3 попытки СЧИТАЯ ПРОВАЛЫ — правильная
                     -- статья могла не успеть провериться. Даём до 5 попыток.
                     if #out >= 3 or fetched >= 5 then break end
-                    if type(r) == "table" and r.title then
-                        print("[GAME-DBG] wikisearch hit: " .. tostring(r.title))
+                    if not e.rel then
+                        print("[GAME-DBG] wikisearch skip (чужая игра): " .. tostring(e.title))
+                    else
+                        print("[GAME-DBG] wikisearch hit: " .. tostring(e.title))
                         fetched = fetched + 1
-                        local text = fetchWikiPage(domain, r.title)
+                        local text = fetchWikiPage(domain, e.title)
                         if text ~= "" then
                             local sn = findWikiSnippets(text, keys, 3 - #out)
                             for _, s in ipairs(sn) do table.insert(out, s) end
-                            if #sn > 0 and src == "" then src = tostring(r.title) end
+                            if #sn > 0 and src == "" then src = tostring(e.title) end
                         end
                     end
                 end
@@ -5291,6 +5390,7 @@ local function handleQueuedChat(item)
     text = text:gsub("<think>.-</think>%s*", "")
     text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
     text = text:match("^%s*(.-)%s*$") or text
+    text = sanitizeUtf8(text) -- битые байты из ответа модели (иначе JSONEncodeFailed на след. запросе)
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
     if settings.CameraLook and item.player and item.player.Character then
@@ -12796,6 +12896,7 @@ local function ctDoSend()
             text = text:gsub("<think>.-</think>%s*", "")
             text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
             text = text:match("^%s*(.-)%s*$") or text
+            text = sanitizeUtf8(text) -- иначе битый байт убьёт все следующие запросы
         end
         if text and text ~= "" and settings.MemoryEnabled then
             appendHistory(DirectChatHistory, userContent, text)
