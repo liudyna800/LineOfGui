@@ -4996,7 +4996,9 @@ _THREAT_WORDS = {
     ["caught"]=1, ["catch"]=1, ["infect"]=1, ["infected"]=1, ["dead"]=1,
     ["die"]=1, ["died"]=1, ["murder"]=1, ["murderer"]=1, ["kidnap"]=1, ["kidnapped"]=1,
 }
+LOB_DANGER_PARKED = true
 function lobDangerActive()
+    if LOB_DANGER_PARKED then return false end
     return ClientSettings.DangerSense == true and ClientSettings.GameUnderstanding == true
 end
 function lobHasThreatWords(msg)
