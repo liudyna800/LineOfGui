@@ -1,381 +1,405 @@
 --[[ 
-    AREA 51 SCANNER for Delta Executor
-    Что делает: сканирует Explorer (Workspace, Teams, Players, ReplicatedStorage и т.д.)
-    и сохраняет всё в .txt файлы в Workspace папку Delta (writefile).
+  AREA 51 KILLER MODE v3 | MONSTER FIX + KILL ALL
+  PlaceId 2092167559 | Killers vs Survivors
+  Для эмулятора + Delta.
 
-    Как пользоваться:
-    1. Зайди в плейс Area 51 > Killer Mode
-    2. Вставь этот скрипт в Delta > Execute
-    3. Жди 5-15 сек (в консоли будет прогресс)
-    4. Файлы появятся в Delta Workspace: Area51_Dump/
-       - summary.txt (команды, игроки, таймеры, роли)
-       - remotes.txt (все RemoteEvent / RemoteFunction - для фарма/килла)
-       - full_tree.txt (дерево Explorer до глубины)
-       - tools.txt (оружие, инструменты)
-    5. Скинь мне эти файлы сюда - допилю killer-скрипт точно под архитектуру
+  Что нового:
+  1. KillAura SURV (для выживших с пушкой) + KillAura MONSTER (для киллеров без пушки)
+  2. Hitbox огромный до 20 для монстров
+  3. KILL ALL кнопка + LOOP KILL ALL - пробует убить всех через уязвимые Remote
+  4. Авто-поиск Damage-ремотов при запуске, авто-экип лучшего Tool
+
+  Важно: Kill All сработает только если в игре есть уязвимый Remote на урон.
+  Если не сработает - кидай remotes.txt, сделаю v4 с точным ремутом.
+  Тогда Aura + Hitbox все равно будут рвать.
 ]]
 
-local FOLDER = "Area51_Dump"
-local MAX_DEPTH = 4          -- глубина дерева (4 = безопасно, 6 = полный но долго)
-local MAX_CHILD_PER_NODE = 150 -- лимит детей на узел чтобы не зависнуть
-local SCAN_DELAY = false     -- true = медленнее но не лагает
-
---// проверка executor функций
-if not writefile or not makefolder then
-    warn("[Scanner] Твой executor НЕ поддерживает writefile/makefolder. Нужен Delta.")
-    return
-end
-
 local Players = game:GetService("Players")
-local Teams = game:GetService("Teams")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 
-pcall(function() makefolder(FOLDER) end)
+getgenv().A51V3 = getgenv().A51V3 or {
+  ESP_Enemy=true, ESP_Team=false,
+  AuraSurv=false, AuraMonster=true, AuraRadius=28,
+  Hitbox=false, HitboxSize=15,
+  Speed=false, SpeedVal=34, Fly=false, FlySpeed=65, Noclip=false, Fullbright=false,
+  KillAllLoop=false, KillAllDelay=1.0,
+}
+local S = getgenv().A51V3
 
-local function safeWrite(path, content)
-    pcall(function() writefile(path, content) end)
+pcall(function()
+  local VU = game:GetService("VirtualUser")
+  LocalPlayer.Idled:Connect(function()
+    VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame) task.wait(1)
+    VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+  end)
+end)
+
+local function MyTeam() return LocalPlayer.Team and LocalPlayer.Team.Name or "NoTeam" end
+local function IsEnemy(p)
+  if p==LocalPlayer then return false end
+  if LocalPlayer.Team and p.Team then return LocalPlayer.Team ~= p.Team end
+  return true
+end
+local function TeamColor(p)
+  if p.Team and p.Team.Name=="Killers" then return Color3.fromRGB(255,30,30) end
+  if p.Team and p.Team.Name=="Survivors" then return Color3.fromRGB(255,225,0) end
+  return Color3.fromRGB(255,255,255)
 end
 
-local function fullPath(inst)
-    local ok, res = pcall(function() return inst:GetFullName() end)
-    if ok then return res else return inst.Name end
+--// ПОИСК DAMAGE РЕМОТОВ (для Kill All)
+local DamageRemotes = {}
+local AllRemotes = {}
+local function ScanRemotes()
+  DamageRemotes = {}
+  AllRemotes = {}
+  local keys = {"damage","hit","hurt","kill","shoot","fire","attack","melee","claw","slash","gun","ray","blast","take","deal","swing","knife","sword","punch"}
+  for _,d in ipairs(game:GetDescendants()) do
+    if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+      table.insert(AllRemotes, d)
+      local ln = string.lower(d.Name)
+      for _,k in ipairs(keys) do
+        if string.find(ln, k) then table.insert(DamageRemotes, d) break end
+      end
+    end
+  end
+  print("[A51v3] Remotes: all="..#AllRemotes.." damage-like="..#DamageRemotes)
+  for _,r in ipairs(DamageRemotes) do print("  DMG: "..r:GetFullName()) end
+end
+pcall(ScanRemotes)
+
+-- пробует убить одного через все найденные ремоуты разными аргументами
+local function TryKillPlayer(plr)
+  if not plr.Character then return false end
+  local char = plr.Character
+  local hum = char:FindFirstChildOfClass("Humanoid")
+  local hrp = char:FindFirstChild("HumanoidRootPart")
+  local head = char:FindFirstChild("Head")
+  if not hum or hum.Health<=0 then return false end
+  local killed = false
+  for _,rem in ipairs(DamageRemotes) do
+    -- самые частые сигнатуры в Area51-подобных
+    local tries = {
+      function() rem:FireServer(char) end,
+      function() rem:FireServer(hum) end,
+      function() rem:FireServer(hum, 100) end,
+      function() rem:FireServer(hum, 9999) end,
+      function() rem:FireServer(char, 9999) end,
+      function() rem:FireServer(head, 9999) end,
+      function() rem:FireServer(plr) end,
+      function() rem:FireServer(plr, 9999) end,
+      function() rem:FireServer(hrp.Position, hum, 9999) end,
+      function() rem:FireServer(hum, hum.MaxHealth) end,
+    }
+    for _,fn in ipairs(tries) do
+      local ok = pcall(fn)
+      if ok then
+        task.wait()
+        if hum.Health<=0 then killed=true break end
+      end
+    end
+    if killed then break end
+    -- RemoteFunction вариант
+    if rem:IsA("RemoteFunction") then
+      pcall(function() rem:InvokeServer(hum, 9999) end)
+      pcall(function() rem:InvokeServer(char, 9999) end)
+    end
+  end
+  return hum.Health<=0
 end
 
-local function attrsToStr(inst)
-    local out = {}
-    local ok, attrs = pcall(function() return inst:GetAttributes() end)
-    if ok and attrs then
-        for k,v in pairs(attrs) do
-            table.insert(out, k.."="..tostring(v))
-        end
+local function KillAllOnce()
+  local cnt=0
+  for _,p in ipairs(Players:GetPlayers()) do
+    if IsEnemy(p) and p.Character then
+      local h = p.Character:FindFirstChildOfClass("Humanoid")
+      if h and h.Health>0 then
+        if TryKillPlayer(p) then cnt=cnt+1 end
+      end
     end
-    if #out > 0 then return " [Attrs: "..table.concat(out, ", ").."]" end
-    return ""
+  end
+  return cnt
 end
 
---// 1. SUMMARY - самое важное для killer-режима
-local function buildSummary()
-    local L = {}
-    local function add(s) table.insert(L, s) end
-
-    add("=== AREA 51 KILLER MODE DUMP ===")
-    add("Date: "..os.date("%Y-%m-%d %H:%M:%S"))
-    add("PlaceId: "..tostring(game.PlaceId))
-    add("JobId: "..tostring(game.JobId))
-    add("")
-
-    -- Teams
-    add("--- TEAMS ("..#Teams:GetTeams()..") ---")
-    for _,t in ipairs(Teams:GetTeams()) do
-        add("Team: '"..t.Name.."' | Color: "..tostring(t.TeamColor).." | Players: "..#t:GetPlayers().." | AutoAssignable: "..tostring(t.AutoAssignable))
-        for _,p in ipairs(t:GetPlayers()) do
-            add("   - "..p.Name.." ("..p.DisplayName..")")
-        end
-    end
-    -- игроки без команды
-    local noTeam = {}
-    for _,p in ipairs(Players:GetPlayers()) do
-        if not p.Team then table.insert(noTeam, p.Name) end
-    end
-    add("Players without Team ("..#noTeam.."): "..table.concat(noTeam, ", "))
-    add("")
-
-    -- LocalPlayer подробно
-    add("--- LOCALPLAYER ---")
-    add("Name: "..LocalPlayer.Name)
-    add("Team: "..(LocalPlayer.Team and LocalPlayer.Team.Name or "NIL"))
-    add("TeamColor: "..tostring(LocalPlayer.TeamColor))
-    pcall(function()
-        for k,v in pairs(LocalPlayer:GetAttributes()) do
-            add("Attr "..k.." = "..tostring(v))
-        end
-    end)
-    local ls = LocalPlayer:FindFirstChild("leaderstats")
-    if ls then
-        add("leaderstats:")
-        for _,v in ipairs(ls:GetChildren()) do
-            add("  "..v.ClassName.." "..v.Name.." = "..tostring(v.Value))
-        end
-    else
-        add("leaderstats: NIL")
-    end
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then
-        add("PlayerGui ("..#pg:GetChildren().."):")
-        for _,g in ipairs(pg:GetChildren()) do
-            add("  ScreenGui: "..g.Name.." ("..g.ClassName..")")
-            -- ищем таймеры / роли внутри GUI по именам
-            for _,d in ipairs(g:GetDescendants()) do
-                local n = string.lower(d.Name)
-                if string.find(n,"time") or string.find(n,"timer") or string.find(n,"role") or string.find(n,"team") or string.find(n,"kill") or string.find(n,"swap") or string.find(n,"round") then
-                    local txt = ""
-                    pcall(function()
-                        if d:IsA("TextLabel") or d:IsA("TextButton") then txt = " Text='"..tostring(d.Text):sub(1,80).."'" end
-                        if d:IsA("StringValue") or d:IsA("IntValue") then txt = " Value="..tostring(d.Value) end
-                    end)
-                    add("    ["..d.ClassName.."] "..fullPath(d)..txt)
-                end
-            end
-        end
-    end
-    add("")
-
-    -- Character
-    add("--- CHARACTER ---")
+-- авто-экип лучшего тула
+local function EquipBest()
+  pcall(function()
+    local bp = LocalPlayer:FindFirstChild("Backpack")
     local ch = LocalPlayer.Character
-    if ch then
-        for _,v in ipairs(ch:GetChildren()) do
-            add("  "..v.ClassName.." "..v.Name)
-        end
-        local hum = ch:FindFirstChildOfClass("Humanoid")
-        if hum then
-            add("  Humanoid: HP "..tostring(hum.Health).."/"..tostring(hum.MaxHealth).." WalkSpeed="..tostring(hum.WalkSpeed).." Jump="..tostring(hum.JumpPower))
-        end
-    else
-        add("Character NIL")
+    if not bp or not ch then return end
+    if ch:FindFirstChildOfClass("Tool") then return end
+    local best=nil
+    for _,t in ipairs(bp:GetChildren()) do
+      if t:IsA("Tool") then best=t break end
     end
-    add("")
+    if best then
+      ch:FindFirstChildOfClass("Humanoid"):EquipTool(best)
+    end
+  end)
+end
 
-    -- Подозрительные Values для ролей/таймера во всей игре (быстрый поиск)
-    add("--- ROLE / TIMER VALUES (поиск по именам) ---")
-    local keywords = {"role","team","killer","surviv","monster","beast","swap","round","timer","timeleft","intermission","mode"}
-    local found = 0
-    for _,svc in ipairs({Workspace, ReplicatedStorage, Lighting, StarterGui, Teams}) do
-        for _,d in ipairs(svc:GetDescendants()) do
-            if found > 200 then break end
-            local ln = string.lower(d.Name)
-            for _,k in ipairs(keywords) do
-                if string.find(ln, k) then
-                    local val = ""
+--// GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name="A51V3" ScreenGui.ResetOnSpawn=false
+ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+pcall(function() ScreenGui.Parent=game.CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent=LocalPlayer:WaitForChild("PlayerGui") end
+
+local Main = Instance.new("Frame")
+Main.Size=UDim2.new(0,285,0,470) Main.Position=UDim2.new(0,15,0.5,-235)
+Main.BackgroundColor3=Color3.fromRGB(12,12,18) Main.BorderSizePixel=0
+Main.Active=true Main.Draggable=true Main.Parent=ScreenGui
+Instance.new("UICorner",Main).CornerRadius=UDim.new(0,10)
+
+local Title=Instance.new("TextLabel")
+Title.Size=UDim2.new(1,0,0,30) Title.BackgroundColor3=Color3.fromRGB(150,0,150)
+Title.Text="A51 v3 MONSTER FIX" Title.TextColor3=Color3.new(1,1,1)
+Title.TextScaled=true Title.Font=Enum.Font.GothamBold Title.Parent=Main
+Instance.new("UICorner",Title).CornerRadius=UDim.new(0,10)
+
+local RoleL=Instance.new("TextLabel")
+RoleL.Size=UDim2.new(1,-10,0,24) RoleL.Position=UDim2.new(0,5,0,34)
+RoleL.BackgroundTransparency=1 RoleL.Text="Роль: "..MyTeam().." | Remotes: "..#DamageRemotes
+RoleL.TextColor3=Color3.fromRGB(0,255,127) RoleL.TextScaled=true RoleL.Font=Enum.Font.GothamBold RoleL.Parent=Main
+
+local Info=Instance.new("TextLabel")
+Info.Size=UDim2.new(1,-10,0,20) Info.Position=UDim2.new(0,5,0,58)
+Info.BackgroundTransparency=1 Info.Text="Аура: "..S.AuraRadius.." | Hitbox: "..S.HitboxSize
+Info.TextColor3=Color3.fromRGB(255,255,0) Info.TextScaled=true Info.Font=Enum.Font.Code Info.Parent=Main
+
+local Scroll=Instance.new("ScrollingFrame")
+Scroll.Size=UDim2.new(1,-10,1,-92) Scroll.Position=UDim2.new(0,5,0,82)
+Scroll.BackgroundTransparency=1 Scroll.ScrollBarThickness=4
+Scroll.CanvasSize=UDim2.new(0,0,0,700) Scroll.Parent=Main
+local UL=Instance.new("UIListLayout",Scroll) UL.Padding=UDim.new(0,5)
+
+local function Btn(text,def,cb)
+  local b=Instance.new("TextButton")
+  b.Size=UDim2.new(1,-5,0,34)
+  b.BackgroundColor3=def and Color3.fromRGB(0,170,0) or Color3.fromRGB(45,45,55)
+  b.Text=(def and "[ON] " or "[OFF] ")..text b.TextColor3=Color3.new(1,1,1)
+  b.TextScaled=true b.Font=Enum.Font.Gotham b.Parent=Scroll
+  Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+  local on=def
+  b.MouseButton1Click:Connect(function()
+    on=not on b.BackgroundColor3=on and Color3.fromRGB(0,170,0) or Color3.fromRGB(45,45,55)
+    b.Text=(on and "[ON] " or "[OFF] ")..text cb(on)
+  end)
+end
+local function Act(text,color,cb)
+  local b=Instance.new("TextButton")
+  b.Size=UDim2.new(1,-5,0,36) b.BackgroundColor3=color b.Text=text
+  b.TextColor3=Color3.new(1,1,1) b.TextScaled=true b.Font=Enum.Font.GothamBold b.Parent=Scroll
+  Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+  b.MouseButton1Click:Connect(cb)
+end
+
+Btn("ESP Врагов",S.ESP_Enemy,function(v) S.ESP_Enemy=v end)
+Btn("Aura ВЫЖИВШИЙ (пушка)",S.AuraSurv,function(v) S.AuraSurv=v if v then EquipBest() end end)
+Btn("Aura МОНСТР (когти, без пушки)",S.AuraMonster,function(v) S.AuraMonster=v end)
+Btn("Hitbox огромный ("..S.HitboxSize..")",S.Hitbox,function(v) S.Hitbox=v end)
+Btn("Спид 34",S.Speed,function(v) S.Speed=v end)
+Btn("Флай [F]",S.Fly,function(v) S.Fly=v end)
+Btn("Ноклип [N]",S.Noclip,function(v) S.Noclip=v end)
+Btn("Loop Kill All (по ремоутам)",S.KillAllLoop,function(v) S.KillAllLoop=v end)
+
+Act("☠ УБИТЬ ВСЕХ ВРАГОВ 1 РАЗ",Color3.fromRGB(180,0,0),function()
+  EquipBest()
+  local c=KillAllOnce()
+  game.StarterGui:SetCore("SendNotification",{Title="Kill All",Text="Попытка убита: "..c.." | Если 0 - нужен remotes.txt",Duration=4})
+end)
+Act("🔍 ПЕРЕСКАНИРОВАТЬ РЕМОТЫ",Color3.fromRGB(0,90,180),function()
+  ScanRemotes()
+  RoleL.Text="Роль: "..MyTeam().." | Remotes: "..#DamageRemotes
+  game.StarterGui:SetCore("SendNotification",{Title="Remotes",Text="Всего:"..#AllRemotes.." DMG:"..#DamageRemotes,Duration=4})
+end)
+Act("⬆ +50 вверх",Color3.fromRGB(0,90,180),function()
+  local c=LocalPlayer.Character
+  if c and c:FindFirstChild("HumanoidRootPart") then
+    c.HumanoidRootPart.CFrame=c.HumanoidRootPart.CFrame+Vector3.new(0,50,0)
+  end
+end)
+
+local Open=Instance.new("TextButton")
+Open.Size=UDim2.new(0,52,0,52) Open.Position=UDim2.new(1,-62,0,10)
+Open.BackgroundColor3=Color3.fromRGB(150,0,150) Open.Text="51"
+Open.TextScaled=true Open.Font=Enum.Font.GothamBold Open.TextColor3=Color3.new(1,1,1)
+Open.Active=true Open.Draggable=true Open.Parent=ScreenGui
+Instance.new("UICorner",Open).CornerRadius=UDim.new(1,0)
+Open.MouseButton1Click:Connect(function() Main.Visible=not Main.Visible end)
+UserInputService.InputBegan:Connect(function(i,g)
+  if g then return end
+  if i.KeyCode==Enum.KeyCode.RightShift then Main.Visible=not Main.Visible
+  elseif i.KeyCode==Enum.KeyCode.F then S.Fly=not S.Fly
+  elseif i.KeyCode==Enum.KeyCode.N then S.Noclip=not S.Noclip end
+end)
+
+--// ESP
+function ApplyESP(plr)
+  if plr==LocalPlayer then return end
+  if not plr.Character or not plr.Character:FindFirstChild("Head") then return end
+  pcall(function()
+    local h=plr.Character:FindFirstChild("ESP_H") if h then h:Destroy() end
+    local b=plr.Character:FindFirstChild("ESP_B") if b then b:Destroy() end
+  end)
+  local enemy=IsEnemy(plr)
+  if enemy and not S.ESP_Enemy then return end
+  if (not enemy) and not S.ESP_Team then return end
+  local col=TeamColor(plr)
+  local hl=Instance.new("Highlight") hl.Name="ESP_H"
+  hl.FillColor=col hl.OutlineColor=col hl.FillTransparency=0.55
+  hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop hl.Parent=plr.Character
+  local bb=Instance.new("BillboardGui") bb.Name="ESP_B"
+  bb.Size=UDim2.new(0,140,0,40) bb.StudsOffset=Vector3.new(0,3.2,0) bb.AlwaysOnTop=true
+  bb.Parent=plr.Character:FindFirstChild("Head")
+  local tl=Instance.new("TextLabel") tl.Size=UDim2.new(1,0,1,0)
+  tl.BackgroundTransparency=1 tl.TextStrokeTransparency=0 tl.TextScaled=true
+  tl.Font=Enum.Font.GothamBold tl.TextColor3=col tl.Parent=bb
+  local conn conn=RunService.RenderStepped:Connect(function()
+    if not plr.Character or bb.Parent==nil or hl.Parent==nil then conn:Disconnect() return end
+    local hum=plr.Character:FindFirstChildOfClass("Humanoid") if not hum then return end
+    if hum.Health<=0 then tl.Text="☠ "..plr.Name return end
+    local d="?"
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("HumanoidRootPart") then
+      d=tostring(math.floor((LocalPlayer.Character.HumanoidRootPart.Position-plr.Character.HumanoidRootPart.Position).Magnitude)).."m"
+    end
+    tl.Text=(enemy and "👹 " or "🛡 ")..plr.DisplayName.." ["..d.."] "..math.floor(hum.Health).."HP"
+  end)
+end
+task.spawn(function() while true do task.wait(2) for _,p in ipairs(Players:GetPlayers()) do pcall(ApplyESP,p) end end end)
+
+--// HITBOX LOOP (важно для монстров - бить издалека)
+task.spawn(function()
+  while true do
+    task.wait(1)
+    if S.Hitbox then
+      for _,p in ipairs(Players:GetPlayers()) do
+        if IsEnemy(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+          pcall(function()
+            local r=p.Character.HumanoidRootPart
+            r.Size=Vector3.new(S.HitboxSize,S.HitboxSize,S.HitboxSize)
+            r.Transparency=0.7 r.CanCollide=false
+          end)
+        end
+      end
+    end
+  end
+end)
+
+--// KILL AURA v3 - ДВА РЕЖИМА
+-- Surviv: требует Tool в руках, спамит Activate + touch + remote
+-- Monster: работает даже БЕЗ Tool (когти), бьет touch-ем своим телом + remote
+task.spawn(function()
+  while true do
+    task.wait(0.15) -- быстро для баланса против пушек
+    local active = S.AuraSurv or S.AuraMonster
+    if active then
+      pcall(function()
+        local ch=LocalPlayer.Character if not ch then return end
+        local hrp=ch:FindFirstChild("HumanoidRootPart") if not hrp then return end
+        local tool=ch:FindFirstChildOfClass("Tool")
+        -- если режим выжившего и нет тула в руках - эквип
+        if S.AuraSurv and not tool then EquipBest() tool=ch:FindFirstChildOfClass("Tool") end
+        -- монстру тул НЕ нужен, бьем телом
+        for _,p in ipairs(Players:GetPlayers()) do
+          if IsEnemy(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local h=p.Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health>0 then
+              local dist=(hrp.Position-p.Character.HumanoidRootPart.Position).Magnitude
+              if dist<=S.AuraRadius then
+                -- 1. Tool activate (для выживших)
+                if tool then
+                  -- для монстра с пушкой тоже сойдет
+                  tool:Activate()
+                  if tool:FindFirstChild("Handle") then
                     pcall(function()
-                        if d:IsA("ValueBase") then val = " Value="..tostring(d.Value)
-                        elseif d:IsA("TextLabel") or d:IsA("TextButton") then val = " Text='"..tostring(d.Text):sub(1,80).."'"
-                        end
+                      firetouchinterest(tool.Handle, p.Character.HumanoidRootPart, 0) task.wait()
+                      firetouchinterest(tool.Handle, p.Character.HumanoidRootPart, 1)
                     end)
-                    add("["..d.ClassName.."] "..fullPath(d)..val)
-                    found = found + 1
-                    break
+                    -- дополнительно по голове и торсу
+                    for _,partName in ipairs({"Head","UpperTorso","LowerTorso","Torso"}) do
+                      local pt=p.Character:FindFirstChild(partName)
+                      if pt then pcall(function()
+                        firetouchinterest(tool.Handle, pt, 0) task.wait()
+                        firetouchinterest(tool.Handle, pt, 1)
+                      end) end
+                    end
+                  end
+                else
+                  -- 2. MONSTER MODE без тула: бьем своим HRP по врагу
+                  for _,myPart in ipairs(ch:GetChildren()) do
+                    if myPart:IsA("BasePart") then
+                      pcall(function()
+                        firetouchinterest(myPart, p.Character.HumanoidRootPart, 0) task.wait()
+                        firetouchinterest(myPart, p.Character.HumanoidRootPart, 1)
+                      end)
+                      break -- одного достаточно чтобы не лагало
+                    end
+                  end
                 end
-            end
-        end
-    end
-    add("Total role/timer matches: "..found)
-    add("")
-
-    -- Workspace прямыe дети (спавны, карта)
-    add("--- WORKSPACE TOP ("..#Workspace:GetChildren()..") ---")
-    for _,c in ipairs(Workspace:GetChildren()) do
-        local cnt = 0
-        pcall(function() cnt = #c:GetChildren() end)
-        add("["..c.ClassName.."] "..c.Name.." (children: "..cnt..")")
-    end
-    add("")
-
-    -- ReplicatedStorage топ
-    add("--- REPLICATEDSTORAGE TOP ("..#ReplicatedStorage:GetChildren()..") ---")
-    for _,c in ipairs(ReplicatedStorage:GetChildren()) do
-        local cnt = 0
-        pcall(function() cnt = #c:GetChildren() end)
-        add("["..c.ClassName.."] "..c.Name.." (children: "..cnt..")")
-    end
-
-    return table.concat(L, "\n")
-end
-
---// 2. REMOTES - все RemoteEvent/Function (нужны для килла/фарма)
-local function buildRemotes()
-    local L = {"=== REMOTES DUMP ===", "PlaceId: "..tostring(game.PlaceId), ""}
-    local count = {RemoteEvent=0, RemoteFunction=0, BindableEvent=0, BindableFunction=0}
-    for _,svc in ipairs({game, Workspace, ReplicatedStorage, StarterGui, Teams, Lighting, Players}) do
-        local svcName = "game"
-        pcall(function() svcName = svc:GetFullName() end)
-        table.insert(L, "--- Service: "..svcName.." ---")
-        for _,d in ipairs(svc:GetDescendants()) do
-            if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("BindableEvent") or d:IsA("BindableFunction") then
-                count[d.ClassName] = (count[d.ClassName] or 0) + 1
-                table.insert(L, "["..d.ClassName.."] "..fullPath(d)..attrsToStr(d))
-            end
-        end
-    end
-    table.insert(L, "")
-    table.insert(L, "TOTAL: RemoteEvent="..(count.RemoteEvent or 0).." RemoteFunction="..(count.RemoteFunction or 0).." BindableEvent="..(count.BindableEvent or 0).." BindableFunction="..(count.BindableFunction or 0))
-    return table.concat(L, "\n")
-end
-
---// 3. TOOLS
-local function buildTools()
-    local L = {"=== TOOLS / WEAPONS ===", ""}
-    for _,svc in ipairs({ReplicatedStorage, Workspace, StarterGui, LocalPlayer:FindFirstChild("Backpack") or ReplicatedStorage, LocalPlayer.Character or Workspace}) do
-        local ok, name = pcall(function() return svc:GetFullName() end)
-        table.insert(L, "--- "..(ok and name or "?").." ---")
-        local n = 0
-        for _,d in ipairs(svc:GetDescendants()) do
-            if d:IsA("Tool") or d:IsA("HopperBin") then
-                n = n + 1
-                if n < 300 then
-                    table.insert(L, "[Tool] "..fullPath(d).." | RequiresHandle="..tostring(d.RequiresHandle))
+                -- 3. Remote урон (и выжившим и монстрам)
+                if #DamageRemotes>0 then
+                  -- не спамим все 10 вариантов каждый тик, только 2 быстрых чтобы не кикнуло
+                  for _,rem in ipairs(DamageRemotes) do
+                    pcall(function() rem:FireServer(h, 9999) end)
+                    pcall(function() rem:FireServer(p.Character, 9999) end)
+                  end
                 end
+              end
             end
+          end
         end
-        table.insert(L, "Found tools: "..n)
-        table.insert(L, "")
+      end)
     end
-    return table.concat(L, "\n")
-end
-
---// 4. FULL TREE с лимитом
-local treeLines = {}
-local function dumpNode(inst, depth)
-    if depth > MAX_DEPTH then return end
-    local children = {}
-    pcall(function() children = inst:GetChildren() end)
-    local total = #children
-    local shown = math.min(total, MAX_CHILD_PER_NODE)
-    for i=1, shown do
-        local c = children[i]
-        local indent = string.rep("  ", depth)
-        local line = indent.."- ["..c.ClassName.."] "..c.Name..attrsToStr(c)
-        -- значения для ValueBase / Text
-        pcall(function()
-            if c:IsA("ValueBase") then line = line.." = "..tostring(c.Value)
-            elseif c:IsA("TextLabel") or c:IsA("TextButton") or c:IsA("TextBox") then
-                local t = tostring(c.Text or "")
-                if #t > 0 then line = line.." Text='"..t:sub(1,60).."' " end
-            end
-        end)
-        table.insert(treeLines, line)
-        if SCAN_DELAY and depth >= 3 then task.wait() end
-        -- рекурсия
-        dumpNode(c, depth+1)
-    end
-    if total > shown then
-        table.insert(treeLines, string.rep("  ", depth).."... (+"..(total-shown).." more in "..inst.Name..")")
-    end
-end
-
-local function buildTree()
-    treeLines = {"=== FULL TREE (depth="..MAX_DEPTH..", limit="..MAX_CHILD_PER_NODE.."/node) ===", "PlaceId: "..tostring(game.PlaceId), ""}
-    for _,svcName in ipairs({"Workspace","Players","Lighting","MaterialService","ReplicatedFirst","ReplicatedStorage","ServerStorage","StarterGui","StarterPack","StarterPlayer","Teams","SoundService","Chat"}) do
-        local svc = nil
-        pcall(function() svc = game:GetService(svcName) end)
-        if svc then
-            table.insert(treeLines, "")
-            table.insert(treeLines, "== "..svcName.." ==")
-            dumpNode(svc, 1)
-        end
-    end
-    -- PlayerGui отдельно (там таймер режима)
-    pcall(function()
-        local pg = LocalPlayer:FindFirstChild("PlayerGui")
-        if pg then
-            table.insert(treeLines, "")
-            table.insert(treeLines, "== PlayerGui ("..LocalPlayer.Name..") ==")
-            dumpNode(pg, 1)
-        end
-    end)
-    return table.concat(treeLines, "\n")
-end
-
---// ЗАПУСК
-print("[Scanner] Старт...")
-game.StarterGui:SetCore("SendNotification", {Title="Scanner", Text="Сканирую... 10-15 сек", Duration=3})
-
-local ok1, summary = pcall(buildSummary)
-if ok1 then safeWrite(FOLDER.."/summary.txt", summary) print("[Scanner] summary.txt OK ("..#summary.." bytes)") else warn("[Scanner] summary fail: "..tostring(summary)) end
-task.wait(0.5)
-
-local ok2, rem = pcall(buildRemotes)
-if ok2 then safeWrite(FOLDER.."/remotes.txt", rem) print("[Scanner] remotes.txt OK") else warn("[Scanner] remotes fail") end
-task.wait(0.5)
-
-local ok3, tools = pcall(buildTools)
-if ok3 then safeWrite(FOLDER.."/tools.txt", tools) print("[Scanner] tools.txt OK") else warn("[Scanner] tools fail") end
-task.wait(0.5)
-
-local ok4, tree = pcall(buildTree)
-if ok4 then safeWrite(FOLDER.."/full_tree.txt", tree) print("[Scanner] full_tree.txt OK ("..#tree.." bytes)") else warn("[Scanner] tree fail: "..tostring(tree)) end
-
--- индекс файл
-safeWrite(FOLDER.."/_where_are_files.txt", "Файлы тут: Delta Executor > Files / Workspace / "..FOLDER.."/\nОткрой summary.txt, remotes.txt, tools.txt, full_tree.txt и скинь сюда.")
-
---// ЭМУЛЯТОР: автопоказ + копипаста без копания в папках
--- На эмуляторе (BlueStacks/LDPlayer/MuMu) файлы лежат внутри Android:
--- /storage/emulated/0/Delta/Workspace/Area51_Dump/
--- Чтобы не искать их, показываем GUI с текстом + копируем в буфер обмена
-pcall(function()
-    if setclipboard and ok1 and summary then
-        setclipboard(summary:sub(1, 50000)) -- буфер режет длинные, поэтому первые 50к
-        print("[Scanner] summary скопирован в буфер обмена (Ctrl+V в Discord/блокнот)")
-    end
+  end
 end)
 
-pcall(function()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "ScannerViewer"
-    gui.ResetOnSpawn = false
-    pcall(function() gui.Parent = game.CoreGui end)
-    if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 500, 0, 400)
-    frame.Position = UDim2.new(0.5, -250, 0.5, -200)
-    frame.BackgroundColor3 = Color3.fromRGB(15,15,20)
-    frame.Active = true
-    frame.Draggable = true
-    frame.Parent = gui
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0,8)
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1,0,0,30)
-    title.BackgroundColor3 = Color3.fromRGB(0,150,0)
-    title.Text = "SCANNER ГОТОВ - выдели и Ctrl+C"
-    title.TextColor3 = Color3.new(1,1,1)
-    title.TextScaled = true
-    title.Font = Enum.Font.GothamBold
-    title.Parent = frame
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1,-10,1,-80)
-    box.Position = UDim2.new(0,5,0,35)
-    box.MultiLine = true
-    box.ClearTextOnFocus = false
-    box.TextWrapped = false
-    box.TextXAlignment = Enum.TextXAlignment.Left
-    box.TextYAlignment = Enum.TextYAlignment.Top
-    box.Font = Enum.Font.Code
-    box.TextSize = 12
-    box.TextColor3 = Color3.new(1,1,1)
-    box.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    box.Text = (ok1 and summary or "summary fail") .. "\n\n--- REMOTES (первые 200 строк) ---\n" .. ((ok2 and rem or ""):sub(1,8000))
-    box.Parent = frame
-
-    local btnCopy = Instance.new("TextButton")
-    btnCopy.Size = UDim2.new(0.5,-7,0,35)
-    btnCopy.Position = UDim2.new(0,5,1,-40)
-    btnCopy.BackgroundColor3 = Color3.fromRGB(0,90,180)
-    btnCopy.Text = "COPY SUMMARY"
-    btnCopy.TextColor3 = Color3.new(1,1,1)
-    btnCopy.TextScaled = true
-    btnCopy.Parent = frame
-    btnCopy.MouseButton1Click:Connect(function()
-        if setclipboard then setclipboard(summary) end
-        btnCopy.Text = "СКОПИРОВАНО!"
-    end)
-
-    local btnClose = Instance.new("TextButton")
-    btnClose.Size = UDim2.new(0.5,-7,0,35)
-    btnClose.Position = UDim2.new(0.5,2,1,-40)
-    btnClose.BackgroundColor3 = Color3.fromRGB(170,0,0)
-    btnClose.Text = "ЗАКРЫТЬ"
-    btnClose.TextColor3 = Color3.new(1,1,1)
-    btnClose.TextScaled = true
-    btnClose.Parent = frame
-    btnClose.MouseButton1Click:Connect(function() gui:Destroy() end)
+--// LOOP KILL ALL
+task.spawn(function()
+  while true do
+    task.wait(S.KillAllDelay)
+    if S.KillAllLoop then
+      pcall(function()
+        local c=KillAllOnce()
+        if c>0 then print("[A51v3] LoopKill убил: "..c) end
+      end)
+    end
+  end
 end)
 
-game.StarterGui:SetCore("SendNotification", {Title="Scanner ✅", Text="Готово! Папка "..FOLDER, Duration=5})
-print("[Scanner] ГОТОВО. Папка: "..FOLDER.." | Скинь файлы сюда для точного скрипта.")
+--// SPEED/NOCLIP/BRIGHT/FLY
+RunService.Stepped:Connect(function()
+  pcall(function()
+    local ch=LocalPlayer.Character
+    if ch and ch:FindFirstChildOfClass("Humanoid") then
+      local h=ch:FindFirstChildOfClass("Humanoid")
+      if S.Speed then h.WalkSpeed=S.SpeedVal else if h.WalkSpeed~=20 then h.WalkSpeed=20 end end
+    end
+    if S.Noclip and ch then for _,v in ipairs(ch:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide=false end end end
+    if S.Fullbright then Lighting.Brightness=2 Lighting.ClockTime=14 Lighting.FogEnd=100000 Lighting.GlobalShadows=false end
+  end)
+end)
+local bv=nil
+RunService.Heartbeat:Connect(function()
+  local ch=LocalPlayer.Character if not ch or not ch:FindFirstChild("HumanoidRootPart") then return end
+  local hrp=ch.HumanoidRootPart
+  if S.Fly then
+    if not bv then bv=Instance.new("BodyVelocity") bv.MaxForce=Vector3.new(9e4,9e4,9e4) bv.Velocity=Vector3.zero bv.Parent=hrp end
+    local md=ch:FindFirstChildOfClass("Humanoid").MoveDirection
+    bv.Velocity=md*S.FlySpeed
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then bv.Velocity=bv.Velocity+Vector3.new(0,S.FlySpeed/1.4,0) end
+  else if bv then bv:Destroy() bv=nil end end
+end)
+
+--// СМЕНА КОМАНД
+local lastT=MyTeam()
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+  task.wait(0.5) local nt=MyTeam() RoleL.Text="Роль: "..nt.." | Remotes: "..#DamageRemotes
+  game.StarterGui:SetCore("SendNotification",{Title="СМЕНА!",Text="Ты: "..nt,Duration=5})
+  lastT=nt for _,p in ipairs(Players:GetPlayers()) do pcall(ApplyESP,p) end
+end)
+
+game.StarterGui:SetCore("SendNotification",{Title="A51 v3 MONSTER ✅",Text="Роль:"..MyTeam().." DMG-ремотов:"..#DamageRemotes,Duration=6})
+print("[A51v3] loaded team="..MyTeam().." dmg="..#DamageRemotes)
