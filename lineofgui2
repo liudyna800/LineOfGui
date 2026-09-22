@@ -3992,10 +3992,8 @@ function getCreatorName()
     return name
 end
 
-fetchGameContext = function(force, warm)
-    -- warm=true: фоновый прогрев мозга при загрузке, gate тумблера пропускаем
-    -- (кэш всё равно используется только включёнными тумблерами).
-    if not warm and not ClientSettings.GameUnderstanding then return nil end
+fetchGameContext = function(force)
+    if not ClientSettings.GameUnderstanding then return nil end
     local pid = game.PlaceId
     if _gameContext and _gameContext.placeId == pid and not force then return _gameContext end
     if _gameContextFetching then return _gameContext end
@@ -4998,12 +4996,7 @@ _THREAT_WORDS = {
     ["caught"]=1, ["catch"]=1, ["infect"]=1, ["infected"]=1, ["dead"]=1,
     ["die"]=1, ["died"]=1, ["murder"]=1, ["murderer"]=1, ["kidnap"]=1, ["kidnapped"]=1,
 }
--- PARKED: чувство опасности временно отключено целиком (ложные отказы своим).
--- Вернуть: поставить false. Подозрение: DANGER-блок категоричен + armed-скан
--- показывает вооружённых СОЮЗНИКОВ, модель пугается и отказывает всем.
-LOB_DANGER_PARKED = true
 function lobDangerActive()
-    if LOB_DANGER_PARKED then return false end
     return ClientSettings.DangerSense == true and ClientSettings.GameUnderstanding == true
 end
 function lobHasThreatWords(msg)
@@ -9620,37 +9613,17 @@ makeToggleRow(
     end
 )
 
--- v20 Beta 2: чувство опасности (ВРЕМЕННО ОТКЛЮЧЕНО, на доработке — тумблер пока ни на что не влияет)
+-- v20 Beta 2: чувство опасности (спит без GameUnderstanding)
 makeToggleRow(
     automation,
-    "⚠️ Чувство опасности (скоро)",
-    "Пока спит. Вернётся после фикса ложных отказов своим.",
+    "⚠️ Чувство опасности",
+    "Только с GameUnderstanding. ИИ знает команды, отказывает врагам с причиной, реагирует на урон/рагдолл/телепорт/оружие рядом.",
     ClientSettings.DangerSense == true,
     function(state)
         ClientSettings.DangerSense = state
         saveSettings()
     end
 )
-
--- v20 Beta 2: ручная загрузка мозга + живой статус (do-блок: не жрём лимит локалок)
-do
-    local brainStatusLbl = makeTextLabel(automation, LOB_WARMUP_STATE.text, 12, "medium")
-    brainStatusLbl.Name = "BrainStatus"
-    brainStatusLbl.TextColor3 = THEME.TextDim
-    brainStatusLbl.Size = UDim2.new(1, -8, 0, 18)
-    brainStatusLbl.TextTruncate = Enum.TextTruncate.AtEnd
-    lobOnWarmupProgress = function(t)
-        pcall(function()
-            if brainStatusLbl and brainStatusLbl.Parent then
-                brainStatusLbl.Text = tostring(t or "")
-            end
-        end)
-    end
-    local brainBtn = makeButton(automation, "🧠 Начать загрузку", "noArrow")
-    brainBtn.MouseButton1Click:Connect(function()
-        task.spawn(lobBrainWarmup)
-    end)
-end
 
 -- v17: Сознание игроков
 makeToggleRow(
@@ -10061,85 +10034,7 @@ do
                 if not ClientSettings.UI then ClientSettings.UI = {} end
                 ClientSettings.UI.WindowWidth = p.w
                 ClientSettings.UI.WindowHeight = p.h
-createInterface()
-
--- v20 Beta 2: BRAIN WARMUP (кнопка + автопрогрев). Стадии с обработкой ошибок:
--- 404/429/таймауты сети и провайдера показываем статусом, скрипт не падает.
--- Глобалы (лимит локалок чанка!). lobOnWarmupProgress ставит UI для живого статуса.
-LOB_WARMUP_STATE = { running = false, text = "мозг не загружен" }
-lobOnWarmupProgress = nil
-function lobWarmupSay(t)
-    LOB_WARMUP_STATE.text = tostring(t or "")
-    print("[LOB] brain: " .. tostring(t or ""))
-    if lobOnWarmupProgress then pcall(lobOnWarmupProgress, t) end
-end
-function lobBrainWarmup()
-    if LOB_WARMUP_STATE.running then
-        lobWarmupSay("уже грузится, жди...")
-        return
-    end
-    LOB_WARMUP_STATE.running = true
-    task.spawn(function()
-        local doneOk, errAll = pcall(function()
-            -- ключи проверяем без сети: 401/отказ потом, а не сейчас
-            local hasGroq, hasGem = false, false
-            pcall(function()
-                local k = getGroqApiKey and getGroqApiKey() or ""
-                hasGroq = type(k) == "string" and #k > 8
-                local g = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini or ""
-                hasGem = type(g) == "string" and #g > 8
-            end)
-            lobWarmupSay("шаг 1/3: узнаю место...")
-            local pi = nil
-            pcall(function() pi = fetchPlaceInfo() end)
-            if not pi or not pi.name or pi.name == "" or pi.name == "Unknown Game" then
-                error("место не определилось (Marketplace и Universe API недоступны — проверь интернет)")
-            end
-            lobWarmupSay("место: " .. tostring(pi.name) .. " | ключи: Groq " .. (hasGroq and "OK" or "--") .. ", Gemini " .. (hasGem and "OK" or "--"))
-            lobWarmupSay("шаг 2/3: веб-поиск про игру...")
-            local t0 = os.clock()
-            pcall(function() fetchGameContext(true, true) end)
-            local pid = game.PlaceId
-            local ready = false
-            while (os.clock() - t0) < 25 do
-                if _gameContext and _gameContext.placeId == pid and (_gameContext.at or 0) >= t0 then
-                    ready = true
-                    break
-                end
-                task.wait(0.5)
-            end
-            if not ready then
-                error("контекст не собрался за 25с (веб/вики висят или 429 у провайдера — попробуй ещё раз позже)")
-            end
-            local txt = tostring((_gameContext and _gameContext.text) or "")
-            local marks = {}
-            if txt:find("About:") then table.insert(marks, "описание") end
-            if txt:find("Web:") then table.insert(marks, "веб") end
-            if txt:find("Wiki:") then table.insert(marks, "вики") end
-            if #marks == 0 then
-                lobWarmupSay("✅ готово: " .. tostring(pi.name) .. " — только название (веб/вики пусто: 404 или лимиты)")
-            else
-                lobWarmupSay("✅ готово: " .. tostring(pi.name) .. " (" .. table.concat(marks, "+") .. ")")
-            end
-            if pushNotification and type(pushNotification) == "function" then
-                local th = nil
-                pcall(function() th = THEME and THEME.Accent or nil end)
-                pcall(pushNotification, "Мозг загружен", tostring(pi.name) .. ": " .. (#marks > 0 and table.concat(marks, ", ") or "только название"), th)
-            end
-        end)
-        if not doneOk then
-            lobWarmupSay("❌ " .. tostring(errAll or "ошибка"):sub(1, 120))
-        end
-        LOB_WARMUP_STATE.running = false
-        if lobOnWarmupProgress then pcall(lobOnWarmupProgress, LOB_WARMUP_STATE.text) end
-    end)
-end
-
--- автопрогрев при загрузке скрипта (та же функция, что и у кнопки)
-task.spawn(function()
-    task.wait(3)
-    pcall(lobBrainWarmup)
-end)
+                createInterface()
                 return
             end
         end
