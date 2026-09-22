@@ -1,13 +1,381 @@
--- Запуск FlyGuiV3 в отдельном потоке
-task.spawn(function()
+--[[ 
+    AREA 51 SCANNER for Delta Executor
+    Что делает: сканирует Explorer (Workspace, Teams, Players, ReplicatedStorage и т.д.)
+    и сохраняет всё в .txt файлы в Workspace папку Delta (writefile).
+
+    Как пользоваться:
+    1. Зайди в плейс Area 51 > Killer Mode
+    2. Вставь этот скрипт в Delta > Execute
+    3. Жди 5-15 сек (в консоли будет прогресс)
+    4. Файлы появятся в Delta Workspace: Area51_Dump/
+       - summary.txt (команды, игроки, таймеры, роли)
+       - remotes.txt (все RemoteEvent / RemoteFunction - для фарма/килла)
+       - full_tree.txt (дерево Explorer до глубины)
+       - tools.txt (оружие, инструменты)
+    5. Скинь мне эти файлы сюда - допилю killer-скрипт точно под архитектуру
+]]
+
+local FOLDER = "Area51_Dump"
+local MAX_DEPTH = 4          -- глубина дерева (4 = безопасно, 6 = полный но долго)
+local MAX_CHILD_PER_NODE = 150 -- лимит детей на узел чтобы не зависнуть
+local SCAN_DELAY = false     -- true = медленнее но не лагает
+
+--// проверка executor функций
+if not writefile or not makefolder then
+    warn("[Scanner] Твой executor НЕ поддерживает writefile/makefolder. Нужен Delta.")
+    return
+end
+
+local Players = game:GetService("Players")
+local Teams = game:GetService("Teams")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local StarterGui = game:GetService("StarterGui")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+
+pcall(function() makefolder(FOLDER) end)
+
+local function safeWrite(path, content)
+    pcall(function() writefile(path, content) end)
+end
+
+local function fullPath(inst)
+    local ok, res = pcall(function() return inst:GetFullName() end)
+    if ok then return res else return inst.Name end
+end
+
+local function attrsToStr(inst)
+    local out = {}
+    local ok, attrs = pcall(function() return inst:GetAttributes() end)
+    if ok and attrs then
+        for k,v in pairs(attrs) do
+            table.insert(out, k.."="..tostring(v))
+        end
+    end
+    if #out > 0 then return " [Attrs: "..table.concat(out, ", ").."]" end
+    return ""
+end
+
+--// 1. SUMMARY - самое важное для killer-режима
+local function buildSummary()
+    local L = {}
+    local function add(s) table.insert(L, s) end
+
+    add("=== AREA 51 KILLER MODE DUMP ===")
+    add("Date: "..os.date("%Y-%m-%d %H:%M:%S"))
+    add("PlaceId: "..tostring(game.PlaceId))
+    add("JobId: "..tostring(game.JobId))
+    add("")
+
+    -- Teams
+    add("--- TEAMS ("..#Teams:GetTeams()..") ---")
+    for _,t in ipairs(Teams:GetTeams()) do
+        add("Team: '"..t.Name.."' | Color: "..tostring(t.TeamColor).." | Players: "..#t:GetPlayers().." | AutoAssignable: "..tostring(t.AutoAssignable))
+        for _,p in ipairs(t:GetPlayers()) do
+            add("   - "..p.Name.." ("..p.DisplayName..")")
+        end
+    end
+    -- игроки без команды
+    local noTeam = {}
+    for _,p in ipairs(Players:GetPlayers()) do
+        if not p.Team then table.insert(noTeam, p.Name) end
+    end
+    add("Players without Team ("..#noTeam.."): "..table.concat(noTeam, ", "))
+    add("")
+
+    -- LocalPlayer подробно
+    add("--- LOCALPLAYER ---")
+    add("Name: "..LocalPlayer.Name)
+    add("Team: "..(LocalPlayer.Team and LocalPlayer.Team.Name or "NIL"))
+    add("TeamColor: "..tostring(LocalPlayer.TeamColor))
     pcall(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+        for k,v in pairs(LocalPlayer:GetAttributes()) do
+            add("Attr "..k.." = "..tostring(v))
+        end
     end)
+    local ls = LocalPlayer:FindFirstChild("leaderstats")
+    if ls then
+        add("leaderstats:")
+        for _,v in ipairs(ls:GetChildren()) do
+            add("  "..v.ClassName.." "..v.Name.." = "..tostring(v.Value))
+        end
+    else
+        add("leaderstats: NIL")
+    end
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        add("PlayerGui ("..#pg:GetChildren().."):")
+        for _,g in ipairs(pg:GetChildren()) do
+            add("  ScreenGui: "..g.Name.." ("..g.ClassName..")")
+            -- ищем таймеры / роли внутри GUI по именам
+            for _,d in ipairs(g:GetDescendants()) do
+                local n = string.lower(d.Name)
+                if string.find(n,"time") or string.find(n,"timer") or string.find(n,"role") or string.find(n,"team") or string.find(n,"kill") or string.find(n,"swap") or string.find(n,"round") then
+                    local txt = ""
+                    pcall(function()
+                        if d:IsA("TextLabel") or d:IsA("TextButton") then txt = " Text='"..tostring(d.Text):sub(1,80).."'" end
+                        if d:IsA("StringValue") or d:IsA("IntValue") then txt = " Value="..tostring(d.Value) end
+                    end)
+                    add("    ["..d.ClassName.."] "..fullPath(d)..txt)
+                end
+            end
+        end
+    end
+    add("")
+
+    -- Character
+    add("--- CHARACTER ---")
+    local ch = LocalPlayer.Character
+    if ch then
+        for _,v in ipairs(ch:GetChildren()) do
+            add("  "..v.ClassName.." "..v.Name)
+        end
+        local hum = ch:FindFirstChildOfClass("Humanoid")
+        if hum then
+            add("  Humanoid: HP "..tostring(hum.Health).."/"..tostring(hum.MaxHealth).." WalkSpeed="..tostring(hum.WalkSpeed).." Jump="..tostring(hum.JumpPower))
+        end
+    else
+        add("Character NIL")
+    end
+    add("")
+
+    -- Подозрительные Values для ролей/таймера во всей игре (быстрый поиск)
+    add("--- ROLE / TIMER VALUES (поиск по именам) ---")
+    local keywords = {"role","team","killer","surviv","monster","beast","swap","round","timer","timeleft","intermission","mode"}
+    local found = 0
+    for _,svc in ipairs({Workspace, ReplicatedStorage, Lighting, StarterGui, Teams}) do
+        for _,d in ipairs(svc:GetDescendants()) do
+            if found > 200 then break end
+            local ln = string.lower(d.Name)
+            for _,k in ipairs(keywords) do
+                if string.find(ln, k) then
+                    local val = ""
+                    pcall(function()
+                        if d:IsA("ValueBase") then val = " Value="..tostring(d.Value)
+                        elseif d:IsA("TextLabel") or d:IsA("TextButton") then val = " Text='"..tostring(d.Text):sub(1,80).."'"
+                        end
+                    end)
+                    add("["..d.ClassName.."] "..fullPath(d)..val)
+                    found = found + 1
+                    break
+                end
+            end
+        end
+    end
+    add("Total role/timer matches: "..found)
+    add("")
+
+    -- Workspace прямыe дети (спавны, карта)
+    add("--- WORKSPACE TOP ("..#Workspace:GetChildren()..") ---")
+    for _,c in ipairs(Workspace:GetChildren()) do
+        local cnt = 0
+        pcall(function() cnt = #c:GetChildren() end)
+        add("["..c.ClassName.."] "..c.Name.." (children: "..cnt..")")
+    end
+    add("")
+
+    -- ReplicatedStorage топ
+    add("--- REPLICATEDSTORAGE TOP ("..#ReplicatedStorage:GetChildren()..") ---")
+    for _,c in ipairs(ReplicatedStorage:GetChildren()) do
+        local cnt = 0
+        pcall(function() cnt = #c:GetChildren() end)
+        add("["..c.ClassName.."] "..c.Name.." (children: "..cnt..")")
+    end
+
+    return table.concat(L, "\n")
+end
+
+--// 2. REMOTES - все RemoteEvent/Function (нужны для килла/фарма)
+local function buildRemotes()
+    local L = {"=== REMOTES DUMP ===", "PlaceId: "..tostring(game.PlaceId), ""}
+    local count = {RemoteEvent=0, RemoteFunction=0, BindableEvent=0, BindableFunction=0}
+    for _,svc in ipairs({game, Workspace, ReplicatedStorage, StarterGui, Teams, Lighting, Players}) do
+        local svcName = "game"
+        pcall(function() svcName = svc:GetFullName() end)
+        table.insert(L, "--- Service: "..svcName.." ---")
+        for _,d in ipairs(svc:GetDescendants()) do
+            if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("BindableEvent") or d:IsA("BindableFunction") then
+                count[d.ClassName] = (count[d.ClassName] or 0) + 1
+                table.insert(L, "["..d.ClassName.."] "..fullPath(d)..attrsToStr(d))
+            end
+        end
+    end
+    table.insert(L, "")
+    table.insert(L, "TOTAL: RemoteEvent="..(count.RemoteEvent or 0).." RemoteFunction="..(count.RemoteFunction or 0).." BindableEvent="..(count.BindableEvent or 0).." BindableFunction="..(count.BindableFunction or 0))
+    return table.concat(L, "\n")
+end
+
+--// 3. TOOLS
+local function buildTools()
+    local L = {"=== TOOLS / WEAPONS ===", ""}
+    for _,svc in ipairs({ReplicatedStorage, Workspace, StarterGui, LocalPlayer:FindFirstChild("Backpack") or ReplicatedStorage, LocalPlayer.Character or Workspace}) do
+        local ok, name = pcall(function() return svc:GetFullName() end)
+        table.insert(L, "--- "..(ok and name or "?").." ---")
+        local n = 0
+        for _,d in ipairs(svc:GetDescendants()) do
+            if d:IsA("Tool") or d:IsA("HopperBin") then
+                n = n + 1
+                if n < 300 then
+                    table.insert(L, "[Tool] "..fullPath(d).." | RequiresHandle="..tostring(d.RequiresHandle))
+                end
+            end
+        end
+        table.insert(L, "Found tools: "..n)
+        table.insert(L, "")
+    end
+    return table.concat(L, "\n")
+end
+
+--// 4. FULL TREE с лимитом
+local treeLines = {}
+local function dumpNode(inst, depth)
+    if depth > MAX_DEPTH then return end
+    local children = {}
+    pcall(function() children = inst:GetChildren() end)
+    local total = #children
+    local shown = math.min(total, MAX_CHILD_PER_NODE)
+    for i=1, shown do
+        local c = children[i]
+        local indent = string.rep("  ", depth)
+        local line = indent.."- ["..c.ClassName.."] "..c.Name..attrsToStr(c)
+        -- значения для ValueBase / Text
+        pcall(function()
+            if c:IsA("ValueBase") then line = line.." = "..tostring(c.Value)
+            elseif c:IsA("TextLabel") or c:IsA("TextButton") or c:IsA("TextBox") then
+                local t = tostring(c.Text or "")
+                if #t > 0 then line = line.." Text='"..t:sub(1,60).."' " end
+            end
+        end)
+        table.insert(treeLines, line)
+        if SCAN_DELAY and depth >= 3 then task.wait() end
+        -- рекурсия
+        dumpNode(c, depth+1)
+    end
+    if total > shown then
+        table.insert(treeLines, string.rep("  ", depth).."... (+"..(total-shown).." more in "..inst.Name..")")
+    end
+end
+
+local function buildTree()
+    treeLines = {"=== FULL TREE (depth="..MAX_DEPTH..", limit="..MAX_CHILD_PER_NODE.."/node) ===", "PlaceId: "..tostring(game.PlaceId), ""}
+    for _,svcName in ipairs({"Workspace","Players","Lighting","MaterialService","ReplicatedFirst","ReplicatedStorage","ServerStorage","StarterGui","StarterPack","StarterPlayer","Teams","SoundService","Chat"}) do
+        local svc = nil
+        pcall(function() svc = game:GetService(svcName) end)
+        if svc then
+            table.insert(treeLines, "")
+            table.insert(treeLines, "== "..svcName.." ==")
+            dumpNode(svc, 1)
+        end
+    end
+    -- PlayerGui отдельно (там таймер режима)
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then
+            table.insert(treeLines, "")
+            table.insert(treeLines, "== PlayerGui ("..LocalPlayer.Name..") ==")
+            dumpNode(pg, 1)
+        end
+    end)
+    return table.concat(treeLines, "\n")
+end
+
+--// ЗАПУСК
+print("[Scanner] Старт...")
+game.StarterGui:SetCore("SendNotification", {Title="Scanner", Text="Сканирую... 10-15 сек", Duration=3})
+
+local ok1, summary = pcall(buildSummary)
+if ok1 then safeWrite(FOLDER.."/summary.txt", summary) print("[Scanner] summary.txt OK ("..#summary.." bytes)") else warn("[Scanner] summary fail: "..tostring(summary)) end
+task.wait(0.5)
+
+local ok2, rem = pcall(buildRemotes)
+if ok2 then safeWrite(FOLDER.."/remotes.txt", rem) print("[Scanner] remotes.txt OK") else warn("[Scanner] remotes fail") end
+task.wait(0.5)
+
+local ok3, tools = pcall(buildTools)
+if ok3 then safeWrite(FOLDER.."/tools.txt", tools) print("[Scanner] tools.txt OK") else warn("[Scanner] tools fail") end
+task.wait(0.5)
+
+local ok4, tree = pcall(buildTree)
+if ok4 then safeWrite(FOLDER.."/full_tree.txt", tree) print("[Scanner] full_tree.txt OK ("..#tree.." bytes)") else warn("[Scanner] tree fail: "..tostring(tree)) end
+
+-- индекс файл
+safeWrite(FOLDER.."/_where_are_files.txt", "Файлы тут: Delta Executor > Files / Workspace / "..FOLDER.."/\nОткрой summary.txt, remotes.txt, tools.txt, full_tree.txt и скинь сюда.")
+
+--// ЭМУЛЯТОР: автопоказ + копипаста без копания в папках
+-- На эмуляторе (BlueStacks/LDPlayer/MuMu) файлы лежат внутри Android:
+-- /storage/emulated/0/Delta/Workspace/Area51_Dump/
+-- Чтобы не искать их, показываем GUI с текстом + копируем в буфер обмена
+pcall(function()
+    if setclipboard and ok1 and summary then
+        setclipboard(summary:sub(1, 50000)) -- буфер режет длинные, поэтому первые 50к
+        print("[Scanner] summary скопирован в буфер обмена (Ctrl+V в Discord/блокнот)")
+    end
 end)
 
--- Запуск Infectious Smile в отдельном потоке
-task.spawn(function()
-    pcall(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/Justaverageguym/Hub/main/Scripts/Infectious%20smile.lua"))()
+pcall(function()
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ScannerViewer"
+    gui.ResetOnSpawn = false
+    pcall(function() gui.Parent = game.CoreGui end)
+    if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 500, 0, 400)
+    frame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    frame.BackgroundColor3 = Color3.fromRGB(15,15,20)
+    frame.Active = true
+    frame.Draggable = true
+    frame.Parent = gui
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0,8)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1,0,0,30)
+    title.BackgroundColor3 = Color3.fromRGB(0,150,0)
+    title.Text = "SCANNER ГОТОВ - выдели и Ctrl+C"
+    title.TextColor3 = Color3.new(1,1,1)
+    title.TextScaled = true
+    title.Font = Enum.Font.GothamBold
+    title.Parent = frame
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1,-10,1,-80)
+    box.Position = UDim2.new(0,5,0,35)
+    box.MultiLine = true
+    box.ClearTextOnFocus = false
+    box.TextWrapped = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.TextYAlignment = Enum.TextYAlignment.Top
+    box.Font = Enum.Font.Code
+    box.TextSize = 12
+    box.TextColor3 = Color3.new(1,1,1)
+    box.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    box.Text = (ok1 and summary or "summary fail") .. "\n\n--- REMOTES (первые 200 строк) ---\n" .. ((ok2 and rem or ""):sub(1,8000))
+    box.Parent = frame
+
+    local btnCopy = Instance.new("TextButton")
+    btnCopy.Size = UDim2.new(0.5,-7,0,35)
+    btnCopy.Position = UDim2.new(0,5,1,-40)
+    btnCopy.BackgroundColor3 = Color3.fromRGB(0,90,180)
+    btnCopy.Text = "COPY SUMMARY"
+    btnCopy.TextColor3 = Color3.new(1,1,1)
+    btnCopy.TextScaled = true
+    btnCopy.Parent = frame
+    btnCopy.MouseButton1Click:Connect(function()
+        if setclipboard then setclipboard(summary) end
+        btnCopy.Text = "СКОПИРОВАНО!"
     end)
+
+    local btnClose = Instance.new("TextButton")
+    btnClose.Size = UDim2.new(0.5,-7,0,35)
+    btnClose.Position = UDim2.new(0.5,2,1,-40)
+    btnClose.BackgroundColor3 = Color3.fromRGB(170,0,0)
+    btnClose.Text = "ЗАКРЫТЬ"
+    btnClose.TextColor3 = Color3.new(1,1,1)
+    btnClose.TextScaled = true
+    btnClose.Parent = frame
+    btnClose.MouseButton1Click:Connect(function() gui:Destroy() end)
 end)
+
+game.StarterGui:SetCore("SendNotification", {Title="Scanner ✅", Text="Готово! Папка "..FOLDER, Duration=5})
+print("[Scanner] ГОТОВО. Папка: "..FOLDER.." | Скинь файлы сюда для точного скрипта.")
