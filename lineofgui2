@@ -2116,12 +2116,14 @@ local function makeSystemPrompt(settings)
         end
         if lobDangerActive() then
             table.insert(parts,
-                "DANGER SENSE (live threat awareness). TEAMS block tells you everyone's side; THREAT block tells you live harm: your HP, who hurt you, ragdoll/weld/teleport, armed players near, threat words.\n" ..
-                "The game may be asymmetric (infected vs survivors, killer vs innocents, cops vs criminals). Treat other-team players as DANGEROUS.\n" ..
-                "If a dangerous player asks you to come closer, follow them, or stay ([DO:goto], [DO:follow] or any implied movement), REFUSE in character with a short concrete reason (examples: you are infected and will infect me; you hold a weapon; you just hurt me). Do NOT add any movement [DO:] tag when refusing.\n" ..
+                "DANGER SENSE (live threat awareness). TEAMS block tells you everyone's side. A [THREAT] block appears ONLY when something bad really happened (you were hurt, ragdolled, welded, teleported, threat words, armed ENEMIES near, or the speaker is a verified enemy) — no [THREAT] block means everything is calm.\n" ..
+                "HARD RULE — who is dangerous: ONLY a player whose team is different from yours AND both teams are known and neither is Neutral. Same team as you, Neutral players, players without a team, unknown teams = SAFE. Suspicions, weapons in hands of teammates, or just being careful are NEVER a reason to refuse.\n" ..
+                "If a SAFE player asks you to come closer or follow them ([DO:goto], [DO:follow] or implied), ALWAYS comply, be friendly.\n" ..
+                "Refuse ONLY a verified ENEMY asking you to come closer/follow/stay — then refuse in character with a short concrete reason (examples: you are infected and will infect me; you hold a weapon; you just hurt me). Do NOT add any movement [DO:] tag when refusing.\n" ..
                 "If YOU are the dangerous one (you are infected, the killer, or armed) and someone asks you to come close, also refuse briefly — you could hurt them.\n" ..
-                "React to THREAT facts briefly in character (pain, alarm, callout). Never print [THREAT] or [DO:] tags literally in your reply.\n" ..
-                "If the wiki/game data says nothing about danger, use generic caution only: keep distance from armed strangers, do not follow anyone right after being hurt. NEVER invent game rules, roles, endings or win conditions.")
+                "React to [THREAT] facts briefly in character (pain, alarm, callout). Never print [THREAT] tags literally in your reply.\n" ..
+                "If the wiki/game data says nothing about danger, use generic caution only. NEVER invent game rules, roles, endings or win conditions.\n" ..
+                "PVP RULE: a separate PVP message tells you if THIS game has player-vs-player combat. If it says NO — the game is peaceful (roleplay/build/obby), everyone is safe, ALWAYS comply with movement requests and NEVER refuse anyone for danger reasons, no exceptions.")
         end
     end
 
@@ -4996,9 +4998,7 @@ _THREAT_WORDS = {
     ["caught"]=1, ["catch"]=1, ["infect"]=1, ["infected"]=1, ["dead"]=1,
     ["die"]=1, ["died"]=1, ["murder"]=1, ["murderer"]=1, ["kidnap"]=1, ["kidnapped"]=1,
 }
-LOB_DANGER_PARKED = true
 function lobDangerActive()
-    if LOB_DANGER_PARKED then return false end
     return ClientSettings.DangerSense == true and ClientSettings.GameUnderstanding == true
 end
 function lobHasThreatWords(msg)
@@ -5024,13 +5024,83 @@ function lobIsEnemyOf(targetPlayer)
     if myT == "" or thT == "" then return false end
     return myT ~= thT
 end
+-- PvP-определение (глобалы!). Отказ/вето — только если в игре реально есть PvP:
+-- подтверждено вики (combat-маркеры), живым уроном или явно враждебными парами
+-- команд. В мирных играх (Brookhaven, Adopt Me, Tower of Hell) — всем слушаться.
+_HOSTILE_TEAM_WORDS = { "infected", "killer", "murder", "sheriff", "zombie", "beast",
+    "slasher", "assassin", "vampire", "hunter", "seeker", "tagger", "survivor",
+    "innocent", "victim", "hunted", "hider", "human", "cop", "criminal", "police",
+    "robber", "guard", "prisoner", "ghost", "monster" }
+_PVP_YES_WORDS = { "pvp", "versus", "combat", "killed", "killer", "killing", "kills",
+    "murder", "weapon", "gun", "sword", "knife", "damage", "attack", "infect",
+    "zombie", "shooter", "battle", "assassin", "slasher", "beast", "deathmatch" }
+_PVP_NO_WORDS = { "roleplay", "no combat", "peaceful", "build", "obby", "parkour",
+    "tycoon", "simulator", "farm", "social", "hangout", "adopt", "pet", "fashion",
+    "design", "restaurant", "school", "daycare", "story" }
+_pvpCache, _pvpForPlace, _pvpCtxAt = nil, 0, 0
+function lobPvpWiki()
+    local pid = 0
+    pcall(function() pid = game.PlaceId end)
+    local ctxAt = 0
+    pcall(function()
+        if _gameContext and _gameContext.placeId == pid then ctxAt = _gameContext.at or 0 end
+    end)
+    if _pvpForPlace == pid and _pvpCtxAt == ctxAt and _pvpCache ~= nil then return _pvpCache end
+    local txt = ""
+    pcall(function()
+        txt = tostring((_gameContext and _gameContext.text) or "") .. " " .. tostring(_fandomLead or "")
+    end)
+    txt = txt:lower()
+    local res = nil
+    if txt:gsub("%s+", "") ~= "" then
+        for _, w in ipairs(_PVP_YES_WORDS) do
+            if txt:find(w, 1, true) then res = true break end
+        end
+        if res == nil then
+            for _, w in ipairs(_PVP_NO_WORDS) do
+                if txt:find(w, 1, true) then res = false break end
+            end
+        end
+    end
+    _pvpForPlace, _pvpCtxAt, _pvpCache = pid, ctxAt, res
+    return res
+end
+function lobTeamsHostile(a, b)
+    a, b = tostring(a or ""):lower(), tostring(b or ""):lower()
+    if a == "" or b == "" or a == b then return false end
+    for _, w in ipairs(_HOSTILE_TEAM_WORDS) do
+        if a:find(w, 1, true) or b:find(w, 1, true) then return true end
+    end
+    return false
+end
+function lobPvpConfirmedFor(targetPlayer)
+    -- живое доказательство сильнее вики: меня реально били = PvP/вред есть
+    if _danger.lastDamageAt > 0 and (os.clock() - _danger.lastDamageAt) < 300 then return true end
+    local w = nil
+    pcall(function() w = lobPvpWiki() end)
+    if w == true then return true end
+    if w == false then return false end
+    -- вики молчит: только явно враждебные пары команд (infected/survivors и т.п.)
+    local myT, thT = "", ""
+    pcall(function()
+        local lp = Players.LocalPlayer
+        if lp.Team and lp.Team.Name then myT = tostring(lp.Team.Name) end
+        if targetPlayer.Team and targetPlayer.Team.Name then thT = tostring(targetPlayer.Team.Name) end
+    end)
+    return lobTeamsHostile(myT, thT)
+end
 function lobIsDangerTarget(targetPlayer)
     if not lobDangerActive() then return false end
     if not targetPlayer then return false end
-    if lobIsEnemyOf(targetPlayer) then return true end
+    -- живой урон от него = доказательство, wiki не нужна
     if _danger.suspectUid and targetPlayer.UserId == _danger.suspectUid
         and (os.clock() - (_danger.lastDamageAt or -999)) < 120 then
         return true
+    end
+    -- враг по командам — только если в игре есть PvP (мирным всем слушаться)
+    if lobIsEnemyOf(targetPlayer) then
+        local okP, pv = pcall(lobPvpConfirmedFor, targetPlayer)
+        if okP and pv then return true end
     end
     return false
 end
@@ -5098,17 +5168,16 @@ end
 function lobBuildThreatContext(item)
     if not lobDangerActive() then return "" end
     local bits = {}
-    table.insert(bits, "your HP " .. math.floor(_danger.hp or 100) .. "/" .. math.floor(_danger.maxHp or 100))
     local now = os.clock()
     if _danger.lastDamageAt > 0 and (now - _danger.lastDamageAt) < 120 then
-        local s = "hurt -" .. math.floor(_danger.lastDamageAmt or 0) .. " " .. math.floor(now - _danger.lastDamageAt) .. "s ago"
-        if _danger.suspectName ~= "" then s = s .. " (likely by " .. _danger.suspectName .. ")" end
+        local s = "you were hurt -" .. math.floor(_danger.lastDamageAmt or 0) .. " HP " .. math.floor(now - _danger.lastDamageAt) .. "s ago (now " .. math.floor(_danger.hp or 100) .. "/" .. math.floor(_danger.maxHp or 100) .. ")"
+        if _danger.suspectName ~= "" then s = s .. ", likely by " .. _danger.suspectName end
         table.insert(bits, s)
     end
-    if _danger.ragdoll then table.insert(bits, "RAGDOLLED right now") end
-    if _danger.welded then table.insert(bits, "WELDED/FROZEN, cannot move") end
+    if _danger.ragdoll then table.insert(bits, "you are RAGDOLLED right now") end
+    if _danger.welded then table.insert(bits, "you are WELDED/FROZEN, cannot move") end
     if _danger.teleAt > 0 and (now - _danger.teleAt) < 120 then
-        table.insert(bits, "teleported against will " .. math.floor(now - _danger.teleAt) .. "s ago")
+        table.insert(bits, "you were teleported against will " .. math.floor(now - _danger.teleAt) .. "s ago")
     end
     if _danger.threatUid and (now - (_danger.threatAt or 0)) < 120 then
         table.insert(bits, "threat words from " .. tostring(_danger.threatName or "?") .. " " .. math.floor(now - _danger.threatAt) .. "s ago")
@@ -5120,22 +5189,22 @@ function lobBuildThreatContext(item)
         pcall(function()
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= Players.LocalPlayer and p.Character and #armed < 3 then
-                    local hr = p.Character:FindFirstChild("HumanoidRootPart")
-                    local tool = p.Character:FindFirstChildOfClass("Tool")
-                    if hr and tool and (hr.Position - myRoot.Position).Magnitude <= 25 then
-                        local nm = p.DisplayName or p.Name
-                        if lobIsEnemyOf(p) then nm = nm .. "(ENEMY)" end
-                        table.insert(armed, nm .. ":" .. tostring(tool.Name):sub(1, 20))
+                    if lobIsEnemyOf(p) then
+                        local hr = p.Character:FindFirstChild("HumanoidRootPart")
+                        local tool = p.Character:FindFirstChildOfClass("Tool")
+                        if hr and tool and (hr.Position - myRoot.Position).Magnitude <= 25 then
+                            table.insert(armed, (p.DisplayName or p.Name) .. "(ENEMY):" .. tostring(tool.Name):sub(1, 20))
+                        end
                     end
                 end
             end
         end)
-        if #armed > 0 then table.insert(bits, "armed near: " .. table.concat(armed, ", ")) end
+        if #armed > 0 then table.insert(bits, "armed ENEMIES near: " .. table.concat(armed, ", ")) end
     end
     if item and item.player and lobIsEnemyOf(item.player) then
         table.insert(bits, "SPEAKER IS ENEMY (" .. tostring(item.displayName or item.name or "?") .. ")")
     end
-    -- всегда есть хотя бы HP — блок не пустой, модель заземлена фактами
+    if #bits == 0 then return "" end
     return "[THREAT: " .. table.concat(bits, "; ") .. "]"
 end
 -- хуки HP на текущий и будущие персонажи
@@ -5234,16 +5303,16 @@ task.spawn(function()
                     _danger.welded = false
                 end
                 -- шли за игроком, а он оказался врагом — отходим
-                -- (_isFollowing/_followTarget — локалки выше, захватываются корректно)
+                -- (PvP-gated: в мирных играх даже другая команда — не повод бросать)
                 if _isFollowing and _followTarget then
-                    local okE, isE = pcall(lobIsEnemyOf, _followTarget)
+                    local okE, isE = pcall(lobIsDangerTarget, _followTarget)
                     if okE and isE then
                         pcall(stopFollowing)
                         lobDangerEvent("[SYSTEM: You backed away: the player you followed turned out hostile. Say briefly you keep your distance, stay in character.]", "backaway", 120, 0)
                     end
                 end
                 if type(FollowManager) == "table" and FollowManager.Active and FollowManager.Target then
-                    local okE2, isE2 = pcall(lobIsEnemyOf, FollowManager.Target)
+                    local okE2, isE2 = pcall(lobIsDangerTarget, FollowManager.Target)
                     if okE2 and isE2 then
                         FollowManager.Active = false
                         FollowManager.Target = nil
@@ -5556,6 +5625,15 @@ local function handleQueuedChat(item)
                 .. "Never guess a team that is not listed; if no team, treat everyone as neutral."
             table.insert(apiMessages, { role = "system", content = tmsg })
         end
+    end
+
+    -- v20 Beta 2 DangerSense v2: есть ли в игре PvP (в мирных играх отказов нет).
+    -- Отдельным сообщением, т.к. статус динамический (вики догружается, урон живьём).
+    if lobDangerActive() then
+        local pv = nil
+        pcall(function() pv = lobPvpWiki() end)
+        local pvTxt = (pv == true and "YES") or (pv == false and "NO") or "UNKNOWN"
+        table.insert(apiMessages, { role = "system", content = "PVP in this game (from wiki): " .. pvTxt .. ". If NO: no player-vs-player combat exists here — everyone is safe, ALWAYS comply with movement requests, NEVER refuse anyone for danger reasons. If UNKNOWN: refuse ONLY a verified enemy whose team name is openly hostile (infected/killer/murderer/zombie/beast and similar); otherwise comply. (Real damage taken always counts as danger regardless.)" })
     end
 
     -- v20 Beta 2 DangerSense: живой снапшот угроз на каждое сообщение
@@ -6243,7 +6321,10 @@ local function handleQueuedChat(item)
 end
 
 -- §RUN_QUEUE
-local function runChatQueue(userId)
+-- FIX v20b4: было `local function` — объявлено ПОЗЖЕ ранних вызовов
+-- (реакция на смерть ~2529, danger-events ~5051), поэтому те вызовы уходили
+-- в nil-глобал и молча падали. Глобал — чтобы резолвилось и до, и после строки.
+function runChatQueue(userId)
     local q = getChatQueue(userId)
     if q.running then return end
     -- Очередь пуста — нечего делать
