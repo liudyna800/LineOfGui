@@ -6091,9 +6091,7 @@ local function handleQueuedChat(item)
             waited = waited + 0.5
         end
         if not done then
-            if ClientSettings.Debug then
-                print("[LOB] timeout after " .. timeoutSec .. "s for model: " .. model)
-            end
+            print("[LOB] timeout after " .. timeoutSec .. "s for model: " .. model)
             return
         end
     end
@@ -6511,6 +6509,10 @@ function runChatQueue(userId)
         if not ran_ok then
             print("[LOB] runChatQueue panic: " .. tostring(ran_err))
         end
+        -- если за время обработки пришли новые сообщения — запускаемся заново
+        if q.head <= q.tail then
+            pcall(runChatQueue, userId)
+        end
     end)
 end
 
@@ -6524,12 +6526,11 @@ task.spawn(function()
         local now = os.clock()
         for uid, q in pairs(ChatQueue) do
             if q.running and q.startedAt and q.startedAt > 0 then
-                if (now - q.startedAt) > 45 then
+                if (now - q.startedAt) > 20 then
                     print("[LOB] watchdog: reset stuck queue for " .. tostring(uid))
                     q.running = false
                     q.startedAt = 0
-                    -- Очищаем очередь чтобы не накапливались устаревшие сообщения
-                    q.head = 1; q.tail = 0; q.items = {}
+                    -- НЕ чистим items — иначе теряем ещё не отвеченные сообщения
                 end
             end
         end
