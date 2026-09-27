@@ -2149,7 +2149,7 @@ local function makeSystemPrompt(settings)
     -- ── 7. WORLD EVENTS ──────────────────────────────────────────────────
     if settings.WorldReactions then
         table.insert(parts,
-            "WORLD EVENTS: Messages starting with [SYSTEM: ...] are automatic game events (not from players). React briefly in 1 sentence, stay in character. Never print [SYSTEM: in your reply.")
+                "WORLD EVENTS: Messages starting with [SYSTEM: ...] are automatic game events (not from players). React in ONE short casual sentence, stay in character, and VARY your wording — never reuse the same opener (e.g. 'Haha') from your previous reactions. Do not comment on anyone's face, smile or appearance. Never print [SYSTEM: in your reply.")
     end
 
     -- ── 8. ВЕБ-ПОИСК ─────────────────────────────────────────────────────
@@ -6628,11 +6628,13 @@ local function _watchPlayerDeath(p)
         -- Проверяем радиус по lastPos (т.к. char уже может быть уничтожен)
         local myChar = Players.LocalPlayer.Character
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if myRoot and lastPos then
-            local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
-            if (lastPos - myRoot.Position).Magnitude > radius then return end
-        end
-        -- cooldown не применяем для смерти — это важное событие
+        -- FIX v20 Beta 3: без myRoot/lastPos радиус проверить нельзя — НЕ реагируем.
+        -- Раньше проверка пропускалась и бот откликался на смерть в ЛЮБОЙ точке карты.
+        if not myRoot or not lastPos then return end
+        local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
+        if (lastPos - myRoot.Position).Magnitude > radius then return end
+        -- FIX: смерть тоже через общий gate (глобальный + пер-игрок кулдаун) — без спама
+        if not _canWorldReact(uid, "death") then return end
         local name = p.DisplayName or p.Name
         local msg = "[SYSTEM: Player "..name.." just died near you. React in 1 short sentence, stay in character.]"
         local fakeId = uid + 10000000
