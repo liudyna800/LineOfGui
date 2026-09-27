@@ -2116,13 +2116,13 @@ local function makeSystemPrompt(settings)
         end
         if lobDangerActive() then
             table.insert(parts,
-                "DANGER SENSE (live threat awareness). TEAMS block tells you everyone's side. A [THREAT] block appears ONLY when something bad really happened (you were hurt, ragdolled, welded, teleported, threat words, armed ENEMIES near, or the speaker is a verified enemy) — no [THREAT] block means everything is calm.\n" ..
+                "DANGER SENSE (live threat awareness). TEAMS block tells you everyone's side. A THREAT REPORT appears ONLY when something bad really happened (you were hurt, ragdolled, welded, teleported, threat words, armed ENEMIES near, or the speaker is a verified enemy) — no THREAT REPORT means everything is calm.\n" ..
                 "HARD RULE — who is dangerous: ONLY a player whose team is different from yours AND both teams are known and neither is Neutral. Same team as you, Neutral players, players without a team, unknown teams = SAFE. Suspicions, weapons in hands of teammates, or just being careful are NEVER a reason to refuse.\n" ..
                 "If a SAFE player asks you to come closer or follow them ([DO:goto], [DO:follow] or implied), ALWAYS comply, be friendly.\n" ..
                 "Refuse ONLY a verified ENEMY asking you to come closer/follow/stay — then refuse in character with a short reason built from the CURRENT TEAMS line (name their ACTUAL role vs yours). NEVER reuse a canned sentence and NEVER repeat a reason from an earlier message. Do NOT add any movement [DO:] tag when refusing.\n" ..
                 "ROLES ARE DYNAMIC: players get infected / switch sides / respawn mid-match. The TEAMS line sent with this message is the ONLY source of truth for who is what RIGHT NOW. If your role or the speaker's role is different from anything said earlier in the chat, the TEAMS line WINS — update immediately and do not repeat your old claim.\n" ..
                 "If YOU are the dangerous one right now (the TEAMS line shows YOUR team is the hostile/infected/killer side) and someone asks you to come close, refuse briefly because YOU could harm THEM — never claim the other player is the dangerous one when the line says it is you.\n" ..
-                "React to [THREAT] facts briefly in character (pain, alarm, callout). Never print [THREAT] tags literally in your reply.\n" ..
+                "React to THREAT REPORT facts briefly in character (pain, alarm, callout). Never mention or copy the words THREAT REPORT or its internal fields into your reply.\n" ..
                 "If the wiki/game data says nothing about danger, use generic caution only. NEVER invent game rules, roles, endings or win conditions.\n" ..
                 "PVP RULE: a separate PVP message tells you if THIS game has player-vs-player combat. If it says NO — the game is peaceful (roleplay/build/obby), everyone is safe, ALWAYS comply with movement requests and NEVER refuse anyone for danger reasons, no exceptions.")
         end
@@ -2364,6 +2364,19 @@ local function sendChatChecked(text)
     return ok, ferr
 end
 
+-- v20b4: единая зачистка служебных тегов, которые модель иногда копирует в чат.
+-- Ловит и закрытые [TAG: ...], и «голые» префиксы [THREAT / [NEARBY / [PVP / [TEAMS.
+function lobStripServiceTags(text)
+    if type(text) ~= "string" then return text end
+    text = text:gsub("%[%s*THREAT%s*:?%s*%]?", "")
+    text = text:gsub("%[%s*NEARBY%s*:?%s*%]?", "")
+    text = text:gsub("%[%s*PVP%s*:?%s*%]?", "")
+    text = text:gsub("%[%s*TEAMS%s*:?%s*%]?", "")
+    text = text:gsub("%]%s*$", "")        -- хвостовой ] от обёртки [THREAT: ...]
+    text = text:gsub("%s+", " ")
+    return (text:match("^%s*(.-)%s*$") or text)
+end
+
 local function sendBotMessage(text)
     if type(text) ~= "string" or text == "" then return end
     -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
@@ -2381,6 +2394,8 @@ local function sendBotMessage(text)
     text = text:gsub("%[LANG:[%w_]*%s*", "")
     text = text:gsub("%[NAME:[^%s%]]*%s*", "")
     text = text:gsub("%[SYSTEM:[^%]]*", "")
+    -- v20b4: THREAT/NEARBY/PVP/TEAMS — модель копирует служебные блоки в чат
+    text = lobStripServiceTags(text)
     -- Шаг 3: одиночные [ или ] которые остались — убираем
     text = text:gsub("%[%s*%]", "")       -- пустые []
     text = text:gsub("%[%s*$", "")        -- [ в конце строки
@@ -5206,7 +5221,7 @@ function lobBuildThreatContext(item)
         table.insert(bits, "SPEAKER IS ENEMY (" .. tostring(item.displayName or item.name or "?") .. ")")
     end
     if #bits == 0 then return "" end
-    return "[THREAT: " .. table.concat(bits, "; ") .. "]"
+    return "THREAT REPORT (internal data — never copy this label or these fields into your reply, just react in character): " .. table.concat(bits, "; ")
 end
 -- хуки HP на текущий и будущие персонажи
 Players.LocalPlayer.CharacterAdded:Connect(function(char)
@@ -5980,6 +5995,7 @@ local function handleQueuedChat(item)
     text = text:gsub("<think>.-</think>%s*", "")
     text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
     text = text:match("^%s*(.-)%s*$") or text
+    text = lobStripServiceTags(text)
     text = sanitizeUtf8(text) -- битые байты из ответа модели (иначе JSONEncodeFailed на след. запросе)
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
@@ -13512,6 +13528,7 @@ local function ctDoSend()
             text = text:gsub("<think>.-</think>%s*", "")
             text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
             text = text:match("^%s*(.-)%s*$") or text
+            text = lobStripServiceTags(text)
             text = sanitizeUtf8(text) -- иначе битый байт убьёт все следующие запросы
         end
         if text and text ~= "" and settings.MemoryEnabled then
