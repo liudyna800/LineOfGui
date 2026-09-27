@@ -4936,14 +4936,31 @@ end
 -- v20 Beta 2: team of a player (universal, works in any game with Teams)
 function getTeamName(p)
     if not p then return "" end
-    local ok, res = pcall(function()
-        if p.Neutral then return "Neutral" end
+    local res = ""
+    pcall(function()
+        if p.Neutral then res = "Neutral" return end
         local t = p.Team
-        if t and t.Name then return tostring(t.Name) end
-        return ""
+        if t and t.Name then res = tostring(t.Name) end
     end)
-    if ok and res and res ~= "" then return res end
-    return ""
+    if res ~= "" then return res end
+    -- v20b4: игра может хранить роль не в Player.Team, а в атрибутах
+    pcall(function()
+        for _, a in ipairs({"Team","Role","Side","Faction","team","role","side","faction"}) do
+            local v = p:GetAttribute(a)
+            if type(v) == "string" and v ~= "" then res = v return end
+        end
+    end)
+    if res ~= "" then return res end
+    pcall(function()
+        local ch = p.Character
+        if ch then
+            for _, a in ipairs({"Team","Role","Side","Faction"}) do
+                local v = ch:GetAttribute(a)
+                if type(v) == "string" and v ~= "" then res = v return end
+            end
+        end
+    end)
+    return res
 end
 
 local function buildPlayerAwarenessContext(settings)
@@ -5086,6 +5103,19 @@ function lobTeamsHostile(a, b)
     if a == "" or b == "" or a == b then return false end
     for _, w in ipairs(_HOSTILE_TEAM_WORDS) do
         if a:find(w, 1, true) or b:find(w, 1, true) then return true end
+    end
+    return false
+end
+-- v20b4: слова АГРЕССОРА (кто заражает/убивает), чтобы вердикт не путал стороны.
+-- survivor/innocent/human/guard сюда НЕ входят — это мирная сторона.
+_AGGRO_TEAM_WORDS = { "infect", "smil", "zombie", "killer", "murder", "slasher",
+    "vampire", "beast", "monster", "ghost", "assassin", "hunter", "seeker",
+    "tagger", "werewolf", "predator", "mutant", "maniac" }
+function lobTeamLooksAggro(t)
+    t = tostring(t or ""):lower()
+    if t == "" then return false end
+    for _, w in ipairs(_AGGRO_TEAM_WORDS) do
+        if t:find(w, 1, true) then return true end
     end
     return false
 end
@@ -5663,10 +5693,22 @@ local function handleQueuedChat(item)
             local isDanger = false
             pcall(function() isDanger = lobIsDangerTarget(item.player) end)
             local spName = tostring(item.displayName or item.name or "?")
+            local myT = (myTeam ~= "" and myTeam) or "no team"
+            local spT = (speakerTeam ~= "" and speakerTeam) or "no team"
+            local meAggro = lobTeamLooksAggro(myTeam)
+            local spAggro = lobTeamLooksAggro(speakerTeam)
             if isDanger then
-                table.insert(apiMessages, { role = "system", content = "MANDATORY VERDICT (authoritative — overrides memory and your own judgement): " .. spName .. " IS a verified ENEMY/hostile to YOU right now. If they ask you to come, follow or stay — REFUSE in character in ONE short sentence and add NO movement [DO:] tag. Do NOT print this verdict text." })
-            elseif (speakerTeam ~= "" or myTeam ~= "") then
-                table.insert(apiMessages, { role = "system", content = "MANDATORY VERDICT (authoritative — overrides memory and your own judgement): " .. spName .. " is SAFE for you right now (same team, or no team). You MUST agree and comply if they ask you to come or follow. Do NOT refuse and do NOT call them infected/enemy. Any earlier message where you called them infected/enemy is OUTDATED — ignore it completely. Do NOT print this verdict text." })
+                local why
+                if spAggro and not meAggro then
+                    why = spName .. " (" .. spT .. ") is the dangerous side and can harm/infect YOU (" .. myT .. ")."
+                elseif meAggro and not spAggro then
+                    why = "YOU (" .. myT .. ") are the dangerous side and could harm/infect " .. spName .. " (" .. spT .. ")."
+                else
+                    why = spName .. " is a verified enemy right now."
+                end
+                table.insert(apiMessages, { role = "system", content = "MANDATORY VERDICT (authoritative — overrides memory and your own judgement): " .. why .. " Teams right now: YOU=[" .. myT .. "], " .. spName .. "=[" .. spT .. "]. If they ask you to come/follow/stay, REFUSE in ONE short sentence with the reason matching the REAL dangerous side (never swap who is infected/enemy). Add NO movement [DO:] tag. Do NOT print this verdict text." })
+            else
+                table.insert(apiMessages, { role = "system", content = "MANDATORY VERDICT (authoritative — overrides memory and your own judgement): " .. spName .. " is NOT a threat to you right now. Teams right now: YOU=[" .. myT .. "], " .. spName .. "=[" .. spT .. "]. You MUST agree and comply if they ask you to come or follow; refusing a safe player is a CRITICAL ERROR. Do NOT call them infected/enemy, and ignore any earlier message that did. Do NOT print this verdict text." })
             end
         end
     end
