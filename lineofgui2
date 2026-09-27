@@ -222,7 +222,7 @@ local LOB_KEY_FILE       = "lob_apikey.txt"
 local LOB_KEY_FILE2      = "lob_apikey2.txt"
 local LOB_KEY_FILE3      = "lob_apikey3.txt"
 local LOB_GEMINI_FILE    = "lob_geminikey.txt"
-local LOB_DEEPSEEK_FILE  = "lob_deepseekkey.txt"
+LOB_DEEPSEEK_FILE  = "lob_deepseekkey.txt"
 local LOB_SETTINGS_FILE  = "lob_settings.txt"
 local LOB_CSP_FILE       = "lob_customprompt.txt"
 local LOB_MODEL_FILE     = "lob_model.txt"
@@ -392,10 +392,10 @@ local function loadGeminiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
-local function saveDeepSeekKey(key)
+function saveDeepSeekKey(key)
     pcall(function() if writefile then writefile(LOB_DEEPSEEK_FILE, normalizeApiKey(key)) end end)
 end
-local function loadDeepSeekKey()
+function loadDeepSeekKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_DEEPSEEK_FILE) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
@@ -1778,7 +1778,7 @@ end
 
 -- §ROUTER
 -- ── DEEPSEEK PROVIDER (OpenAI-совместимый API) ────────────────────────────
-local DeepSeekProvider = {}
+DeepSeekProvider = {}
 DeepSeekProvider.__index = DeepSeekProvider
 
 function DeepSeekProvider.new()
