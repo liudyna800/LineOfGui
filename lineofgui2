@@ -2378,7 +2378,6 @@ function lobStripServiceTags(text)
     return (text:match("^%s*(.-)%s*$") or text)
 end
 
-_lastBotSendAt = 0
 local function sendBotMessage(text)
     if type(text) ~= "string" or text == "" then return end
     -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
@@ -2409,15 +2408,8 @@ local function sendBotMessage(text)
     local maxLen = 90
     local function deliver(part, depth)
         depth = depth or 0
-        -- мини-интервал между сообщениями бота (Roblox троттлит частую отправку)
-        local gap = os.clock() - (_lastBotSendAt or 0)
-        if gap < 0.7 then task.wait(0.7 - gap) end
         local ok, err = sendChatChecked(part)
-        if not ok then
-            task.wait(0.6)
-            ok, err = sendChatChecked(part)   -- повторная попытка
-        end
-        if ok then _lastBotSendAt = os.clock() return true end
+        if ok then return true end
         print("[LOB] part fail len=" .. tostring(charLen(part)) .. ": " .. tostring(err):sub(1, 90))
         if depth < 3 and charLen(part) > 40 then
             local halves = splitTextIntoParts(part, math.max(40, math.floor(charLen(part) / 2)))
@@ -6081,12 +6073,11 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    -- Таймаут: Gemini 3.x preview с thinking → 60 сек
-    -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
+    -- Таймаут модели. ВАЖНО: если таймаут — ответ теряется и бот МОЛЧИТ.
+    -- Gemini отвечает медленнее, 20с не хватало → ставим 45с.
     local isGemini = model:find("^gemini")
-    local isGemini3x = model:find("^gemini%-3")
     local isKimi = model:find("kimi") or model:find("moonshotai")
-    local timeoutSec = isGemini3x and 20 or (isGemini and 20 or (isKimi and 15 or 8))
+    local timeoutSec = isGemini and 45 or (isKimi and 20 or 12)
     local text, err
     do
         local done = false
@@ -6100,7 +6091,17 @@ local function handleQueuedChat(item)
             waited = waited + 0.5
         end
         if not done then
-            print("[LOB] timeout after " .. timeoutSec .. "s for model: " .. model)
+            print("[LOB] slow model " .. tostring(model) .. " (> " .. timeoutSec .. "s) — late reply will be sent when ready")
+            -- Не бросаем запрос: дождёмся в фоне и отправим ответ, когда модель ответит
+            task.spawn(function()
+                local waited2 = 0
+                while not done and waited2 < 75 do task.wait(0.5); waited2 = waited2 + 0.5 end
+                if done and type(text) == "string" and text ~= "" then
+                    local clean = lobStripServiceTags(text)
+                    clean = clean:gsub("%[NAME:[^%]]*%]%s*", "")
+                    if clean and clean ~= "" then pcall(sendBotMessage, clean) end
+                end
+            end)
             return
         end
     end
@@ -6535,7 +6536,7 @@ task.spawn(function()
         local now = os.clock()
         for uid, q in pairs(ChatQueue) do
             if q.running and q.startedAt and q.startedAt > 0 then
-                if (now - q.startedAt) > 20 then
+                if (now - q.startedAt) > 90 then
                     print("[LOB] watchdog: reset stuck queue for " .. tostring(uid))
                     q.running = false
                     q.startedAt = 0
