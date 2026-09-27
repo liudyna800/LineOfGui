@@ -6073,11 +6073,10 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    -- Таймаут модели. ВАЖНО: если таймаут — ответ теряется и бот МОЛЧИТ.
-    -- Gemini отвечает медленнее, 20с не хватало → ставим 45с.
+    -- Таймаут модели: 20с (Gemini медленный — отвечает через late-reply, см. ниже)
     local isGemini = model:find("^gemini")
     local isKimi = model:find("kimi") or model:find("moonshotai")
-    local timeoutSec = isGemini and 45 or (isKimi and 20 or 12)
+    local timeoutSec = isGemini and 20 or (isKimi and 15 or 8)
     local text, err
     do
         local done = false
@@ -6536,7 +6535,7 @@ task.spawn(function()
         local now = os.clock()
         for uid, q in pairs(ChatQueue) do
             if q.running and q.startedAt and q.startedAt > 0 then
-                if (now - q.startedAt) > 90 then
+                if (now - q.startedAt) > 45 then
                     print("[LOB] watchdog: reset stuck queue for " .. tostring(uid))
                     q.running = false
                     q.startedAt = 0
