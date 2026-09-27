@@ -5656,6 +5656,19 @@ local function handleQueuedChat(item)
                 .. "Never guess a team that is not listed; if no team, treat everyone as neutral."
             table.insert(apiMessages, { role = "system", content = tmsg })
         end
+
+        -- v20b4: ЖЁСТКИЙ вердикт от кода — модель больше не решает сама "враг/свой"
+        -- (лечит путаницу ролей: "ты заражённый, а я улыбаюсь" и т.п.)
+        if item.player then
+            local isDanger = false
+            pcall(function() isDanger = lobIsDangerTarget(item.player) end)
+            local spName = tostring(item.displayName or item.name or "?")
+            if isDanger then
+                table.insert(apiMessages, { role = "system", content = "MANDATORY VERDICT (authoritative — overrides memory and your own judgement): " .. spName .. " IS a verified ENEMY/hostile to YOU right now. If they ask you to come, follow or stay — REFUSE in character in ONE short sentence and add NO movement [DO:] tag. Do NOT print this verdict text." })
+            elseif (speakerTeam ~= "" or myTeam ~= "") then
+                table.insert(apiMessages, { role = "system", content = "MANDATORY VERDICT (authoritative — overrides memory and your own judgement): " .. spName .. " is SAFE for you right now (same team, or no team). You MUST agree and comply if they ask you to come or follow. Do NOT refuse and do NOT call them infected/enemy. Any earlier message where you called them infected/enemy is OUTDATED — ignore it completely. Do NOT print this verdict text." })
+            end
+        end
     end
 
     -- v20 Beta 2 DangerSense v2: есть ли в игре PvP (в мирных играх отказов нет).
