@@ -2533,18 +2533,9 @@ Players.LocalPlayer.CharacterAdded:Connect(function(char)
     if not hum then return end
     hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
+        -- v20 Beta 3: своя смерть — тоже просто событие в память, без чата
         task.delay(0.5, function()
-            local msgs = {
-                "[SYSTEM: You just died. React to your own death in 1 short sentence, stay in character.]",
-                "[SYSTEM: You were eliminated. Say something short about dying, in character.]",
-            }
-            local fakeId = 0
-            enqueueChatItem(fakeId, {
-                player=nil, userId=fakeId, name="SYSTEM",
-                displayName="SYSTEM", cleaned=msgs[math.random(#msgs)],
-                isWorld=true,
-            })
-            runChatQueue(fakeId)
+            pcall(function() lobRecordWorldEvent("mydro", Players.LocalPlayer.UserId, "you") end)
         end)
     end)
 end)
@@ -5508,6 +5499,48 @@ local function _canWorldReact(userId, reactType)
     end
     return true
 end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v20 Beta 3: МИРОВЫЕ СОБЫТИЯ → ПАМЯТЬ, а не чат.
+-- Бот больше НЕ пишет сам на каждый прыжок/смерть. События копятся в буфер и
+-- отдаются ИИ как контекст только когда игрок сам что-то написал.
+-- ═══════════════════════════════════════════════════════════════════════════
+_worldEvents     = {}        -- { {type=, uid=, name=, t=}, ... }
+_worldEventLast  = {}        -- [uid..type] = os.clock() (антиспам записи)
+_WORLD_EVENT_TTL = 25        -- сколько секунд событие считаем актуальным
+_WORLD_EVENT_CAP = 12        -- максимум событий в буфере
+function lobRecordWorldEvent(etype, uid, name)
+    local now = os.clock()
+    local key = tostring(uid) .. tostring(etype)
+    local cd = (etype == "jump") and 10 or (etype == "stare") and 25 or 0
+    if cd > 0 and (_worldEventLast[key] or 0) + cd > now then return end
+    _worldEventLast[key] = now
+    table.insert(_worldEvents, { type = etype, uid = uid, name = name, t = now })
+    while #_worldEvents > _WORLD_EVENT_CAP do table.remove(_worldEvents, 1) end
+    for i = #_worldEvents, 1, -1 do
+        if (now - _worldEvents[i].t) > _WORLD_EVENT_TTL then table.remove(_worldEvents, i) end
+    end
+end
+function lobBuildWorldEventsContext(speakerUid)
+    local now = os.clock()
+    local lines = {}
+    for _, e in ipairs(_worldEvents) do
+        if (now - e.t) <= _WORLD_EVENT_TTL then
+            local ago = math.floor(now - e.t + 0.5)
+            local who = (speakerUid and e.uid == speakerUid)
+                and "the player you are talking to"
+                or tostring(e.name or "someone")
+            local verb = (e.type == "jump" and "jumped near you")
+                or (e.type == "stare" and "was staring at you")
+                or (e.type == "death" and "died nearby")
+                or (e.type == "mydro" and "you yourself died")
+                or tostring(e.type)
+            table.insert(lines, "- " .. who .. " " .. verb .. " (" .. ago .. "s ago)")
+        end
+    end
+    if #lines == 0 then return "" end
+    return "[EVENTS YOU NOTICED recently (background memory; use ONLY if relevant to what the player says, never list them all, never print this block):\n" .. table.concat(lines, "\n") .. "]"
+end
 -- (монитор запускается ниже после объявления runChatQueue)
 
 
@@ -5940,6 +5973,14 @@ local function handleQueuedChat(item)
                 end
                 end
             end
+        end
+    end
+
+    -- v20 Beta 3: контекст недавних мировых событий (память, не чат)
+    if settings.WorldReactions and not item.isWorld then
+        local evCtx = lobBuildWorldEventsContext(item.userId)
+        if evCtx ~= "" then
+            table.insert(apiMessages, { role = "system", content = evCtx })
         end
     end
 
@@ -6479,16 +6520,18 @@ end)
 -- §WORLD_REACT
 task.delay(5, function()
     local prevAir     = {}   -- uid → bool: был ли в воздухе
+    local prevY       = {}   -- uid → number: прошлая высота (детект прыжка по скорости)
+    local prevRising  = {}   -- uid → bool: поднимался ли на прошлом тике
     local prevRadius  = {}   -- uid → bool: был ли в радиусе на прошлом тике
     local enterTime   = {}   -- uid → os.clock(): когда вошёл в радиус
     local GRACE       = 8    -- сек grace period после входа — не реагируем на взгляд/прыжок
-    -- [v19.9.8] ФИКС: утечка памяти — prevAir/prevRadius/enterTime не чистились
-    -- БАГИ ДО: при долгой сессии таблицы росли бесконечно для каждого зашедшего игрока
     Players.PlayerRemoving:Connect(function(p)
         local uid = p.UserId
-        prevAir[uid]    = nil
-        prevRadius[uid] = nil
-        enterTime[uid]  = nil
+        prevAir[uid]     = nil
+        prevY[uid]       = nil
+        prevRising[uid]  = nil
+        prevRadius[uid]  = nil
+        enterTime[uid]   = nil
     end)
     while true do
         task.wait(0.5)
@@ -6515,9 +6558,11 @@ task.delay(5, function()
                 enterTime[uid] = os.clock()
             end
             if not inRadius then
-                -- Вышел из радиуса — сбрасываем grace и prevAir
+                -- Вышел из радиуса — сбрасываем трекинг
                 prevRadius[uid] = false
                 prevAir[uid] = false
+                prevY[uid] = nil
+                prevRising[uid] = false
                 continue
             end
             prevRadius[uid] = true
@@ -6532,53 +6577,29 @@ task.delay(5, function()
                 continue
             end
 
-            local reacted = false
-            -- Прыжок
-            local hum      = char:FindFirstChildOfClass("Humanoid")
-            local humState = hum and hum:GetState()
-            local inAir    = humState == Enum.HumanoidStateType.Jumping
-                          or humState == Enum.HumanoidStateType.Freefall
-            if inAir and not prevAir[uid] and _canWorldReact(uid, "jump") then
-                reacted = true
-                local name = p.DisplayName or p.Name
-                local msgs = {
-                    "[SYSTEM: "..name.." just jumped near you. React casually in 1 short sentence; do not comment on their face or appearance.]",
-                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly and casually; no comments about looks.]",
-                }
-                local wKey = uid + 20000000
-                enqueueChatItem(wKey, {
-                    player=p, userId=uid, name=p.Name,
-                    displayName=name, cleaned=msgs[math.random(#msgs)],
-                    isWorld=true,
-                }, 1)
-                runChatQueue(wKey)
-                prevAir[uid] = inAir
-                break
+            -- v20 Beta 3: только ЗАПИСЫВАЕМ событие в память, в чат НЕ пишем.
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            -- Прыжок: по РЕАЛЬНОМУ подъёму вверх (положительная верт. скорость),
+            -- а не по состоянию — Freefall ловит падения и ступеньки (ложные «прыжки»).
+            local nowY = root.Position.Y
+            local rising = false
+            if prevY[uid] then
+                local vy = (nowY - prevY[uid]) / 0.5
+                local st = hum and hum:GetState()
+                rising = vy > 12 and (st == Enum.HumanoidStateType.Jumping
+                    or st == Enum.HumanoidStateType.Freefall)
             end
-            prevAir[uid] = inAir
+            prevY[uid] = nowY
+            if rising and not prevRising[uid] then
+                lobRecordWorldEvent("jump", uid, p.DisplayName or p.Name)
+            end
+            prevRising[uid] = rising
 
-            -- Взгляд: сначала проверяем смотрит ли — потом тратим кулдаун
-            if not reacted then
-                local toUs = myPos - root.Position
-                local stareDist = toUs.Magnitude
-                -- dot product ПЕРВЫМ — кулдаун не тратим если не смотрит
-                if stareDist > 1 and root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
-                    if _canWorldReact(uid, "stare") then
-                        local name = p.DisplayName or p.Name
-                        local msgs = {
-                            "[SYSTEM: "..name.." is staring right at you. React casually in 1 short sentence, in character; do not comment on their face, smile or appearance. Do NOT greet them again if you already talked.]",
-                            "[SYSTEM: "..name.." keeps looking at you. React briefly and casually; no comments about looks.]",
-                        }
-                        local wKey = uid + 20000000
-                        enqueueChatItem(wKey, {
-                            player=p, userId=uid, name=p.Name,
-                            displayName=name, cleaned=msgs[math.random(#msgs)],
-                            isWorld=true,
-                        }, 2)
-                        runChatQueue(wKey)
-                        break
-                    end
-                end
+            -- Взгляд: игрок смотрит на бота
+            local toUs = myPos - root.Position
+            local stareDist = toUs.Magnitude
+            if stareDist > 1 and root.CFrame.LookVector:Dot(toUs.Unit) > 0.95 then
+                lobRecordWorldEvent("stare", uid, p.DisplayName or p.Name)
             end
         end
     end
@@ -6633,17 +6654,8 @@ local function _watchPlayerDeath(p)
         if not myRoot or not lastPos then return end
         local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
         if (lastPos - myRoot.Position).Magnitude > radius then return end
-        -- FIX: смерть тоже через общий gate (глобальный + пер-игрок кулдаун) — без спама
-        if not _canWorldReact(uid, "death") then return end
-        local name = p.DisplayName or p.Name
-        local msg = "[SYSTEM: Player "..name.." just died near you. React in 1 short sentence, stay in character.]"
-        local fakeId = uid + 10000000
-        enqueueChatItem(fakeId, {
-            player=p, userId=fakeId, name=p.Name,
-            displayName=name, cleaned=msg,
-            isWorld=true,
-        })
-        runChatQueue(fakeId)
+        -- v20 Beta 3: смерть — событие в память, в чат НЕ пишем
+        lobRecordWorldEvent("death", uid, p.DisplayName or p.Name)
     end)
 end
 
@@ -9715,8 +9727,8 @@ makeToggleRow(
 -- v18: Реакции на мир
 makeToggleRow(
     automation,
-    "👀 Реакции на мир",
-    "Бот замечает прыжки и взгляды игроков рядом и реагирует сам. Раз в минуту на каждого игрока.",
+    "👀 Замечать события рядом",
+    "Бот запоминает прыжки, взгляды и смерти игроков рядом. Сам в чат НЕ пишет — упомянет, только если игрок заговорит (или спросит).",
     ClientSettings.WorldReactions ~= false,
     function(state) ClientSettings.WorldReactions = state; saveSettings() end
 )
