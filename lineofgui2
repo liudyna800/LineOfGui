@@ -1790,14 +1790,19 @@ function DeepSeekProvider:chatCompletions(payload)
     apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
     if apiKey == "" then return nil, "MissingDeepSeekKey" end
 
+    -- «deepseek-4.1-flash» работает в ЧАТ-режиме → официальный id DeepSeek Chat
+    local apiModel = tostring(payload.model)
+    if apiModel:find("4%.1%-flash") or apiModel:find("^deepseek%-4") then
+        apiModel = "deepseek-chat"
+    end
     local url = "https://api.deepseek.com/chat/completions"
     local body = {
-        model       = payload.model,
+        model       = apiModel,
         max_tokens  = payload.max_tokens,
         messages    = payload.messages,
     }
     -- deepseek-reasoner не принимает temperature — не шлём его для reasoner
-    if not tostring(payload.model):find("reasoner") then
+    if not apiModel:find("reasoner") then
         body.temperature = payload.temperature
     end
     local res, statusCode, statusMsg, rawBody = postJson(url, {
@@ -10017,9 +10022,7 @@ local groqModels = {
     "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite  | preview лёгкий
     "gemini-3.5-flash-lite",                       -- Gemini 3.5 Flash Lite | current lightweight
     -- ── 🐳 DEEPSEEK (свой ключ, api.deepseek.com) ─────────────────────────
-    "deepseek-4.1-flash",                          -- DeepSeek 4.1 Flash   | быстрый
-    "deepseek-chat",                               -- DeepSeek Chat (V3)   | стабильный
-    "deepseek-reasoner",                           -- DeepSeek Reasoner    | с рассуждением
+    "deepseek-4.1-flash",                          -- DeepSeek 4.1 Flash   | чат-режим
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
@@ -11046,7 +11049,7 @@ do
     dsBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek) or ""
     dsBox.Parent = dsInputFrame
 
-    local dsLimitLbl = makeTextLabel(dsCard, "api.deepseek.com — deepseek-4.1-flash / deepseek-chat / deepseek-reasoner", 11, "medium")
+    local dsLimitLbl = makeTextLabel(dsCard, "api.deepseek.com — deepseek-4.1-flash (chat)", 11, "medium")
     dsLimitLbl.Size = UDim2.new(1, 0, 0, 28)
     dsLimitLbl.Position = UDim2.new(0, 0, 0, 78)
     dsLimitLbl.TextColor3 = THEME.TextDim
