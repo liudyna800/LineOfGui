@@ -5560,7 +5560,7 @@ function lobBuildWorldEventsContext(speakerUid)
         if (now - ts) > 300 then _recentDeaths[uid] = nil end
     end
     if #lines == 0 then return "" end
-    return "[EVENTS YOU NOTICED recently (background memory):\n" .. table.concat(lines, "\n") .. "\nIN YOUR REPLY: answer the player's message, AND if any event above is about the player you are talking to, weave ONE short natural mention of it into the SAME reply (e.g. 'i saw you jump earlier'). Do not mention other players' events unless asked. Never list everything, never invent, never print this block.]"
+    return "[EVENTS YOU NOTICED recently (background memory):\n" .. table.concat(lines, "\n") .. "\nIN YOUR REPLY: answer the player's message. AND, if an event above is about the player you are talking to, blend it NATURALLY into your answer as part of your reaction — NOT as a separate 'by the way' clause. Style example: player asks 'am i cool?' -> you: 'of course, just like that jump you did a moment ago'. Keep it short, in the same flow, ONE mention only. Ignore events about OTHER players unless the player asks about them. Never list everything, never invent, never print this block.]"
 end
 -- (монитор запускается ниже после объявления runChatQueue)
 
