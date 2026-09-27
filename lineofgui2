@@ -4496,7 +4496,7 @@ function fetchFandomArticle(pname)
         end
     end)
     local fw8 = 0
-    while foundText == "" and foundDedi == "" and fw8 < 10 do task.wait(0.25) fw8 = fw8 + 0.25 end
+    while foundText == "" and foundDedi == "" and fw8 < 4 do task.wait(0.25) fw8 = fw8 + 0.25 end
     if foundText ~= "" then
         return saveFound(foundDomain, foundText)
     end
@@ -6037,7 +6037,7 @@ local function handleQueuedChat(item)
                     gdone = true
                 end)
                 local gc2 = 0
-                while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
+                while not gdone and gc2 < 15 do task.wait(0.2) gc2 = gc2 + 1 end
                 local gw = gsr or ""
                 local webDone = false
                 print("[GAME-DBG] web len=" .. #gw .. " marks=" .. tostring((gw:find("%[Wiki%]") and "W" or "-") .. (gw:find("%[News") and "N" or "-") .. (gw:find("%[Jina%]") and "J" or "-")))
@@ -6122,6 +6122,11 @@ local function handleQueuedChat(item)
     if model:find("^qwen/") then
         payload.reasoning_effort = "none"
         payload.temperature = nil  -- Qwen3 с reasoning_effort не принимает temperature
+    end
+    -- СКОРОСТЬ: у gpt-oss по умолчанию reasoning=medium → секунды на скрытые
+    -- рассуждения перед ответом. Ставим low — отвечает в разы быстрее.
+    if model:find("gpt%-oss") then
+        payload.reasoning_effort = "low"
     end
     -- Веб-поиск через tool use
     -- compound-beta имеет встроенный поиск — не нужны tools
@@ -6286,6 +6291,9 @@ local function handleQueuedChat(item)
             secondPayload.reasoning_effort = "none"
             secondPayload.temperature = nil
         end
+        if model:find("gpt%-oss") then
+            secondPayload.reasoning_effort = "low"
+        end
 
         local text2, err2
         do
@@ -6402,6 +6410,7 @@ local function handleQueuedChat(item)
             table.insert(secondMessagesW, { role = "system", content = wsText })
             local secondPayloadW = { model = model, temperature = payload.temperature, max_tokens = maxTok, messages = secondMessagesW }
             if model:find("^qwen/") then secondPayloadW.reasoning_effort = "none" secondPayloadW.temperature = nil end
+            if model:find("gpt%-oss") then secondPayloadW.reasoning_effort = "low" end
             local textW, errW, doneW = nil, nil, false
             task.spawn(function()
                 textW, errW = providerRouter:chatCompletions(secondPayloadW)
@@ -6487,6 +6496,9 @@ local function handleQueuedChat(item)
         if model:find("^qwen/") then
             secondPayload.reasoning_effort = "none"
             secondPayload.temperature = nil
+        end
+        if model:find("gpt%-oss") then
+            secondPayload.reasoning_effort = "low"
         end
 
         local text2, err2
@@ -13932,6 +13944,9 @@ local function ctDoSend()
         if payload.model:find("^qwen/") then
             payload.reasoning_effort = "none"
             payload.temperature = nil
+        end
+        if payload.model:find("gpt%-oss") then
+            payload.reasoning_effort = "low"
         end
 
         -- v20 Beta 2: timeout 25s + retry only on fast fail (no doubling of slow calls)
