@@ -5864,7 +5864,8 @@ local function handleQueuedChat(item)
         -- follow-up: short reply after a game question is still about the game
         _lastGameQ = _lastGameQ or {}
         local nowQ = os.clock()
-        if (not isQ) and (nowQ - (_lastGameQ[item.userId] or 0)) < 90 and charLen(item.cleaned) < 40 then
+        -- follow-up только если есть вопросительный знак (обычный «привет» НЕ триггерит скан)
+        if (not isQ) and ql:find("?", 1, true) and (nowQ - (_lastGameQ[item.userId] or 0)) < 90 and charLen(item.cleaned) < 40 then
             isQ = true
             print("[GAME-DBG] followup-Q")
         end
@@ -10006,7 +10007,63 @@ end)
 
 -- BEHAVIOR TAB CONTENT (Populate)
 
--- BEHAVIOR TAB CONTENT (Populate)
+-- ═══ v20 Beta 3: карточка СТАТУСА загрузки игры (виден процесс, когда бот готов) ═══
+do
+    local statusSection = makeSectionCard(behaviorScroll, "Статус", "")
+    local statusRow = Instance.new("Frame")
+    statusRow.Name = "BotStatusRow"
+    statusRow.BackgroundColor3 = THEME.Button
+    statusRow.BackgroundTransparency = THEME.ButtonTransparency or 0.60
+    statusRow.Size = UDim2.new(1, -8, 0, 48)
+    statusRow.Parent = statusSection
+    makeCorner(statusRow, 22)
+    makeStroke(statusRow, 1, Color3.fromRGB(255,255,255), 0.78)
+
+    local statusDot = Instance.new("Frame")
+    statusDot.Size = UDim2.new(0, 8, 0, 8)
+    statusDot.AnchorPoint = Vector2.new(0, 0.5)
+    statusDot.Position = UDim2.new(0, 10, 0.5, 0)
+    statusDot.BackgroundColor3 = Color3.fromRGB(220, 180, 60)
+    statusDot.BorderSizePixel = 0
+    statusDot.Parent = statusRow
+    makeCorner(statusDot, 999)
+
+    local statusTitle = makeTextLabel(statusRow, "Готов к общению", 13, "semibold")
+    statusTitle.Size = UDim2.new(1, -26, 0, 18)
+    statusTitle.Position = UDim2.new(0, 24, 0, 7)
+
+    local statusSub = makeTextLabel(statusRow, "", 11, "medium")
+    statusSub.TextColor3 = THEME.TextDim
+    statusSub.Size = UDim2.new(1, -26, 0, 16)
+    statusSub.Position = UDim2.new(0, 24, 0, 26)
+
+    task.spawn(function()
+        while statusRow and statusRow.Parent do
+            local s = ClientSettings
+            local title, sub2, col
+            if not s.GameUnderstanding then
+                title, sub2, col = "Готов к общению", "Понимание геймплея выключено", Color3.fromRGB(80, 220, 120)
+            else
+                local havePlace = _placeInfo and _placeInfo.name and _placeInfo.name ~= "" and _placeInfo.name ~= "Unknown Game"
+                local haveCtx = _gameContext and _gameContext.text and _gameContext.text ~= ""
+                if haveCtx then
+                    title, sub2, col = "Готов к общению", "Данные об игре загружены", Color3.fromRGB(80, 220, 120)
+                elseif _gameContextFetching then
+                    title, sub2, col = "Сканирую игру…", "Веб-поиск и вики, подожди немного", Color3.fromRGB(220, 180, 60)
+                elseif havePlace then
+                    title, sub2, col = "Загружаю данные…", tostring(_placeInfo.name), Color3.fromRGB(100, 170, 255)
+                else
+                    title, sub2, col = "Определяю игру…", "Читаю название места", Color3.fromRGB(220, 180, 60)
+                end
+            end
+            if statusTitle.Text ~= title then statusTitle.Text = title end
+            if statusSub.Text ~= sub2 then statusSub.Text = sub2 end
+            statusDot.BackgroundColor3 = col
+            task.wait(1)
+        end
+    end)
+end
+
 local personalitySection = makeSectionCard(behaviorScroll, "Личность", "")
 
 do
