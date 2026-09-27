@@ -5481,15 +5481,22 @@ local MAX_HISTORY = 10  -- дефолт; перезаписывается из C
 local _worldReactCooldowns = {}  -- [userId..type] → os.clock()
 local WORLD_REACT_COOLDOWN  = 60
 local WORLD_REACT_STARE_CD  = 45  -- взгляд чуть короче
+-- v20 Beta 3: ГЛОБАЛЬНЫЙ кулдаун — не спамим реакциями на всех игроков сразу.
+-- Одна мировая реакция на всего бота раз в N секунд, независимо от числа игроков.
+local WORLD_REACT_GLOBAL_CD = 25
+local _worldReactGlobalAt   = 0
 
 local _worldReactCleanAt = 0
 local function _canWorldReact(userId, reactType)
     local key = tostring(userId) .. (reactType or "")
     local now = os.clock()
+    -- общий лимит: пока не прошёл глобальный кулдаун — молчим
+    if (now - _worldReactGlobalAt) < WORLD_REACT_GLOBAL_CD then return false end
     local t = _worldReactCooldowns[key]
     local cd = (reactType == "stare") and WORLD_REACT_STARE_CD or WORLD_REACT_COOLDOWN
     if t and (now - t) < cd then return false end
     _worldReactCooldowns[key] = now
+    _worldReactGlobalAt = now
     -- Очистка устаревших cooldown записей раз в 120 сек
     if (now - _worldReactCleanAt) > 120 then
         _worldReactCleanAt = now
@@ -6535,8 +6542,8 @@ task.delay(5, function()
                 reacted = true
                 local name = p.DisplayName or p.Name
                 local msgs = {
-                    "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
-                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly.]",
+                    "[SYSTEM: "..name.." just jumped near you. React casually in 1 short sentence; do not comment on their face or appearance.]",
+                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly and casually; no comments about looks.]",
                 }
                 local wKey = uid + 20000000
                 enqueueChatItem(wKey, {
@@ -6545,6 +6552,8 @@ task.delay(5, function()
                     isWorld=true,
                 }, 1)
                 runChatQueue(wKey)
+                prevAir[uid] = inAir
+                break
             end
             prevAir[uid] = inAir
 
@@ -6557,8 +6566,8 @@ task.delay(5, function()
                     if _canWorldReact(uid, "stare") then
                         local name = p.DisplayName or p.Name
                         local msgs = {
-                            "[SYSTEM: "..name.." is staring right at you. React naturally in 1 short sentence, stay in character. Do NOT greet them again if you already talked.]",
-                            "[SYSTEM: "..name.." keeps looking at you. React briefly, stay in character.]",
+                            "[SYSTEM: "..name.." is staring right at you. React casually in 1 short sentence, in character; do not comment on their face, smile or appearance. Do NOT greet them again if you already talked.]",
+                            "[SYSTEM: "..name.." keeps looking at you. React briefly and casually; no comments about looks.]",
                         }
                         local wKey = uid + 20000000
                         enqueueChatItem(wKey, {
@@ -6567,6 +6576,7 @@ task.delay(5, function()
                             isWorld=true,
                         }, 2)
                         runChatQueue(wKey)
+                        break
                     end
                 end
             end
