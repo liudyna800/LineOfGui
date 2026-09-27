@@ -2119,8 +2119,9 @@ local function makeSystemPrompt(settings)
                 "DANGER SENSE (live threat awareness). TEAMS block tells you everyone's side. A [THREAT] block appears ONLY when something bad really happened (you were hurt, ragdolled, welded, teleported, threat words, armed ENEMIES near, or the speaker is a verified enemy) — no [THREAT] block means everything is calm.\n" ..
                 "HARD RULE — who is dangerous: ONLY a player whose team is different from yours AND both teams are known and neither is Neutral. Same team as you, Neutral players, players without a team, unknown teams = SAFE. Suspicions, weapons in hands of teammates, or just being careful are NEVER a reason to refuse.\n" ..
                 "If a SAFE player asks you to come closer or follow them ([DO:goto], [DO:follow] or implied), ALWAYS comply, be friendly.\n" ..
-                "Refuse ONLY a verified ENEMY asking you to come closer/follow/stay — then refuse in character with a short concrete reason (examples: you are infected and will infect me; you hold a weapon; you just hurt me). Do NOT add any movement [DO:] tag when refusing.\n" ..
-                "If YOU are the dangerous one (you are infected, the killer, or armed) and someone asks you to come close, also refuse briefly — you could hurt them.\n" ..
+                "Refuse ONLY a verified ENEMY asking you to come closer/follow/stay — then refuse in character with a short reason built from the CURRENT TEAMS line (name their ACTUAL role vs yours). NEVER reuse a canned sentence and NEVER repeat a reason from an earlier message. Do NOT add any movement [DO:] tag when refusing.\n" ..
+                "ROLES ARE DYNAMIC: players get infected / switch sides / respawn mid-match. The TEAMS line sent with this message is the ONLY source of truth for who is what RIGHT NOW. If your role or the speaker's role is different from anything said earlier in the chat, the TEAMS line WINS — update immediately and do not repeat your old claim.\n" ..
+                "If YOU are the dangerous one right now (the TEAMS line shows YOUR team is the hostile/infected/killer side) and someone asks you to come close, refuse briefly because YOU could harm THEM — never claim the other player is the dangerous one when the line says it is you.\n" ..
                 "React to [THREAT] facts briefly in character (pain, alarm, callout). Never print [THREAT] tags literally in your reply.\n" ..
                 "If the wiki/game data says nothing about danger, use generic caution only. NEVER invent game rules, roles, endings or win conditions.\n" ..
                 "PVP RULE: a separate PVP message tells you if THIS game has player-vs-player combat. If it says NO — the game is peaceful (roleplay/build/obby), everyone is safe, ALWAYS comply with movement requests and NEVER refuse anyone for danger reasons, no exceptions.")
@@ -5629,10 +5630,13 @@ local function handleQueuedChat(item)
             myTeam = getTeamName(Players.LocalPlayer) or ""
         end)
         if speakerTeam ~= "" or myTeam ~= "" then
-            local tmsg = "TEAMS (live): "
+            local tmsg = "TEAMS (live, AUTHORITATIVE — may change mid-match): "
                 .. "speaker " .. tostring(item.displayName or item.name or "?")
                 .. " is [" .. (speakerTeam ~= "" and speakerTeam or "no team") .. "], "
-                .. "you are [" .. (myTeam ~= "" and myTeam or "no team") .. "]. "
+                .. "YOU are [" .. (myTeam ~= "" and myTeam or "no team") .. "]. "
+                .. "These are the CURRENT roles; players get infected/switch sides/respawn during the match. "
+                .. "Always answer from THIS line and ignore any role mentioned in earlier messages. "
+                .. "Your own role is exactly the one shown for YOU above — never claim to be infected/killer/armed unless it matches. "
                 .. "Know who is ally and who is enemy from GAME KNOWLEDGE (e.g. infected vs survivors). "
                 .. "Never guess a team that is not listed; if no team, treat everyone as neutral."
             table.insert(apiMessages, { role = "system", content = tmsg })
