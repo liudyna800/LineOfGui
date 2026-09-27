@@ -222,6 +222,7 @@ local LOB_KEY_FILE       = "lob_apikey.txt"
 local LOB_KEY_FILE2      = "lob_apikey2.txt"
 local LOB_KEY_FILE3      = "lob_apikey3.txt"
 local LOB_GEMINI_FILE    = "lob_geminikey.txt"
+local LOB_DEEPSEEK_FILE  = "lob_deepseekkey.txt"
 local LOB_SETTINGS_FILE  = "lob_settings.txt"
 local LOB_CSP_FILE       = "lob_customprompt.txt"
 local LOB_MODEL_FILE     = "lob_model.txt"
@@ -389,6 +390,13 @@ local function saveGeminiKey(key)
 end
 local function loadGeminiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
+    return (ok and type(result)=="string") and normalizeApiKey(result) or ""
+end
+local function saveDeepSeekKey(key)
+    pcall(function() if writefile then writefile(LOB_DEEPSEEK_FILE, normalizeApiKey(key)) end end)
+end
+local function loadDeepSeekKey()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_DEEPSEEK_FILE) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
 
@@ -620,6 +628,7 @@ ClientSettings = {
         groq2     = "",
         groq3     = "",
         gemini    = "",
+        deepseek  = "",
     },
     UI = {
         WindowWidth = 750,
@@ -736,6 +745,11 @@ do
     if savedGemini and #savedGemini > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.gemini = savedGemini
+    end
+    local savedDeepSeek = loadDeepSeekKey()
+    if savedDeepSeek and #savedDeepSeek > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.deepseek = savedDeepSeek
     end
 
 end
@@ -1763,6 +1777,64 @@ function GeminiProvider:chatCompletions(payload)
 end
 
 -- §ROUTER
+-- ── DEEPSEEK PROVIDER (OpenAI-совместимый API) ────────────────────────────
+local DeepSeekProvider = {}
+DeepSeekProvider.__index = DeepSeekProvider
+
+function DeepSeekProvider.new()
+    return setmetatable({}, DeepSeekProvider)
+end
+
+function DeepSeekProvider:chatCompletions(payload)
+    local apiKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
+    apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
+    if apiKey == "" then return nil, "MissingDeepSeekKey" end
+
+    local url = "https://api.deepseek.com/chat/completions"
+    local body = {
+        model       = payload.model,
+        max_tokens  = payload.max_tokens,
+        messages    = payload.messages,
+    }
+    -- deepseek-reasoner не принимает temperature — не шлём его для reasoner
+    if not tostring(payload.model):find("reasoner") then
+        body.temperature = payload.temperature
+    end
+    local res, statusCode, statusMsg, rawBody = postJson(url, {
+        ["Content-Type"] = "application/json",
+        ["Authorization"] = "Bearer " .. apiKey,
+    }, body)
+
+    if not res then
+        if isRateLimited(statusCode, statusMsg, rawBody) and onApiRateLimited then
+            onApiRateLimited("deepseek")
+        end
+        local errMsg = tostring(statusCode or "") .. ":" .. tostring(statusMsg or "")
+        pcall(function()
+            local b = HttpService:JSONDecode(tostring(rawBody or "{}"))
+            if b.error and b.error.message then errMsg = errMsg .. ":" .. tostring(b.error.message):sub(1,120) end
+        end)
+        return nil, errMsg
+    end
+
+    local choice = res.choices and res.choices[1]
+    if not choice then return nil, "NoChoicesReturned" end
+    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
+    local msg = choice.message
+    local content = msg and msg.content
+    if type(content) == "table" then
+        local parts = {}
+        for _, block in ipairs(content) do
+            if type(block) == "table" and type(block.text) == "string" and block.text ~= "" then
+                table.insert(parts, block.text)
+            end
+        end
+        content = table.concat(parts, " ")
+    end
+    if type(content) ~= "string" or content == "" then return nil, "EmptyResponse" end
+    return content, nil
+end
+
 local ProviderRouter = {}
 ProviderRouter.__index = ProviderRouter
 
@@ -1770,6 +1842,7 @@ function ProviderRouter.new()
     local self = setmetatable({}, ProviderRouter)
     self._groq     = GroqProvider.new()
     self._gemini   = GeminiProvider.new()
+    self._deepseek = DeepSeekProvider.new()
     return self
 end
 
@@ -1778,6 +1851,9 @@ function ProviderRouter:chatCompletions(payload)
     -- Роутинг по префиксу модели
     if model:find("^gemini") then
         return self._gemini:chatCompletions(payload)
+    end
+    if model:find("^deepseek") then
+        return self._deepseek:chatCompletions(payload)
     end
     return self._groq:chatCompletions(payload)
 end
@@ -6048,7 +6124,7 @@ local function handleQueuedChat(item)
     -- Cerebras и DeepSeek не поддерживают OpenAI function calling tools
     -- [v19.9.7] ФИКС: Kimi K2 / moonshotai добавлены в skipTools
     -- БАГИ ДО: при WebSearch=true Kimi пытался вызвать tool в неправильном формате → ошибка
-    local skipTools = model:find("^gemini") or model:find("compound%-beta")
+    local skipTools = model:find("^gemini") or model:find("^deepseek") or model:find("compound%-beta")
         or model:find("^qwen/")
         or model:find("kimi") or model:find("moonshotai")
     if settings.WebSearch and not skipTools then
@@ -7887,6 +7963,7 @@ local rateLimitNoticeAt = 0
 local _providerNames = {
     groq     = "Groq",
     gemini   = "Gemini",
+    deepseek = "DeepSeek",
 }
 
 local function handleRateLimitNotice(provider, force)
@@ -8562,6 +8639,10 @@ local function updateCtStatus()
         local gk = s.ApiKeys and s.ApiKeys.gemini or ""
         hasKey = type(gk)=="string" and #gk > 8
         apiName = "Gemini"
+    elseif model:find("^deepseek") then
+        local dk = s.ApiKeys and s.ApiKeys.deepseek or ""
+        hasKey = type(dk)=="string" and #dk > 8
+        apiName = "DeepSeek"
     else
         local gk = getGroqApiKey and getGroqApiKey() or ""
         hasKey = type(gk)=="string" and #gk > 8 and gk:sub(1,4) == "gsk_"
@@ -9935,6 +10016,10 @@ local groqModels = {
     "gemini-3-flash-preview",                      -- Gemini 3 Flash         | preview
     "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite  | preview лёгкий
     "gemini-3.5-flash-lite",                       -- Gemini 3.5 Flash Lite | current lightweight
+    -- ── 🐳 DEEPSEEK (свой ключ, api.deepseek.com) ─────────────────────────
+    "deepseek-4.1-flash",                          -- DeepSeek 4.1 Flash   | быстрый
+    "deepseek-chat",                               -- DeepSeek Chat (V3)   | стабильный
+    "deepseek-reasoner",                           -- DeepSeek Reasoner    | с рассуждением
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
@@ -10886,6 +10971,165 @@ do
         task.wait(0.7)
         local savedKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
         if savedKey and #savedKey > 8 then doGeminiCheck() end
+    end)
+end
+
+-- ── DEEPSEEK API KEY CARD ──────────────────────────────────────────────
+do
+    local dsCard = Instance.new("Frame")
+    dsCard.Name = "DeepSeekKeyCard"
+    dsCard.BackgroundColor3 = THEME.Card
+    dsCard.BackgroundTransparency = 0
+    dsCard.BorderSizePixel = 0
+    dsCard.Size = UDim2.new(1, 0, 0, 160)
+    dsCard.Parent = advancedScroll
+    makeCorner(dsCard, 12)
+    local dsCardStroke = makeStroke(dsCard, 1, THEME.Stroke, 0.5)
+
+    local dsPad = Instance.new("UIPadding")
+    dsPad.PaddingTop    = UDim.new(0, 12)
+    dsPad.PaddingBottom = UDim.new(0, 12)
+    dsPad.PaddingLeft   = UDim.new(0, 14)
+    dsPad.PaddingRight  = UDim.new(0, 14)
+    dsPad.Parent = dsCard
+
+    local dsTitleRow = Instance.new("Frame")
+    dsTitleRow.BackgroundTransparency = 1
+    dsTitleRow.Size = UDim2.new(1, 0, 0, 18)
+    dsTitleRow.Parent = dsCard
+
+    local dsTitle = makeTextLabel(dsTitleRow, "DeepSeek API Ключ", 14, "bold")
+    dsTitle.Size = UDim2.new(1, -90, 1, 0)
+    dsTitle.TextColor3 = THEME.Text
+
+    local dsStatusDot = Instance.new("Frame")
+    dsStatusDot.Size = UDim2.new(0, 8, 0, 8)
+    dsStatusDot.AnchorPoint = Vector2.new(1, 0.5)
+    dsStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
+    dsStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    dsStatusDot.BorderSizePixel = 0
+    dsStatusDot.Parent = dsTitleRow
+    makeCorner(dsStatusDot, 999)
+
+    local dsStatusLbl = makeTextLabel(dsTitleRow, "не проверен", 11, "medium")
+    dsStatusLbl.Size = UDim2.new(0, 70, 1, 0)
+    dsStatusLbl.Position = UDim2.new(1, -70, 0, 0)
+    dsStatusLbl.TextColor3 = THEME.TextDim
+    dsStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
+
+    local dsDesc = makeTextLabel(dsCard, "platform.deepseek.com → API Keys", 11, "medium")
+    dsDesc.Size = UDim2.new(1, 0, 0, 14)
+    dsDesc.Position = UDim2.new(0, 0, 0, 21)
+    dsDesc.TextColor3 = THEME.TextDim
+
+    local dsInputFrame = Instance.new("Frame")
+    dsInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
+    dsInputFrame.BackgroundTransparency = 0.25
+    dsInputFrame.BorderSizePixel = 0
+    dsInputFrame.Size = UDim2.new(1, 0, 0, 32)
+    dsInputFrame.Position = UDim2.new(0, 0, 0, 40)
+    dsInputFrame.Parent = dsCard
+    makeCorner(dsInputFrame, 8)
+    makeStroke(dsInputFrame, 1, THEME.Stroke, 0.6)
+
+    local dsBox = Instance.new("TextBox")
+    dsBox.BackgroundTransparency = 1
+    dsBox.Size = UDim2.new(1, -16, 1, 0)
+    dsBox.Position = UDim2.new(0, 8, 0, 0)
+    dsBox.Font = Enum.Font.GothamMedium
+    dsBox.TextSize = 13
+    dsBox.TextColor3 = THEME.Text
+    dsBox.PlaceholderText = "Вставь DeepSeek API ключ (sk-...)"
+    dsBox.PlaceholderColor3 = THEME.TextDim
+    dsBox.TextXAlignment = Enum.TextXAlignment.Left
+    dsBox.ClearTextOnFocus = false
+    dsBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek) or ""
+    dsBox.Parent = dsInputFrame
+
+    local dsLimitLbl = makeTextLabel(dsCard, "api.deepseek.com — deepseek-4.1-flash / deepseek-chat / deepseek-reasoner", 11, "medium")
+    dsLimitLbl.Size = UDim2.new(1, 0, 0, 28)
+    dsLimitLbl.Position = UDim2.new(0, 0, 0, 78)
+    dsLimitLbl.TextColor3 = THEME.TextDim
+    dsLimitLbl.TextWrapped = true
+
+    local dsCheckBtn = Instance.new("TextButton")
+    dsCheckBtn.Size = UDim2.new(1, 0, 0, 28)
+    dsCheckBtn.Position = UDim2.new(0, 0, 0, 112)
+    dsCheckBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 230)
+    dsCheckBtn.BackgroundTransparency = 0.15
+    dsCheckBtn.Text = "Проверить ключ"
+    dsCheckBtn.Font = Enum.Font.GothamBold
+    dsCheckBtn.TextSize = 13
+    dsCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    dsCheckBtn.AutoButtonColor = false
+    dsCheckBtn.Parent = dsCard
+    makeCorner(dsCheckBtn, 8)
+
+    dsCheckBtn.MouseEnter:Connect(function() tween(dsCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
+    dsCheckBtn.MouseLeave:Connect(function() tween(dsCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
+
+    local function setDsStatus(ok, text)
+        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
+        tween(dsStatusDot, TWEEN_MED, { BackgroundColor3 = col })
+        dsStatusLbl.Text = text
+        dsStatusLbl.TextColor3 = col
+        tween(dsCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
+    end
+
+    local function doDeepSeekCheck()
+        local clean = normalizeApiKey(dsBox.Text)
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.deepseek = clean
+        saveDeepSeekKey(clean)
+
+        dsCheckBtn.Text = "Проверяю..."
+        dsCheckBtn.BackgroundTransparency = 0.4
+        task.spawn(function()
+            dsCheckBtn.Text = "Проверить ключ"
+            dsCheckBtn.BackgroundTransparency = 0.15
+            if clean == "" then setDsStatus(false, "ключ не указан"); return end
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then setDsStatus(false, "ошибка executor"); return end
+            local ok2, res2 = pcall(req, {
+                Url = "https://api.deepseek.com/models",
+                Method = "GET",
+                Headers = { ["Authorization"] = "Bearer " .. clean },
+            })
+            if not ok2 or type(res2) ~= "table" then setDsStatus(false, "ошибка сети"); return end
+            local s = tonumber(res2.StatusCode or res2.statusCode or 0)
+            if s == 401 then setDsStatus(false, "❌ неверный ключ"); return end
+            if s == 402 then setDsStatus(true, "✓ ключ верный (нет баланса)"); return end
+            if s == 429 then setDsStatus(true, "✓ ключ верный (rate limit)"); return end
+            if s ~= 200 then
+                local msg = ""
+                pcall(function()
+                    local b = HttpService:JSONDecode(res2.Body or res2.body or "{}")
+                    if b.error and b.error.message then msg = ": " .. tostring(b.error.message):sub(1,40) end
+                end)
+                setDsStatus(false, "❌ " .. tostring(s) .. msg); return
+            end
+            setDsStatus(true, "✓ работает")
+        end)
+    end
+
+    dsCheckBtn.MouseButton1Click:Connect(doDeepSeekCheck)
+
+    dsBox.FocusLost:Connect(function()
+        local clean = normalizeApiKey(dsBox.Text)
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.deepseek = clean
+        saveDeepSeekKey(clean)
+        dsBox.Text = clean
+        tween(dsStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
+        dsStatusLbl.Text = "не проверен"
+        dsStatusLbl.TextColor3 = THEME.TextDim
+        tween(dsCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
+    end)
+
+    task.spawn(function()
+        task.wait(0.9)
+        local savedKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
+        if savedKey and #savedKey > 8 then doDeepSeekCheck() end
     end)
 end
 
