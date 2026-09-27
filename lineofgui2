@@ -2372,11 +2372,13 @@ function lobStripServiceTags(text)
     text = text:gsub("%[%s*NEARBY%s*:?%s*%]?", "")
     text = text:gsub("%[%s*PVP%s*:?%s*%]?", "")
     text = text:gsub("%[%s*TEAMS%s*:?%s*%]?", "")
+    text = text:gsub("%[%s*EVENTS%s*:?%s*%]?", "")
     text = text:gsub("%]%s*$", "")        -- хвостовой ] от обёртки [THREAT: ...]
     text = text:gsub("%s+", " ")
     return (text:match("^%s*(.-)%s*$") or text)
 end
 
+_lastBotSendAt = 0
 local function sendBotMessage(text)
     if type(text) ~= "string" or text == "" then return end
     -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
@@ -2407,8 +2409,15 @@ local function sendBotMessage(text)
     local maxLen = 90
     local function deliver(part, depth)
         depth = depth or 0
+        -- мини-интервал между сообщениями бота (Roblox троттлит частую отправку)
+        local gap = os.clock() - (_lastBotSendAt or 0)
+        if gap < 0.7 then task.wait(0.7 - gap) end
         local ok, err = sendChatChecked(part)
-        if ok then return true end
+        if not ok then
+            task.wait(0.6)
+            ok, err = sendChatChecked(part)   -- повторная попытка
+        end
+        if ok then _lastBotSendAt = os.clock() return true end
         print("[LOB] part fail len=" .. tostring(charLen(part)) .. ": " .. tostring(err):sub(1, 90))
         if depth < 3 and charLen(part) > 40 then
             local halves = splitTextIntoParts(part, math.max(40, math.floor(charLen(part) / 2)))
@@ -5516,7 +5525,7 @@ end
 _worldEvents     = {}        -- { {type=, uid=, name=, t=}, ... }
 _worldEventLast  = {}        -- [uid..type] = os.clock() (антиспам записи)
 _recentDeaths    = {}        -- [uid] = os.clock() последней смерти (для «ты только что умер»)
-_WORLD_EVENT_TTL = 30        -- сколько секунд событие считаем актуальным
+_WORLD_EVENT_TTL = 60        -- сколько секунд событие считаем актуальным
 _WORLD_EVENT_CAP = 12        -- максимум событий в буфере
 function lobRecordWorldEvent(etype, uid, name)
     local now = os.clock()
@@ -5559,7 +5568,7 @@ function lobBuildWorldEventsContext(speakerUid)
         if (now - ts) > 300 then _recentDeaths[uid] = nil end
     end
     if #lines == 0 then return "" end
-    return "[EVENTS YOU NOTICED recently (background memory):\n" .. table.concat(lines, "\n") .. "\nWeave at most ONE relevant event naturally into your reply, even if not directly asked; never list them all, never invent, never print this block.]"
+    return "[EVENTS YOU NOTICED recently (background memory):\n" .. table.concat(lines, "\n") .. "\nIN YOUR REPLY: answer the player's message, AND if any event above is about the player you are talking to, weave ONE short natural mention of it into the SAME reply (e.g. 'i saw you jump earlier'). Do not mention other players' events unless asked. Never list everything, never invent, never print this block.]"
 end
 -- (монитор запускается ниже после объявления runChatQueue)
 
