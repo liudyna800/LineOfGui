@@ -2533,9 +2533,12 @@ Players.LocalPlayer.CharacterAdded:Connect(function(char)
     if not hum then return end
     hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
-        -- v20 Beta 3: своя смерть — тоже просто событие в память, без чата
+        -- v20 Beta 3: своя смерть — событие в память (без чата)
         task.delay(0.5, function()
-            pcall(function() lobRecordWorldEvent("mydro", Players.LocalPlayer.UserId, "you") end)
+            pcall(function()
+                _recentDeaths[Players.LocalPlayer.UserId] = os.clock()
+                lobRecordWorldEvent("mydro", Players.LocalPlayer.UserId, "you")
+            end)
         end)
     end)
 end)
@@ -5507,7 +5510,8 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 _worldEvents     = {}        -- { {type=, uid=, name=, t=}, ... }
 _worldEventLast  = {}        -- [uid..type] = os.clock() (антиспам записи)
-_WORLD_EVENT_TTL = 25        -- сколько секунд событие считаем актуальным
+_recentDeaths    = {}        -- [uid] = os.clock() последней смерти (для «ты только что умер»)
+_WORLD_EVENT_TTL = 30        -- сколько секунд событие считаем актуальным
 _WORLD_EVENT_CAP = 12        -- максимум событий в буфере
 function lobRecordWorldEvent(etype, uid, name)
     local now = os.clock()
@@ -5524,22 +5528,33 @@ end
 function lobBuildWorldEventsContext(speakerUid)
     local now = os.clock()
     local lines = {}
+    -- «ты только что умер» — по персональной памяти смертей, радиус не нужен
+    if speakerUid and _recentDeaths[speakerUid] and (now - _recentDeaths[speakerUid]) <= _WORLD_EVENT_TTL then
+        table.insert(lines, "- YOU (the player you are talking to) died " .. math.floor(now - _recentDeaths[speakerUid] + 0.5) .. "s ago and respawned")
+    end
     for _, e in ipairs(_worldEvents) do
         if (now - e.t) <= _WORLD_EVENT_TTL then
-            local ago = math.floor(now - e.t + 0.5)
-            local who = (speakerUid and e.uid == speakerUid)
-                and "the player you are talking to"
-                or tostring(e.name or "someone")
-            local verb = (e.type == "jump" and "jumped near you")
-                or (e.type == "stare" and "was staring at you")
-                or (e.type == "death" and "died nearby")
-                or (e.type == "mydro" and "you yourself died")
-                or tostring(e.type)
-            table.insert(lines, "- " .. who .. " " .. verb .. " (" .. ago .. "s ago)")
+            -- смерть говорящего уже добавлена персональной строкой — не дублируем
+            local skip = speakerUid and e.uid == speakerUid and e.type == "death"
+            if not skip then
+                local ago = math.floor(now - e.t + 0.5)
+                local who = (speakerUid and e.uid == speakerUid)
+                    and "the player you are talking to"
+                    or tostring(e.name or "someone")
+                local verb = (e.type == "jump" and "jumped near you")
+                    or (e.type == "stare" and "was staring at you")
+                    or (e.type == "death" and "died nearby")
+                    or (e.type == "mydro" and "you yourself died")
+                    or tostring(e.type)
+                table.insert(lines, "- " .. who .. " " .. verb .. " (" .. ago .. "s ago)")
+            end
         end
     end
+    for uid, ts in pairs(_recentDeaths) do
+        if (now - ts) > 300 then _recentDeaths[uid] = nil end
+    end
     if #lines == 0 then return "" end
-    return "[EVENTS YOU NOTICED recently (background memory; use ONLY if relevant to what the player says, never list them all, never print this block):\n" .. table.concat(lines, "\n") .. "]"
+    return "[EVENTS YOU NOTICED recently (background memory):\n" .. table.concat(lines, "\n") .. "\nWeave at most ONE relevant event naturally into your reply, even if not directly asked; never list them all, never invent, never print this block.]"
 end
 -- (монитор запускается ниже после объявления runChatQueue)
 
@@ -6646,15 +6661,14 @@ local function _watchPlayerDeath(p)
 
     _deathConns[uid] = hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
-        -- Проверяем радиус по lastPos (т.к. char уже может быть уничтожен)
+        -- ВСЕГДА помним, что ЭТОТ игрок умер (нужно для ответа «ты только что умер»)
+        pcall(function() _recentDeaths[uid] = os.clock() end)
+        -- А в общий буфер событий — только если умер рядом (иначе «по всему миру»)
         local myChar = Players.LocalPlayer.Character
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        -- FIX v20 Beta 3: без myRoot/lastPos радиус проверить нельзя — НЕ реагируем.
-        -- Раньше проверка пропускалась и бот откликался на смерть в ЛЮБОЙ точке карты.
         if not myRoot or not lastPos then return end
         local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
         if (lastPos - myRoot.Position).Magnitude > radius then return end
-        -- v20 Beta 3: смерть — событие в память, в чат НЕ пишем
         lobRecordWorldEvent("death", uid, p.DisplayName or p.Name)
     end)
 end
