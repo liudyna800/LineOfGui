@@ -6074,36 +6074,45 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    -- Таймаут модели: Gemini медленный — ждём до 40с (затем late-reply ниже)
+    -- Таймаут модели: 20с. При таймауте/пустом ответе — СРАЗУ повторяем запрос заново.
     local isGemini = model:find("^gemini")
     local isKimi = model:find("kimi") or model:find("moonshotai")
-    local timeoutSec = isGemini and 40 or (isKimi and 15 or 8)
+    local timeoutSec = isGemini and 20 or (isKimi and 15 or 8)
     local text, err
-    do
-        local done = false
+    local MAX_ATTEMPTS = 3
+    local attempts = {}
+    for attempt = 1, MAX_ATTEMPTS do
+        local slot = { done = false, t = nil }
+        attempts[attempt] = slot
         task.spawn(function()
-            text, err = providerRouter:chatCompletions(payload)
-            done = true
+            local a, b = providerRouter:chatCompletions(payload)
+            slot.t, slot.err = a, b
+            slot.done = true
         end)
         local waited = 0
-        while not done and waited < timeoutSec do
+        while not slot.done and waited < timeoutSec do
             task.wait(0.5)
             waited = waited + 0.5
         end
-        if not done then
-            print("[LOB] slow model " .. tostring(model) .. " (> " .. timeoutSec .. "s) — late reply will be sent when ready")
-            -- Не бросаем запрос: дождёмся в фоне и отправим ответ, когда модель ответит
-            task.spawn(function()
-                local waited2 = 0
-                while not done and waited2 < 75 do task.wait(0.5); waited2 = waited2 + 0.5 end
-                if done and type(text) == "string" and text ~= "" then
-                    local clean = lobStripServiceTags(text)
-                    clean = clean:gsub("%[NAME:[^%]]*%]%s*", "")
-                    if clean and clean ~= "" then pcall(sendBotMessage, clean) end
-                end
-            end)
-            return
+        if slot.done and type(slot.t) == "string" and slot.t ~= "" then
+            text = slot.t
+            break
         end
+        print("[LOB] attempt " .. attempt .. "/" .. MAX_ATTEMPTS .. " timeout/empty — immediate retry")
+    end
+    if not (text and text ~= "") then
+        -- все попытки провалились: последний запрос ещё «в полёте» — отправим его ответ, когда придёт
+        local last = attempts[#attempts]
+        task.spawn(function()
+            local w2 = 0
+            while last and not last.done and w2 < 75 do task.wait(0.5); w2 = w2 + 0.5 end
+            if last and last.done and type(last.t) == "string" and last.t ~= "" then
+                local clean = lobStripServiceTags(last.t)
+                clean = clean:gsub("%[NAME:[^%]]*%]%s*", "")
+                if clean and clean ~= "" then pcall(sendBotMessage, clean) end
+            end
+        end)
+        return
     end
     -- При rate limit (429) — просто логируем, не блокируем очередь
     if (not text or text == "") and err and tostring(err):find("429") then
