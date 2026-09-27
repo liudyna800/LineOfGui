@@ -5697,8 +5697,6 @@ local function handleQueuedChat(item)
             local spT = (speakerTeam ~= "" and speakerTeam) or "no team"
             local meAggro = lobTeamLooksAggro(myTeam)
             local spAggro = lobTeamLooksAggro(speakerTeam)
-            print(string.format("[DANGER-DBG] from=%s | me=[%s] sp=[%s] danger=%s aggroMe=%s aggroSp=%s",
-                spName, tostring(myTeam), tostring(speakerTeam), tostring(isDanger), tostring(meAggro), tostring(spAggro)))
             if isDanger then
                 local why
                 if spAggro and not meAggro then
