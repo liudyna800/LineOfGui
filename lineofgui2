@@ -5223,9 +5223,19 @@ end
 -- монитор: телепорт против воли, рагдолл, weld/freeze, враг-цель следования
 task.spawn(function()
     local lastPos, lastT, ragStart = nil, 0, 0
+    local lastChar, respawnAt = nil, 0
     while true do
         task.wait(0.3)
         if lobDangerActive() then
+            -- респавн/смена персонажа: сбрасываем трекинг, иначе прыжок позиции
+            -- при спавне ловится как ложный "телепорт против воли"
+            local curChar = Players.LocalPlayer.Character
+            if curChar ~= lastChar then
+                lastChar = curChar
+                lastPos, lastT, ragStart = nil, 0, 0
+                respawnAt = os.clock()
+            end
+            local inGrace = (os.clock() - respawnAt) < 2.5
             local myRoot, hum = nil, nil
             pcall(function() myRoot = getLocalRootPart() end)
             pcall(function() hum = getLocalHumanoid() end)
@@ -5238,7 +5248,7 @@ task.spawn(function()
                 -- телепорт: скачок >40 за тик без нашего движения (респавн исключён: новый char сбрасывает lastPos=nil через CharacterAdded? нет — сбрасываем здесь при смене персонажа не выйдет; порог 40 + интервал <1.5с достаточно, респавн даёт d от старой точки но lastT старый -> интервал большой -> пропуск)
                 local selfMoving = _isGoing or _isFollowing
                     or (type(FollowManager) == "table" and FollowManager.Active)
-                if lastPos and not selfMoving and (now - lastT) < 1.5 then
+                if lastPos and not selfMoving and (now - lastT) < 1.5 and not inGrace then
                     local d = 0
                     pcall(function() d = (myRoot.Position - lastPos).Magnitude end)
                     if d > 40 then
@@ -5259,7 +5269,7 @@ task.spawn(function()
                 if st == Enum.HumanoidStateType.Seated then rag = false end
                 if rag and not seated then
                     if ragStart == 0 then ragStart = now end
-                    if (now - ragStart) > 0.6 and not _danger.ragdoll then
+                    if (now - ragStart) > 0.6 and not _danger.ragdoll and not inGrace then
                         _danger.ragdoll = true
                         lobDangerEvent("[SYSTEM: You were ragdolled / knocked down and are recovering. React briefly in 1 sentence, stay in character.]", "rag", 90, 0)
                     end
@@ -5269,7 +5279,7 @@ task.spawn(function()
                 end
                 -- weld/freeze: якорь, нулевая скорость ходьбы, чужой weld (сидя в транспорте — норма)
                 local stuck, why = false, ""
-                if not seated then
+                if not seated and not inGrace then
                     pcall(function()
                         if myRoot.Anchored then stuck, why = true, "anchored" end
                     end)
@@ -5452,6 +5462,7 @@ end
 -- v17.5: Детектор языка + кеш последнего языка каждого игрока
 -- Проблема: эмодзи/одна буква → detectLang возвращает nil → фолбэк на кеш
 local _userLangCache = {}  -- userId → "RU"|"EN"
+_lastGlobalLang = nil       -- последний определённый язык (для world/danger событий)
 
 -- §LANG
 local function detectLang(text)
@@ -5474,6 +5485,7 @@ local function getLangForUser(text, userId)
     local lang = detectLang(text)
     if lang then
         if userId then _userLangCache[userId] = lang end
+        _lastGlobalLang = lang
         return lang
     end
     if userId and _userLangCache[userId] then
@@ -5850,7 +5862,14 @@ local function handleQueuedChat(item)
         end
     end
 
-    local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
+    -- world/danger события больше НЕ форсируют русский: язык игрока-источника,
+    -- иначе последний язык чата, иначе EN. Раньше было жёстко "RU".
+    local langTag
+    if item.isWorld then
+        langTag = (item.userId and item.userId ~= 0 and _userLangCache[item.userId]) or _lastGlobalLang or "EN"
+    else
+        langTag = getLangForUser(item.cleaned, item.userId)
+    end
     table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
     local model = getModel(settings)
