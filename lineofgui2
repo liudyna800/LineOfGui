@@ -2531,15 +2531,20 @@ Players.LocalPlayer.CharacterAdded:Connect(function(char)
 
     local hum = char:WaitForChild("Humanoid", 5)
     if not hum then return end
-    hum.Died:Connect(function()
+    -- v20 Beta 3: своя смерть — событие в память (без чата).
+    -- Ловим и по HealthChanged: мгновенный ресет иногда не даёт Humanoid.Died.
+    local function lobMarkSelfDead()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
-        -- v20 Beta 3: своя смерть — событие в память (без чата)
-        task.delay(0.5, function()
-            pcall(function()
-                _recentDeaths[Players.LocalPlayer.UserId] = os.clock()
-                lobRecordWorldEvent("mydro", Players.LocalPlayer.UserId, "you")
-            end)
+        pcall(function()
+            _recentDeaths[Players.LocalPlayer.UserId] = os.clock()
+            lobRecordWorldEvent("mydro", Players.LocalPlayer.UserId, "you")
         end)
+    end
+    pcall(function()
+        hum.HealthChanged:Connect(function(hp) if hp <= 0 then lobMarkSelfDead() end end)
+    end)
+    hum.Died:Connect(function()
+        task.delay(0.5, lobMarkSelfDead)
     end)
 end)
 
@@ -6658,6 +6663,15 @@ local function _watchPlayerDeath(p)
         -- При ресспавне (CharacterAdded) — останавливаем горутину
         p.CharacterAdded:Connect(function() alive = false end)
     end
+
+    -- v20 Beta 3: ловим смерть и по здоровью — мгновенный ресет может не дать Died
+    pcall(function()
+        hum.HealthChanged:Connect(function(hp)
+            if hp <= 0 and ClientSettings.WorldReactions and ClientSettings.Enabled then
+                _recentDeaths[uid] = os.clock()
+            end
+        end)
+    end)
 
     _deathConns[uid] = hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
