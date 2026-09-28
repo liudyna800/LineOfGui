@@ -265,6 +265,7 @@ local function saveSettings()
             "TokenEconomy="    .. b(cs.TokenEconomy,    false),
             "ReplyCache="      .. b(cs.ReplyCache,      false),
             "SearchNotice="    .. b(cs.SearchNotice,    true),
+            "SmartWalk="       .. b(cs.SmartWalk,       false),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
             "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
@@ -333,6 +334,7 @@ local function loadSettings()
         cs.TokenEconomy    = getBool("TokenEconomy",    false)
         cs.ReplyCache      = getBool("ReplyCache",      false)
         cs.SearchNotice    = getBool("SearchNotice",    true)
+        cs.SmartWalk       = getBool("SmartWalk",       false)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
         cs.Temperature     = getNum("Temperature",      0.7)
         cs.MaxTokens       = getNum("MaxTokens",        1024)
@@ -674,6 +676,7 @@ ClientSettings = {
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     ReplyCache = false,     -- v20 Beta 3: кэш ответов ИИ (повторный вопрос — мгновенно, без запроса)
     SearchNotice = true,    -- v20 Beta 3: заготовленные сообщения "ищу в интернете/вики…" во время поиска
+    SmartWalk = false,      -- v20 Beta 3: умная ходьба (бот сам ходит, ищет собеседников, бродит)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     GameUnderstanding = false, -- v20 Beta 2: game understanding
     DangerSense = false, -- v20 Beta 2: чувство опасности (только с GameUnderstanding)
@@ -750,6 +753,7 @@ do
     if cs2.TokenEconomy    == nil then cs2.TokenEconomy    = false end
     if cs2.ReplyCache      == nil then cs2.ReplyCache      = false end
     if cs2.SearchNotice    == nil then cs2.SearchNotice    = true  end
+    if cs2.SmartWalk       == nil then cs2.SmartWalk       = false end
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     local savedGemini = loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
@@ -4997,6 +5001,12 @@ task.spawn(function()
 end)
 print("[LOB] build: beta2-gamewiki26 model-search")
 
+-- v20 Beta 3: авто-старт умной ходьбы, если включена в настройках
+task.spawn(function()
+    task.wait(6)
+    if ClientSettings.SmartWalk then pcall(lobSmartWalkStart) end
+end)
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v17: PLAYER AWARENESS SYSTEM
 -- ИИ видит: кто рядом, с какой стороны, двигается ли/стоит/ведёт себя странно
@@ -5910,6 +5920,159 @@ local function getHistory(settings, userId)
         if not ChatHistory["Global"] then ChatHistory["Global"] = {} end
         return ChatHistory["Global"]
     end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v20 Beta 3: УМНАЯ ХОДЬБА — бот сам ходит как игрок: обходит препятствия
+-- (Pathfinding), идёт к тем, кто общается, уходит если попросили, а если
+-- никого — бродит и бормочет. Всё в глобалах (лимит локалок).
+-- ═══════════════════════════════════════════════════════════════════════════
+_smartWalk = { active = false, thread = nil, target = nil, targetUntil = 0,
+    avoid = {}, lastIdle = 0 }
+_lastChatAt = {}
+_SMART_WALK_IDLE_TALK_CD = 40
+_SMART_WALK_AVOID_SEC = 60
+
+function lobSmartWalkNoteChat(userId)
+    if userId then _lastChatAt[userId] = os.clock() end
+end
+
+function lobSmartWalkLeave(userId)
+    if userId then _smartWalk.avoid[userId] = os.clock() + _SMART_WALK_AVOID_SEC end
+    if _smartWalk.target and _smartWalk.target.UserId == userId then _smartWalk.target = nil end
+    _smartWalk.targetUntil = 0
+    pcall(function() stopFollowing() end)
+end
+
+function lobIsLeaveCommand(msg)
+    local m = tostring(msg or ""):lower()
+    local words = { "уйди", "уходи", "отстань", "отвали", "иди отсюда", "не подходи", "отойди",
+        "пошёл отсюда", "дай пройти", "go away", "leave me", "get lost", "shoo", "back off" }
+    for _, w in ipairs(words) do if m:find(w, 1, true) then return true end end
+    return false
+end
+
+function lobSmartWalkPickChatter()
+    local char = Players.LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local now = os.clock()
+    local best, bestScore = nil, -1
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Players.LocalPlayer then
+            local pr = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if pr and (_smartWalk.avoid[p.UserId] or 0) < now then
+                local t = _lastChatAt[p.UserId]
+                local spoke = t and (now - t) < 60
+                local dist = (pr.Position - root.Position).Magnitude
+                local score = (spoke and 1000 or 0) - dist
+                if score > bestScore then best, bestScore = p, score end
+            end
+        end
+    end
+    return best
+end
+
+function lobSmartPathMove(targetPos, cancelFn)
+    local PathfindingService = game:GetService("PathfindingService")
+    local char = Players.LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then return false end
+    local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+    local ok = pcall(function() path:ComputeAsync(root.Position, targetPos) end)
+    if not ok or path.Status ~= Enum.PathStatus.Success then
+        pcall(function() hum:MoveTo(targetPos) end)
+        return false
+    end
+    for _, wp in ipairs(path:GetWaypoints()) do
+        if cancelFn and cancelFn() then return false end
+        local cur = Players.LocalPlayer.Character
+        local cr = cur and cur:FindFirstChild("HumanoidRootPart")
+        local ch = cur and cur:FindFirstChildOfClass("Humanoid")
+        if not cr or not ch or ch.Health <= 0 then return false end
+        if (cr.Position - wp.Position).Magnitude < 4 then continue end
+        if wp.Action == Enum.PathWaypointAction.Jump then ch.Jump = true end
+        ch:MoveTo(wp.Position)
+        local arrived, t = false, 0
+        local conn = ch.MoveToFinished:Connect(function(r) arrived = r end)
+        while not arrived and t < 2.5 do
+            if cancelFn and cancelFn() then break end
+            local h2 = Players.LocalPlayer.Character
+            h2 = h2 and h2:FindFirstChildOfClass("Humanoid")
+            if not h2 or h2.Health <= 0 then break end
+            task.wait(0.1); t = t + 0.1
+        end
+        pcall(function() conn:Disconnect() end)
+    end
+    return true
+end
+
+function lobSmartWalkStart()
+    if _smartWalk.active then return end
+    _smartWalk.active = true
+    _smartWalk.thread = task.spawn(function()
+        while _smartWalk.active do
+            task.wait(0.4)
+            if not (ClientSettings.Enabled and ClientSettings.SmartWalk) then task.wait(1) continue end
+            local char = Players.LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not hum or not root or hum.Health <= 0 then task.wait(1) continue end
+            -- не мешаем follow/goto/эмоциям/прыжкам
+            if _isFollowing or _isGoing or _isJumping or _isSpinning then task.wait(0.5) continue end
+
+            local now = os.clock()
+            local target = _smartWalk.target
+            if target and (not target.Parent or (_smartWalk.avoid[target.UserId] or 0) > now) then target = nil end
+            if not target or (now - (_smartWalk.targetUntil or 0)) > 25 then
+                target = lobSmartWalkPickChatter()
+                _smartWalk.target = target
+                _smartWalk.targetUntil = now
+            end
+
+            local handled = false
+            if target and target.Character then
+                local tr = target.Character:FindFirstChild("HumanoidRootPart")
+                if tr then
+                    handled = true
+                    if (tr.Position - root.Position).Magnitude > 8 then
+                        lobSmartPathMove(tr.Position, function()
+                            return (not _smartWalk.active) or _smartWalk.target ~= target or (_smartWalk.avoid[target.UserId] or 0) > os.clock()
+                        end)
+                    else
+                        pcall(function() smoothLookAt(tr.Position) end)
+                        task.wait(1)
+                    end
+                end
+            end
+
+            if not handled then
+                -- никого нет: бредём к случайной точке и изредка бормочем
+                local ang = math.random() * math.pi * 2
+                local rad = math.random(15, 90)
+                local dest = root.Position + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
+                lobSmartPathMove(dest, function() return (not _smartWalk.active) or _smartWalk.target ~= nil end)
+                if (now - (_smartWalk.lastIdle or 0)) > _SMART_WALK_IDLE_TALK_CD then
+                    _smartWalk.lastIdle = now
+                    local lines = { "hmm, quiet here…", "anyone around?", "where did everyone go?", "kinda bored…", "just walking around" }
+                    pcall(sendBotMessage, lines[math.random(#lines)])
+                end
+            end
+        end
+    end)
+end
+
+function lobSmartWalkStop()
+    _smartWalk.active = false
+    if _smartWalk.thread then pcall(task.cancel, _smartWalk.thread) _smartWalk.thread = nil end
+    _smartWalk.target = nil
+    pcall(function()
+        local char = Players.LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if hum and root then hum:MoveTo(root.Position) end
+    end)
 end
 
 -- §HANDLE_CHAT
@@ -7137,6 +7300,12 @@ local function processChatMessage(player, rawMessage)
     -- Blacklist check
     if isBlacklisted(settings, player.UserId) then return end
 
+    -- v20 Beta 3: умная ходьба — кто общается; и «уйди» → отойти к другим
+    if ClientSettings.SmartWalk then
+        lobSmartWalkNoteChat(player.UserId)
+        if lobIsLeaveCommand(rawMessage) then lobSmartWalkLeave(player.UserId) end
+    end
+
     -- v17.5: Антиспам — игнорируем если то же самое сообщение подряд
     if settings.AntiSpam then
         local lastData = _lastMsgPerUser[player.UserId]
@@ -7431,6 +7600,11 @@ local function updateChatListening()
 end
 
 updateChatListening()
+
+-- защита от двойного запуска: следующий запуск сможет отключить ЭТИ слушатели
+_LOB_DISCONNECT_LISTENERS = function()
+    pcall(chatListenerDisconnectAll)
+end
 
 -- UI Components
 -- UI Components
@@ -10052,12 +10226,7 @@ autoReplyToggle = makeToggleRow(
     function(state)
         ClientSettings.AutoReply = state
         saveSettings()
-updateChatListening()
-
--- защита от двойного запуска: следующий запуск сможет отключить ЭТИ слушатели
-_LOB_DISCONNECT_LISTENERS = function()
-    pcall(chatListenerDisconnectAll)
-end
+        updateChatListening()
     end
 )
 
@@ -10216,6 +10385,19 @@ makeToggleRow(
     function(state)
         ClientSettings.SearchNotice = state
         saveSettings()
+    end
+)
+
+-- v20 Beta 3: умная ходьба
+makeToggleRow(
+    automation,
+    "🚶 Умная ходьба",
+    "Бот сам ходит как игрок: обходит препятствия, идёт к тем кто общается, уходит если попросили, а если никого — бродит и бормочет себе под нос.",
+    ClientSettings.SmartWalk == true,
+    function(state)
+        ClientSettings.SmartWalk = state
+        saveSettings()
+        if state then pcall(lobSmartWalkStart) else pcall(lobSmartWalkStop) end
     end
 )
 
