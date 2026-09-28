@@ -10139,8 +10139,8 @@ makeToggleRow(
 
 makeToggleRow(
     automation,
-    "GameUnderstanding",
-    "Bot reads about the place via search and knows teams and goal.",
+    "🧠 Понимание игры",
+    "Бот ищет информацию об этой игре в вебе и вики: узнаёт жанр, цель и команды. Нужен для «Чувства опасности».",
     ClientSettings.GameUnderstanding == true,
     function(state)
         ClientSettings.GameUnderstanding = state
