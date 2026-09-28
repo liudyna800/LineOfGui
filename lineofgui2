@@ -5979,6 +5979,8 @@ function lobSmartPathMove(targetPos, cancelFn)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not hum or not root then return false end
+    -- не идём, пока сидим/танцуем: останавливаем активную эмоцию перед ходьбой
+    pcall(function() stopCurrentEmote() end)
     local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
     local ok = pcall(function() path:ComputeAsync(root.Position, targetPos) end)
     if not ok or path.Status ~= Enum.PathStatus.Success then
