@@ -263,6 +263,7 @@ local function saveSettings()
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
             "FollowConfirm="   .. b(cs.FollowConfirm,   true),
             "TokenEconomy="    .. b(cs.TokenEconomy,    false),
+            "ReplyCache="      .. b(cs.ReplyCache,      false),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
             "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
@@ -329,6 +330,7 @@ local function loadSettings()
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
         cs.FollowConfirm   = getBool("FollowConfirm",   true)
         cs.TokenEconomy    = getBool("TokenEconomy",    false)
+        cs.ReplyCache      = getBool("ReplyCache",      false)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
         cs.Temperature     = getNum("Temperature",      0.7)
         cs.MaxTokens       = getNum("MaxTokens",        1024)
@@ -668,6 +670,7 @@ ClientSettings = {
     ActionsEnabled = true,  -- v16:
     InventoryEnabled = true, -- v20 Beta 2: brat/ispolzovat predmety iz inventarya команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
+    ReplyCache = false,     -- v20 Beta 3: кэш ответов ИИ (повторный вопрос — мгновенно, без запроса)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     GameUnderstanding = false, -- v20 Beta 2: game understanding
     DangerSense = false, -- v20 Beta 2: чувство опасности (только с GameUnderstanding)
@@ -742,6 +745,7 @@ do
     if cs2.AutoReply       == nil then cs2.AutoReply       = false end
     if cs2.WebSearch       == nil then cs2.WebSearch       = false end
     if cs2.TokenEconomy    == nil then cs2.TokenEconomy    = false end
+    if cs2.ReplyCache      == nil then cs2.ReplyCache      = false end
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     local savedGemini = loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
@@ -5857,6 +5861,14 @@ local function getHistory(settings, userId)
 end
 
 -- §HANDLE_CHAT
+-- v20 Beta 3: кэш ответов ИИ (тоггл «Кэширование ответов»)
+_replyCache = {}
+_REPLY_CACHE_TTL = 300
+_REPLY_CACHE_CAP = 100
+local function lobReplyCacheKey(settings, cleanMsg)
+    return tostring(getModel(settings)) .. "|" .. tostring(settings.PersonalityId or "") .. "|" .. tostring(cleanMsg or ""):lower()
+end
+
 local function handleQueuedChat(item)
     local _t0 = os.clock()
     local settings = ClientSettings
@@ -5873,6 +5885,23 @@ local function handleQueuedChat(item)
     -- [v19.9.8] ФИКС: если игрок ушёл пока ждал в очереди — пропускаем запрос
     -- БАГИ ДО: тратились токены на сообщения игроков которые уже вышли с сервера
     if not item.isWorld and item.player and not item.player.Parent then return end
+
+    -- v20 Beta 3: кэш ответов — повторный вопрос отвечаем мгновенно (без запроса к модели)
+    if settings.ReplyCache and not item.isWorld and item.cleaned then
+        local ck = lobReplyCacheKey(settings, item.cleaned)
+        local hit = _replyCache[ck]
+        if hit and type(hit.text) == "string" and hit.text ~= "" and (os.clock() - hit.t) < _REPLY_CACHE_TTL then
+            print("[LOB] cache hit: " .. tostring(item.cleaned):sub(1, 40))
+            if settings.CameraLook and item.player and item.player.Character then
+                local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
+                if pRoot then smoothLookAt(pRoot.Position) end
+            end
+            local hist = getHistory(settings, item.userId)
+            if hist then appendHistory(hist, item.cleaned, hit.text) end
+            sendBotMessage(hit.text)
+            return
+        end
+    end
 
     -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
@@ -6702,6 +6731,19 @@ local function handleQueuedChat(item)
         print("[LOB] reply time: " .. string.format("%.1fs", os.clock() - _t0) .. " for: " .. tostring(item.cleaned):sub(1, 40))
         local sok, serr = pcall(sendBotMessage, cleanText)
         if not sok then print("[LOB] send FAIL: " .. tostring(serr)) end
+        -- v20 Beta 3: кладём в кэш только чистые текстовые ответы (без действий)
+        if settings.ReplyCache and not item.isWorld and not actionName and cleanText ~= "" then
+            local ck = lobReplyCacheKey(settings, item.cleaned)
+            _replyCache[ck] = { text = cleanText, t = os.clock() }
+            if #_replyCache > _REPLY_CACHE_CAP then
+                local n = 0
+                for k in pairs(_replyCache) do
+                    _replyCache[k] = nil
+                    n = n + 1
+                    if n >= math.floor(_REPLY_CACHE_CAP / 2) then break end
+                end
+            end
+        end
     end
 end
 
@@ -10045,6 +10087,19 @@ makeToggleRow(
     ClientSettings.TokenEconomy == true,
     function(state)
         ClientSettings.TokenEconomy = state
+        saveSettings()
+    end
+)
+
+-- v20 Beta 3: Кэширование ответов
+makeToggleRow(
+    automation,
+    "🗃️ Кэширование ответов",
+    "Повторный вопрос с тем же текстом — мгновенный ответ из кэша, БЕЗ запроса к модели. Экономит время и токены; ответ может не учитывать контекст. Кэш живёт ~5 минут.",
+    ClientSettings.ReplyCache == true,
+    function(state)
+        ClientSettings.ReplyCache = state
+        if not state then _replyCache = {} end
         saveSettings()
     end
 )
