@@ -408,8 +408,10 @@ local TextChatService = game:GetService("TextChatService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 
--- Очистка предыдущего GUI при перезапуске
+-- Очистка предыдущего GUI + отключаем слушатели чата ПРОШЛОГО запуска.
+-- Без этого при повторном запуске скрипта бот отвечает ДВАЖДЫ (два слушателя).
 do
+    if _LOB_DISCONNECT_LISTENERS then pcall(_LOB_DISCONNECT_LISTENERS) end
     local ok, pg = pcall(function()
         return Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
     end)
@@ -3792,6 +3794,7 @@ function InventoryBeta2.DoTake(name)
 		or nm == "что-нибудь" or nm == "что-то" or nm == "чего-нибудь"
 		or nm == "чтото" or nm == "чтонить" or nm == "что-нить" or nm == "чёнить" or nm == "чё-нибудь"
 		or nm == "чёто" or nm == "че-то" or nm == "любой" or nm == "любое" or nm == "рандом"
+		or nm == "взять" or nm == "возьми" or nm == "give" or nm == "take" or nm == "grab" or nm == "equip" or nm == "it"
 		or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
 	then name = "" end
 	if name == "" then
@@ -3890,6 +3893,8 @@ function InventoryBeta2.DoUse(name)
 	if nm == "" or nm == "something" or nm == "anything" or nm == "thing" or nm == "sth"
 		or nm == "что-нибудь" or nm == "что-то" or nm == "чтото" or nm == "чтонить"
 		or nm == "что-нить" or nm == "чёнить" or nm == "чёто" or nm == "любой" or nm == "рандом"
+		or nm == "используй" or nm == "использовать" or nm == "использую" or nm == "примени" or nm == "use"
+		or nm == "it" or nm == "this" or nm == "that" or nm == "его" or nm == "её" or nm == "это"
 		or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
 	then name = nil end
 	if name and name ~= "" then
@@ -3976,7 +3981,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
         local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoTake(iname)
-        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
+        -- отправку итога делает round-trip (здесь не дублируем)
         print("[INV] take [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         
         return isay
@@ -3985,7 +3990,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
         local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoEat(iname)
-        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
+        -- отправку итога делает round-trip (здесь не дублируем)
         print("[INV] eat [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         
         return isay
@@ -3996,7 +4001,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         local iok, isay = InventoryBeta2.DoUse(iname)
         print("[INV] use [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
         
-        if iok and (InventoryBeta2.lastScore or 0) > 0 then pcall(sendBotMessage, isay) end
+        -- отправку итога делает round-trip (здесь не дублируем)
     end
     ACTION_HANDLERS.putaway = function(_)
         local iok, isay = InventoryBeta2.DoPutaway()
@@ -9904,7 +9909,12 @@ autoReplyToggle = makeToggleRow(
     function(state)
         ClientSettings.AutoReply = state
         saveSettings()
-        updateChatListening()
+updateChatListening()
+
+-- защита от двойного запуска: следующий запуск сможет отключить ЭТИ слушатели
+_LOB_DISCONNECT_LISTENERS = function()
+    pcall(chatListenerDisconnectAll)
+end
     end
 )
 
