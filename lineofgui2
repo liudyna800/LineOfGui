@@ -4801,6 +4801,36 @@ task.spawn(function()
     task.wait(4)
     if ClientSettings.GameUnderstanding then fetchGameContext(true) end
 end)
+
+-- v20 Beta 3: ЗАГРУЗКА СИСТЕМНЫХ ПРОМПТОВ + прогрев модели.
+-- Строим системный промпт заранее и делаем один дешёвый запрос, чтобы первый
+-- реальный ответ был быстрым (соединение/DNS/модель уже разогреты).
+task.spawn(function()
+    task.wait(6)
+    pcall(function()
+        local sys = makeSystemPrompt(ClientSettings)
+        if type(sys) == "string" and sys ~= "" then
+            ClientSettings._sysPromptBuilt = true
+        end
+        local model = getModel and getModel(ClientSettings) or ""
+        if model and model ~= "" and providerRouter then
+            task.spawn(function()
+                pcall(function()
+                    providerRouter:chatCompletions({
+                        model = model, max_tokens = 1, temperature = 0,
+                        messages = {
+                            { role = "system", content = sys or "You are a player." },
+                            { role = "user", content = "ok" },
+                        },
+                    })
+                end)
+                ClientSettings._sysWarm = true
+            end)
+        else
+            ClientSettings._sysWarm = true
+        end
+    end)
+end)
 print("[LOB] build: beta2-gamewiki26 model-search")
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -10159,7 +10189,11 @@ do
                 local havePlace = _placeInfo and _placeInfo.name and _placeInfo.name ~= "" and _placeInfo.name ~= "Unknown Game"
                 local haveCtx = _gameContext and _gameContext.text and _gameContext.text ~= ""
                 if haveCtx then
-                    title, sub2, col = "Готов к общению", "Данные об игре загружены", Color3.fromRGB(80, 220, 120)
+                    if not ClientSettings._sysWarm then
+                        title, sub2, col = "Готовлю промпты…", "Прогрев системных промптов и модели", Color3.fromRGB(100, 170, 255)
+                    else
+                        title, sub2, col = "Готов к общению", "Данные об игре загружены", Color3.fromRGB(80, 220, 120)
+                    end
                 elseif _gameContextFetching then
                     title, sub2, col = "Сканирую игру…", "Веб-поиск и вики, подожди немного", Color3.fromRGB(220, 180, 60)
                 elseif havePlace then
