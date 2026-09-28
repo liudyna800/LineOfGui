@@ -5961,26 +5961,18 @@ function lobReplyCacheServe(settings, cleanMsg, player, userId)
     return true
 end
 
--- v20 Beta 3: заготовленные сообщения, пока ИИ ищет/думает (на языке игрока).
+-- v20 Beta 3: заготовленные сообщения (ТОЛЬКО АНГЛИЙСКИЙ), пока ИИ ищет/думает.
 -- kind: "search" (начался поиск) / "busy" (игрок пишет, пока бот занят).
--- По 3 варианта на тип и язык — чтобы Roblox не принял за спам.
+-- По 3 варианта на тип — чтобы Roblox не принял за спам.
 _searchNoticeAt = { search = 0, busy = 0 }
 _botBusyCount = 0
 _SEARCH_NOTICE = {
-    search = {
-        ru = { "Секундочку, ищу информацию…", "Момент, сейчас гляну…", "Погоди чуток, ищу…" },
-        en = { "One sec, looking it up…", "Hold on, let me check…", "Gimme a moment, searching…" },
-    },
-    busy = {
-        ru = { "Ещё отвечаю на прошлое, секунду…", "Погоди, я ещё думаю над прошлым сообщением…", "Секунд, договорю и отвечу…" },
-        en = { "Still on your previous message, one sec…", "Hold on, I'm still answering the last one…", "Hang on, almost done with the previous…" },
-    },
+    search = { "One sec, looking it up…", "Hold on, let me check…", "Gimme a moment, searching…" },
+    busy = { "Still on your previous message, one sec…", "Hold on, I'm still answering the last one…", "Hang on, almost done with the previous…" },
 }
 function lobSendSearchNotice(kind, lang)
     if not ClientSettings.SearchNotice then return end
-    local pack = _SEARCH_NOTICE[kind]
-    if type(pack) ~= "table" then return end
-    local list = pack[lang] or pack.ru
+    local list = _SEARCH_NOTICE[kind]
     if type(list) ~= "table" or #list == 0 then return end
     local now = os.clock()
     local cd = (kind == "busy") and 8 or 15
