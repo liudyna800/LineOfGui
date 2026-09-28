@@ -5861,12 +5861,33 @@ local function getHistory(settings, userId)
 end
 
 -- §HANDLE_CHAT
--- v20 Beta 3: кэш ответов ИИ (тоггл «Кэширование ответов»)
+-- v20 Beta 3: кэш ответов ИИ (тоггл «Кэширование ответов»). Всё в глобалах,
+-- чтобы не тратить лимит локалок внутри handleQueuedChat.
 _replyCache = {}
 _REPLY_CACHE_TTL = 300
 _REPLY_CACHE_CAP = 100
 function lobReplyCacheKey(settings, cleanMsg)
     return tostring(getModel(settings)) .. "|" .. tostring(settings.PersonalityId or "") .. "|" .. tostring(cleanMsg or ""):lower()
+end
+function lobReplyCacheGet(settings, cleanMsg)
+    if not settings.ReplyCache or cleanMsg == nil then return nil end
+    local hit = _replyCache[lobReplyCacheKey(settings, cleanMsg)]
+    if hit and type(hit.text) == "string" and hit.text ~= "" and (os.clock() - hit.t) < _REPLY_CACHE_TTL then
+        return hit.text
+    end
+    return nil
+end
+function lobReplyCachePut(settings, cleanMsg, text)
+    if not settings.ReplyCache or cleanMsg == nil or type(text) ~= "string" or text == "" then return end
+    _replyCache[lobReplyCacheKey(settings, cleanMsg)] = { text = text, t = os.clock() }
+    if #_replyCache > _REPLY_CACHE_CAP then
+        local n = 0
+        for k in pairs(_replyCache) do
+            _replyCache[k] = nil
+            n = n + 1
+            if n >= math.floor(_REPLY_CACHE_CAP / 2) then break end
+        end
+    end
 end
 
 local function handleQueuedChat(item)
@@ -5887,18 +5908,17 @@ local function handleQueuedChat(item)
     if not item.isWorld and item.player and not item.player.Parent then return end
 
     -- v20 Beta 3: кэш ответов — повторный вопрос отвечаем мгновенно (без запроса к модели)
-    if settings.ReplyCache and not item.isWorld and item.cleaned then
-        local ck = lobReplyCacheKey(settings, item.cleaned)
-        local hit = _replyCache[ck]
-        if hit and type(hit.text) == "string" and hit.text ~= "" and (os.clock() - hit.t) < _REPLY_CACHE_TTL then
+    if settings.ReplyCache and not item.isWorld then
+        local cached = lobReplyCacheGet(settings, item.cleaned)
+        if cached then
             print("[LOB] cache hit: " .. tostring(item.cleaned):sub(1, 40))
             if settings.CameraLook and item.player and item.player.Character then
                 local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
                 if pRoot then smoothLookAt(pRoot.Position) end
             end
             local hist = getHistory(settings, item.userId)
-            if hist then appendHistory(hist, item.cleaned, hit.text) end
-            sendBotMessage(hit.text)
+            if hist then appendHistory(hist, item.cleaned, cached) end
+            sendBotMessage(cached)
             return
         end
     end
@@ -6732,18 +6752,7 @@ local function handleQueuedChat(item)
         local sok, serr = pcall(sendBotMessage, cleanText)
         if not sok then print("[LOB] send FAIL: " .. tostring(serr)) end
         -- v20 Beta 3: кладём в кэш только чистые текстовые ответы (без действий)
-        if settings.ReplyCache and not item.isWorld and not actionName and cleanText ~= "" then
-            local ck = lobReplyCacheKey(settings, item.cleaned)
-            _replyCache[ck] = { text = cleanText, t = os.clock() }
-            if #_replyCache > _REPLY_CACHE_CAP then
-                local n = 0
-                for k in pairs(_replyCache) do
-                    _replyCache[k] = nil
-                    n = n + 1
-                    if n >= math.floor(_REPLY_CACHE_CAP / 2) then break end
-                end
-            end
-        end
+        if not actionName and not item.isWorld then lobReplyCachePut(settings, item.cleaned, cleanText) end
     end
 end
 
