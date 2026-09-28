@@ -5865,7 +5865,7 @@ end
 _replyCache = {}
 _REPLY_CACHE_TTL = 300
 _REPLY_CACHE_CAP = 100
-local function lobReplyCacheKey(settings, cleanMsg)
+function lobReplyCacheKey(settings, cleanMsg)
     return tostring(getModel(settings)) .. "|" .. tostring(settings.PersonalityId or "") .. "|" .. tostring(cleanMsg or ""):lower()
 end
 
