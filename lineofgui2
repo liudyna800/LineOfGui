@@ -6613,33 +6613,38 @@ local function handleQueuedChat(item)
 
         print("[INV-RT] " .. actionName .. " [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
 
-        -- v20 Beta 3: фразу формирует ИИ (натурально + на языке игрока), но КОРОТКИМ
-        -- дешёвым запросом (без всего контекста) — быстро, в отличие от старого round-trip.
-        do
-            local pp = {
-                model = model, temperature = 0.7, max_tokens = 60,
-                messages = {
-                    { role = "system", content = "You are a Roblox player bot. The action that JUST happened: " .. tostring(isay) .. ". Write ONE very short casual chat line reacting to it, in the player's language. No emojis, no [DO:] tags, no quotation marks. Do not invent a different outcome." },
-                    { role = "user", content = "[LANG:" .. tostring(langTag or "RU") .. "] " .. tostring(item.cleaned or "") },
-                },
-            }
-            if model:find("^qwen/") then pp.reasoning_effort = "none" pp.temperature = nil end
-            if model:find("gpt%-oss") then pp.reasoning_effort = "low" end
-            local phrase, doneP = nil, false
-            task.spawn(function()
-                local okP, tP = pcall(function() return providerRouter:chatCompletions(pp) end)
-                phrase = (okP and type(tP) == "string") and tP or nil
-                doneP = true
-            end)
-            local wp = 0
-            while not doneP and wp < 6 do task.wait(0.25) wp = wp + 0.25 end
-            if type(phrase) == "string" and phrase:match("%S") then
-                phrase = phrase:match("^%s*(.-)%s*$") or phrase
-                phrase = phrase:gsub("<think>.-</think>%s*", "")
-                phrase = lobStripServiceTags(phrase)
-                cleanText = (phrase ~= "" and phrase) or isay
-            else
-                cleanText = isay
+        -- v20 Beta 3: при УСПЕХЕ ответ модели уже правдив ("взял …") — отправляем его
+        -- и НЕ зовём модель снова (быстро, живой текст, правильный язык).
+        -- Второй короткий запрос — ТОЛЬКО при провале (модель могла соврать).
+        if iok and type(cleanText) == "string" and cleanText:match("%S") then
+            -- оставляем cleanText как есть
+        else
+            do
+                local pp = {
+                    model = model, temperature = 0.7, max_tokens = 60,
+                    messages = {
+                        { role = "system", content = "You are a Roblox player bot. The tool action FAILED: " .. tostring(isay) .. ". Write ONE very short casual chat line in the player's language honestly saying you could not do it. No emojis, no [DO:] tags, no quotes." },
+                        { role = "user", content = "[LANG:" .. tostring(langTag or "RU") .. "] " .. tostring(item.cleaned or "") },
+                    },
+                }
+                if model:find("^qwen/") then pp.reasoning_effort = "none" pp.temperature = nil end
+                if model:find("gpt%-oss") then pp.reasoning_effort = "low" end
+                local phrase, doneP = nil, false
+                task.spawn(function()
+                    local okP, tP = pcall(function() return providerRouter:chatCompletions(pp) end)
+                    phrase = (okP and type(tP) == "string") and tP or nil
+                    doneP = true
+                end)
+                local wp = 0
+                while not doneP and wp < 5 do task.wait(0.25) wp = wp + 0.25 end
+                if type(phrase) == "string" and phrase:match("%S") then
+                    phrase = phrase:match("^%s*(.-)%s*$") or phrase
+                    phrase = phrase:gsub("<think>.-</think>%s*", "")
+                    phrase = lobStripServiceTags(phrase)
+                    cleanText = (phrase ~= "" and phrase) or isay
+                else
+                    cleanText = isay
+                end
             end
         end
     end
