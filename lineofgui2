@@ -6618,17 +6618,24 @@ local function handleQueuedChat(item)
 
         print("[INV-RT] " .. actionName .. " [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
 
-        -- v20 Beta 3: при УСПЕХЕ ответ модели уже правдив ("взял …") — отправляем его
-        -- и НЕ зовём модель снова (быстро, живой текст, правильный язык).
-        -- Второй короткий запрос — ТОЛЬКО при провале (модель могла соврать).
-        if iok and type(cleanText) == "string" and cleanText:match("%S") then
-            -- оставляем cleanText как есть
+        -- v20 Beta 3: на УСПЕХЕ, если ответ модели не врёт про провал — оставляем его
+        -- (быстро, живой текст). Если модель заявила провал, а действие успешно —
+        -- перегенерируем честную короткую фразу (и наоборот).
+        local lowTxt = type(cleanText) == "string" and cleanText:lower() or ""
+        local claimsFail = lowTxt:find("не получил") or lowTxt:find("не смог") or lowTxt:find("не могу")
+            or lowTxt:find("не вышло") or lowTxt:find("couldn't") or lowTxt:find("could not")
+            or lowTxt:find("failed") or lowTxt:find("can't") or lowTxt:find("cannot")
+        if iok and type(cleanText) == "string" and cleanText:match("%S") and not claimsFail then
+            -- оставляем как есть
         else
             do
+                local okTxt = iok and "SUCCESS" or "FAILED"
+                local actTxt = ({ take = "take/equip the item", use = "use the item", eat = "eat the item", putaway = "put the item away" })[actionName] or tostring(actionName)
+                local itemTxt = (tostring(iname or "") ~= "") and (" '" .. tostring(iname) .. "'") or ""
                 local pp = {
                     model = model, temperature = 0.7, max_tokens = 60,
                     messages = {
-                        { role = "system", content = "You are a Roblox player bot. The tool action FAILED: " .. tostring(isay) .. ". Write ONE very short casual chat line in the player's language honestly saying you could not do it. No emojis, no [DO:] tags, no quotes." },
+                        { role = "system", content = "You are a Roblox player bot. Tool action result: " .. okTxt .. " (" .. actTxt .. itemTxt .. "). Write ONE very short casual chat line in the player's language matching this result; if FAILED, say it did not work. No emojis, no [DO:] tags, no quotes." },
                         { role = "user", content = "[LANG:" .. tostring(langTag or "RU") .. "] " .. tostring(item.cleaned or "") },
                     },
                 }
