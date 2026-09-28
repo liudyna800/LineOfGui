@@ -3490,6 +3490,20 @@ local function keysOf(raw)
 end
 
 -- Оценка пары: 0 = совпало, 1 = почти (опечатка), 99 = мимо.
+-- v20 Beta 3: встроенный словарик частых предметов (RU-основа -> EN-основа),
+-- чтобы «дубиночку»/«бутылочку» матчились даже без ИИ-описания.
+local ITEM_HINTS = {
+	["бит"]="bat", ["дубин"]="bat", ["палк"]="bat", ["клюшк"]="bat", ["дубинк"]="bat",
+	["бутыл"]="bottle", ["бутл"]="bottle", ["фляг"]="bottle", ["склянк"]="bottle",
+	["меч"]="sword", ["клинок"]="sword", ["шашк"]="sword",
+	["нож"]="knife", ["кинжал"]="knife", ["резак"]="knife",
+	["пистолет"]="gun", ["ружь"]="gun", ["автомат"]="gun", ["винтовк"]="gun", ["пушк"]="gun",
+	["еда"]="food", ["яблок"]="apple", ["банан"]="banana", ["хлеб"]="bread", ["пицц"]="pizza",
+	["аптек"]="med", ["бинт"]="bandage", ["таблет"]="pill", ["шприц"]="syringe",
+	["ключ"]="key", ["фонар"]="flashlight", ["факел"]="torch", ["карт"]="map",
+	["гранат"]="grenade", ["бомб"]="bomb", ["лук"]="bow", ["стрел"]="arrow",
+	["удочк"]="fishing", ["кирк"]="pickaxe", ["топор"]="axe", ["лопат"]="shovel",
+}
 local function pairScore(wantRaw, toolRaw)
 	local w, t = norm(wantRaw), norm(toolRaw)
 	if w == "" or t == "" then return 99 end
@@ -3510,12 +3524,25 @@ local function pairScore(wantRaw, toolRaw)
 	if tw ~= "" and tt ~= "" and lev(tw, tt, 1) <= 1 then return 1 end
 	local sw2, st2 = skel(wantRaw), skel(toolRaw)
 	if sw2 ~= "" and st2 ~= "" and #sw2 >= 2 and #st2 >= 2 and lev(sw2, st2, 1) <= 1 then return 1 end
-	-- v20 Beta 3: синонимы из ИИ-описания предмета (бита->Bat, бутылка->Bottle)
+	-- v20 Beta 3: синонимы из ИИ-описания — сравнение по СТЕМАМ («дубиночку»~«дубина»)
 	local d = InventoryItemDesc and InventoryItemDesc[toolRaw]
 	if d and type(d.syn) == "string" and d.syn ~= "" then
+		local wstem = stem(wantRaw)
 		for s in tostring(d.syn):gmatch("[^,;]+") do
 			local ns = norm(s)
-			if ns ~= "" and (ns == w or w:find(ns, 1, true) or ns:find(w, 1, true)) then return 0 end
+			if ns ~= "" then
+				local nstem = stem(ns)
+				if ns == w or w:find(ns, 1, true) or ns:find(w, 1, true)
+					or (nstem ~= "" and (nstem == wstem or wstem:find(nstem, 1, true) or nstem:find(wstem, 1, true)))
+				then return 0 end
+			end
+		end
+	end
+	-- встроенный словарик (RU-основа -> EN-основа): дубиночку->bat, бутылочку->bottle
+	local wstem2, tstem2 = stem(wantRaw), stem(toolRaw)
+	if wstem2 ~= "" and tstem2 ~= "" then
+		for k, v in pairs(ITEM_HINTS) do
+			if (wstem2 == k or wstem2:find(k, 1, true)) and tstem2:find(v, 1, true) then return 0 end
 		end
 	end
 	return 99
