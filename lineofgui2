@@ -1345,6 +1345,54 @@ local function doWebSearch(query)
 
     local results = {}
 
+    -- ── 0. DuckDuckGo HTML — ОСНОВНОЙ источник (мемы, творцы, свежее) ──
+    local okDDG, resDDG = pcall(httprequest, {
+        Url    = "https://html.duckduckgo.com/html/?q=" .. urlEncode(query),
+        Method = "GET",
+        Headers = { ["Accept"] = "text/html", ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    })
+    if okDDG and resDDG then
+        local ddgBody = tostring(resDDG.Body or resDDG.body or "")
+        local titles, snips = {}, {}
+        for t in ddgBody:gmatch('result__a"[^>]*>(.-)</a>') do table.insert(titles, stripTags(t)) end
+        for s in ddgBody:gmatch('result__snippet"[^>]*>(.-)</a>') do table.insert(snips, stripTags(s)) end
+        local n = math.min(#titles, #snips, 5)
+        for i = 1, n do
+            local t, sn = titles[i], snips[i]
+            if (t ~= "" or sn ~= "") then
+                table.insert(results, "[Web] " .. t:sub(1, 120) .. (sn ~= "" and (" — " .. sn:sub(1, 260)) or ""))
+            end
+        end
+    end
+
+    -- ── 0b. DuckDuckGo Instant Answer API (краткая справка) ───────
+    if #results < 2 then
+        local okIA, resIA = pcall(httprequest, {
+            Url    = "https://api.duckduckgo.com/?q=" .. urlEncode(query) .. "&format=json&no_html=1&skip_disambig=1",
+            Method = "GET",
+            Headers = { ["Accept"] = "application/json" },
+        })
+        if okIA and resIA then
+            local iaBody = tostring(resIA.Body or resIA.body or "")
+            local okD, data = pcall(function() return HttpService:JSONDecode(iaBody) end)
+            if okD and type(data) == "table" then
+                if type(data.AbstractText) == "string" and data.AbstractText ~= "" then
+                    table.insert(results, "[Web] " .. data.AbstractText:sub(1, 300))
+                end
+                if type(data.RelatedTopics) == "table" then
+                    local c = 0
+                    for _, rt in ipairs(data.RelatedTopics) do
+                        if type(rt) == "table" and type(rt.Text) == "string" and rt.Text ~= "" then
+                            table.insert(results, "[Web] " .. rt.Text:sub(1, 220))
+                            c = c + 1
+                            if c >= 3 then break end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- ── 1. Wikipedia Summary API ──────────────────────────────────
     -- Точные факты и энциклопедические описания
     -- FIX v20b3: старый match("^([%w%s%-]+)") брал ВСЁ длинное предложение
@@ -6093,7 +6141,7 @@ local function handleQueuedChat(item)
     -- ВАЖНО: #считает БАЙТЫ → русское «да» (4 байта) запускало веб-поиск на КАЖДОЕ
     -- сообщение и держало ответ до 8с. Теперь порог по СИМВОЛАМ (>=15) — короткий
     -- чат не ищет в вебе, а осмысленные запросы ищут как раньше.
-    if settings.WebSearch and item.cleaned and charLen(item.cleaned) >= 15 then
+    if settings.WebSearch and item.cleaned and charLen(item.cleaned) >= 12 then
         local searchResult = nil
         local searchDone = false
         task.spawn(function()
@@ -6112,7 +6160,7 @@ local function handleQueuedChat(item)
         if sr ~= "" and not sr:find("не найдены") and not sr:find("Ошибка") then
             table.insert(apiMessages, {
                 role = "system",
-                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. sr .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
+                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. sr .. "\n[INSTRUCTION: These are live web results (2026). Answer the player DIRECTLY using them, in 1-2 short sentences in the player's language. This is your ONLY source of truth — do NOT say you don't know if the answer is present here. Summarize naturally, never paste raw text.]"
             })
         end
     end
@@ -14100,7 +14148,7 @@ local function ctDoSend()
         end
         -- Инжектируем тег языка — так же как в игровом чате
         -- Веб-поиск с pcall + timeout (зеркало логики из handleQueuedChat)
-        if settings.WebSearch and msg and charLen(msg) >= 15 then
+        if settings.WebSearch and msg and charLen(msg) >= 12 then
             local searchResult = nil
             local searchDone = false
             task.spawn(function()
@@ -14117,7 +14165,7 @@ local function ctDoSend()
             if sr ~= "" and not sr:find("не найдены") and not sr:find("Ошибка") then
                 table.insert(apiMsgs, {
                     role = "system",
-                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. sr .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
+                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. sr .. "\n[INSTRUCTION: These are live web results (2026). Answer the player DIRECTLY using them, in 1-2 short sentences in the player's language. This is your ONLY source of truth — do NOT say you don't know if the answer is present here. Summarize naturally, never paste raw text.]"
                 })
             end
         end
