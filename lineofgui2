@@ -4496,7 +4496,7 @@ function fetchFandomArticle(pname)
         end
     end)
     local fw8 = 0
-    while foundText == "" and foundDedi == "" and fw8 < 4 do task.wait(0.25) fw8 = fw8 + 0.25 end
+    while foundText == "" and foundDedi == "" and fw8 < 10 do task.wait(0.25) fw8 = fw8 + 0.25 end
     if foundText ~= "" then
         return saveFound(foundDomain, foundText)
     end
@@ -5000,7 +5000,7 @@ function describeAvatar(player) -- global: chunk register limit 200
                         if ok and info and info.Name then ClientSettings._headNames[aid] = tostring(info.Name):sub(1, 50) end
                     end)
                     local wt = 0
-                    while not ClientSettings._headNames[aid] and wt < 15 do task.wait(0.2) wt = wt + 1 end
+                    while not ClientSettings._headNames[aid] and wt < 6 do task.wait(0.2) wt = wt + 1 end
                     hn = ClientSettings._headNames[aid]
                 end
                 table.insert(bits, hn and ("head: " .. hn) or "custom-shaped head (not classic)")
@@ -5897,7 +5897,10 @@ local function handleQueuedChat(item)
 
     -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
     -- Таймаут 8 сек на поиск — если источники медленные, не ждём вечно
-    if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
+    -- ВАЖНО: #считает БАЙТЫ → русское «да» (4 байта) запускало веб-поиск на КАЖДОЕ
+    -- сообщение и держало ответ до 8с. Теперь порог по СИМВОЛАМ (>=15) — короткий
+    -- чат не ищет в вебе, а осмысленные запросы ищут как раньше.
+    if settings.WebSearch and item.cleaned and charLen(item.cleaned) >= 15 then
         local searchResult = nil
         local searchDone = false
         task.spawn(function()
@@ -6037,7 +6040,7 @@ local function handleQueuedChat(item)
                     gdone = true
                 end)
                 local gc2 = 0
-                while not gdone and gc2 < 15 do task.wait(0.2) gc2 = gc2 + 1 end
+                while not gdone and gc2 < 40 do task.wait(0.2) gc2 = gc2 + 1 end
                 local gw = gsr or ""
                 local webDone = false
                 print("[GAME-DBG] web len=" .. #gw .. " marks=" .. tostring((gw:find("%[Wiki%]") and "W" or "-") .. (gw:find("%[News") and "N" or "-") .. (gw:find("%[Jina%]") and "J" or "-")))
@@ -13904,7 +13907,7 @@ local function ctDoSend()
         end
         -- Инжектируем тег языка — так же как в игровом чате
         -- Веб-поиск с pcall + timeout (зеркало логики из handleQueuedChat)
-        if settings.WebSearch and msg and #msg > 3 then
+        if settings.WebSearch and msg and charLen(msg) >= 15 then
             local searchResult = nil
             local searchDone = false
             task.spawn(function()
