@@ -3828,28 +3828,30 @@ function InventoryBeta2.DoTake(name)
 	if not hum then
 		return false, "нет персонажа"
 	end
-	local ch0 = getChar()
-	if ch0 then pcall(function() hum:UnequipTools() end) end
-	task.wait(0.25)
-	for attempt = 1, 3 do
-		pcall(function() hum:EquipTool(tool) end)
-		task.wait(0.4)
+	-- Roblox САМ переключает инструменты: EquipTool меняет текущий без "убрать".
+	-- Раньше сначала звали UnequipTools — из-за этого смена предмета ломалась.
+	local function isHeld()
 		local chv = getChar()
-		local held = chv and chv:FindFirstChild(tool.Name)
-		if held and held:IsA("Tool") then
-			return true, "взял " .. tool.Name
+		local h = chv and chv:FindFirstChild(tool.Name)
+		return h and h:IsA("Tool")
+	end
+	for attempt = 1, 4 do
+		pcall(function() hum:EquipTool(tool) end)
+		task.wait(0.35)
+		if isHeld() then return true, "взял " .. tool.Name end
+		-- фоллбэк только если прямое переключение не сработало
+		if attempt == 2 then
+			pcall(function() hum:UnequipTools() end)
+			task.wait(0.2)
+		elseif attempt >= 3 then
+			pcall(function()
+				local chv2 = getChar()
+				if chv2 then tool.Parent = chv2 end
+			end)
+			task.wait(0.35)
+			if isHeld() then return true, "взял " .. tool.Name end
 		end
-		pcall(function()
-			local chv2 = getChar()
-			if chv2 then tool.Parent = chv2 end
-		end)
-		task.wait(0.4)
-		local chv3 = getChar()
-		local held3 = chv3 and chv3:FindFirstChild(tool.Name)
-		if held3 and held3:IsA("Tool") then
-			return true, "взял " .. tool.Name
-		end
-		task.wait(0.3)
+		task.wait(0.2)
 	end
 	print("[INV] equip FAILED: " .. tool.Name)
 	return false, "не получилось взять " .. tool.Name
