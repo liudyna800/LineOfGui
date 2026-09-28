@@ -5880,6 +5880,7 @@ end
 function lobReplyCachePut(settings, cleanMsg, text)
     if not settings.ReplyCache or cleanMsg == nil or type(text) ~= "string" or text == "" then return end
     _replyCache[lobReplyCacheKey(settings, cleanMsg)] = { text = text, t = os.clock() }
+    print("[LOB] cache store: " .. tostring(cleanMsg):sub(1, 40))
     if #_replyCache > _REPLY_CACHE_CAP then
         local n = 0
         for k in pairs(_replyCache) do
