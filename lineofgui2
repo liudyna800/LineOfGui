@@ -6613,66 +6613,9 @@ local function handleQueuedChat(item)
 
         print("[INV-RT] " .. actionName .. " [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
 
-        local outcomeText = "[ACTION RESULT for " .. actionName .. " \"" .. tostring(iname or "") .. "\"]: " ..
-            (iok and "SUCCESS — " or "FAILED — ") .. tostring(isay) ..
-            ". Reply to the player in 1 short natural sentence that matches this REAL outcome — " ..
-            "if it failed, honestly say so (do not claim you took/used/ate it), do not use any [DO:] tag this time."
-
-        local secondMessages = {}
-        for _, m in ipairs(apiMessages) do table.insert(secondMessages, m) end
-        table.insert(secondMessages, { role = "assistant", content = text })
-        table.insert(secondMessages, { role = "system", content = outcomeText })
-
-        local secondPayload = {
-            model       = model,
-            temperature = payload.temperature,
-            max_tokens  = maxTok,
-            messages    = secondMessages,
-        }
-        if model:find("^qwen/") then
-            secondPayload.reasoning_effort = "none"
-            secondPayload.temperature = nil
-        end
-        if model:find("gpt%-oss") then
-            secondPayload.reasoning_effort = "low"
-        end
-
-        local text2, err2
-        do
-            local done2 = false
-            task.spawn(function()
-                text2, err2 = providerRouter:chatCompletions(secondPayload)
-                done2 = true
-            end)
-            local waited2 = 0
-            while not done2 and waited2 < timeoutSec do
-                task.wait(0.5)
-                waited2 = waited2 + 0.5
-            end
-            if not done2 then
-                warn("[INV-RT] Второй запрос (честный итог) не ответил за " .. timeoutSec .. " сек — использую детерминированный текст напрямую.")
-                text2 = nil
-            end
-        end
-
-        if err2 or not text2 or text2 == "" then
-            warn("[INV-RT] ОШИБКА второго запроса: " .. tostring(err2 or "пустой ответ") .. " — использую детерминированный текст напрямую.")
-            cleanText = isay
-        else
-            text2 = text2:match("^%s*(.-)%s*$") or text2
-            text2 = text2:gsub("%[NAME:[^%]]*%]%s*", "")
-            text2 = text2:gsub("<think>.-</think>%s*", "")
-            -- на случай если ИИ всё же приписал тег во втором ответе — срезаем его,
-            -- действие уже выполнено выше, повторно выполнять не нужно
-            text2 = text2:gsub("%[%s*[Dd][Oo]:%s*[%w_]+[^%]]-%]?", "")
-            text2 = text2:match("^%s*(.-)%s*$") or text2
-            if text2 == "" then text2 = isay end
-            cleanText = text2
-        end
-
-        if iok and (InventoryBeta2.lastScore or 0) > 0 and actionName ~= "putaway" then
-            pcall(sendBotMessage, isay)
-        end
+        -- v20 Beta 3: БЫСТРО. Второй запрос к модели убран — он добавлял 5-10с.
+        -- Действие уже выполнено; отправляем точный детерминированный итог.
+        cleanText = isay
     end
 
     -- v20 Beta 2: safety net: ИИ заявил действие текстом, но тег не поставил
