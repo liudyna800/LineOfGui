@@ -6618,45 +6618,36 @@ local function handleQueuedChat(item)
 
         print("[INV-RT] " .. actionName .. " [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
 
-        -- v20 Beta 3: на УСПЕХЕ, если ответ модели не врёт про провал — оставляем его
-        -- (быстро, живой текст). Если модель заявила провал, а действие успешно —
-        -- перегенерируем честную короткую фразу (и наоборот).
-        local lowTxt = type(cleanText) == "string" and cleanText:lower() or ""
-        local claimsFail = lowTxt:find("не получил") or lowTxt:find("не смог") or lowTxt:find("не могу")
-            or lowTxt:find("не вышло") or lowTxt:find("couldn't") or lowTxt:find("could not")
-            or lowTxt:find("failed") or lowTxt:find("can't") or lowTxt:find("cannot")
-        if iok and type(cleanText) == "string" and cleanText:match("%S") and not claimsFail then
-            -- оставляем как есть
-        else
-            do
-                local okTxt = iok and "SUCCESS" or "FAILED"
-                local actTxt = ({ take = "take/equip the item", use = "use the item", eat = "eat the item", putaway = "put the item away" })[actionName] or tostring(actionName)
-                local itemTxt = (tostring(iname or "") ~= "") and (" '" .. tostring(iname) .. "'") or ""
-                local pp = {
-                    model = model, temperature = 0.7, max_tokens = 60,
-                    messages = {
-                        { role = "system", content = "You are a Roblox player bot. Tool action result: " .. okTxt .. " (" .. actTxt .. itemTxt .. "). Write ONE very short casual chat line in the player's language matching this result; if FAILED, say it did not work. No emojis, no [DO:] tags, no quotes." },
-                        { role = "user", content = "[LANG:" .. tostring(langTag or "RU") .. "] " .. tostring(item.cleaned or "") },
-                    },
-                }
-                if model:find("^qwen/") then pp.reasoning_effort = "none" pp.temperature = nil end
-                if model:find("gpt%-oss") then pp.reasoning_effort = "low" end
-                local phrase, doneP = nil, false
-                task.spawn(function()
-                    local okP, tP = pcall(function() return providerRouter:chatCompletions(pp) end)
-                    phrase = (okP and type(tP) == "string") and tP or nil
-                    doneP = true
-                end)
-                local wp = 0
-                while not doneP and wp < 5 do task.wait(0.25) wp = wp + 0.25 end
-                if type(phrase) == "string" and phrase:match("%S") then
-                    phrase = phrase:match("^%s*(.-)%s*$") or phrase
-                    phrase = phrase:gsub("<think>.-</think>%s*", "")
-                    phrase = lobStripServiceTags(phrase)
-                    cleanText = (phrase ~= "" and phrase) or isay
-                else
-                    cleanText = isay
-                end
+        -- v20 Beta 3: фразу об итоге ВСЕГДА формирует ИИ (живой текст, «как взял»),
+        -- коротким дешёвым запросом. Шаблонный isay — только аварийный фолбэк.
+        do
+            local okTxt = iok and "SUCCESS" or "FAILED"
+            local actTxt = ({ take = "take/equip the item", use = "use the item", eat = "eat the item", putaway = "put the item away" })[actionName] or tostring(actionName)
+            local itemTxt = (tostring(iname or "") ~= "") and (" '" .. tostring(iname) .. "'") or ""
+            local pp = {
+                model = model, temperature = 0.85, max_tokens = 60,
+                messages = {
+                    { role = "system", content = "You are a Roblox player bot. Tool action result: " .. okTxt .. " (" .. actTxt .. itemTxt .. "). Write ONE very short casual chat line describing naturally how it went — vary the wording, do NOT just name the item; if FAILED, say it did not work. Use the player's language. No emojis, no [DO:] tags, no quotes." },
+                    { role = "user", content = "[LANG:" .. tostring(langTag or "RU") .. "] " .. tostring(item.cleaned or "") },
+                },
+            }
+            if model:find("^qwen/") then pp.reasoning_effort = "none" pp.temperature = nil end
+            if model:find("gpt%-oss") then pp.reasoning_effort = "low" end
+            local phrase, doneP = nil, false
+            task.spawn(function()
+                local okP, tP = pcall(function() return providerRouter:chatCompletions(pp) end)
+                phrase = (okP and type(tP) == "string") and tP or nil
+                doneP = true
+            end)
+            local wp = 0
+            while not doneP and wp < 5 do task.wait(0.25) wp = wp + 0.25 end
+            if type(phrase) == "string" and phrase:match("%S") then
+                phrase = phrase:match("^%s*(.-)%s*$") or phrase
+                phrase = phrase:gsub("<think>.-</think>%s*", "")
+                phrase = lobStripServiceTags(phrase)
+                cleanText = (phrase ~= "" and phrase) or isay
+            else
+                cleanText = isay
             end
         end
     end
