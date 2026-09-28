@@ -3510,6 +3510,14 @@ local function pairScore(wantRaw, toolRaw)
 	if tw ~= "" and tt ~= "" and lev(tw, tt, 1) <= 1 then return 1 end
 	local sw2, st2 = skel(wantRaw), skel(toolRaw)
 	if sw2 ~= "" and st2 ~= "" and #sw2 >= 2 and #st2 >= 2 and lev(sw2, st2, 1) <= 1 then return 1 end
+	-- v20 Beta 3: синонимы из ИИ-описания предмета (бита->Bat, бутылка->Bottle)
+	local d = InventoryItemDesc and InventoryItemDesc[toolRaw]
+	if d and type(d.syn) == "string" and d.syn ~= "" then
+		for s in tostring(d.syn):gmatch("[^,;]+") do
+			local ns = norm(s)
+			if ns ~= "" and (ns == w or w:find(ns, 1, true) or ns:find(w, 1, true)) then return 0 end
+		end
+	end
 	return 99
 end
 
@@ -3593,13 +3601,22 @@ function InventoryBeta2.ListInventory()
 end
 
 function InventoryBeta2.DescribeTool(tool)
+	local nm = tostring(tool.Name or "")
 	local tip = ""
 	pcall(function() tip = tostring(tool.ToolTip or "") end)
 	tip = (tip:match("^%s*(.-)%s*$") or "")
 	tip = tip:gsub("[%[%]]", ""):match("^%s*(.-)%s*$") or ""
-	if #tip > 60 then tip = tip:sub(1, 60) end
-	if tip ~= "" then return tool.Name .. " - " .. tip end
-	return tool.Name
+	if #tip > 50 then tip = tip:sub(1, 50) end
+	-- приоритет — ИИ-описание (перевод + что это), иначе ToolTip
+	local d = InventoryItemDesc[nm]
+	local extra = ""
+	if d then
+		if d.ru ~= "" then extra = d.ru end
+		if d.what ~= "" then extra = (extra ~= "" and (extra .. " — " .. d.what)) or d.what end
+	end
+	if extra == "" then extra = tip end
+	if extra ~= "" then return nm .. " (" .. extra .. ")" end
+	return nm
 end
 
 function InventoryBeta2.CandidateNames()
@@ -3661,7 +3678,51 @@ function InventoryBeta2.ResolveNameAI(want, candidates)
 	return nil
 end
 
+-- v20 Beta 3: СЕМАНТИКА инвентаря. Один раз на предмет спрашиваем ИИ (перевод RU +
+-- что это + синонимы) и кэшируем — чтобы бот ПОНИМАЛ предметы, а не только "буквы".
+-- Синонимы подмешиваются и в матчер (опечатки/переводы: бита->Bat).
+InventoryItemDesc = InventoryItemDesc or {}
+InventoryDescPending = InventoryDescPending or {}
+function InventoryBeta2.EnsureDescriptions(names)
+	if not providerRouter or not ClientSettings then return end
+	local uniq = {}
+	for _, nm in ipairs(names or {}) do
+		if type(nm) == "string" and nm ~= "" and not InventoryItemDesc[nm] and not InventoryDescPending[nm] then
+			InventoryDescPending[nm] = true
+			table.insert(uniq, nm)
+		end
+	end
+	if #uniq == 0 then return end
+	local model = "openai/gpt-oss-20b"
+	pcall(function() if getModel then model = getModel(ClientSettings) or model end end)
+	for _, nm in ipairs(uniq) do
+		task.spawn(function()
+			pcall(function()
+				local payload = {
+					model = model, temperature = 0, max_tokens = 60,
+					messages = {
+						{ role = "system", content = "You describe Roblox items. Reply ONLY as JSON: {\"ru\":\"<russian translation>\",\"what\":\"<2-4 russian words for what it is>\",\"syn\":\"<comma-separated russian synonyms>\"}" },
+						{ role = "user", content = "Item name: " .. nm },
+					},
+				}
+				if tostring(model):find("^qwen/") then payload.reasoning_effort = "none" payload.temperature = nil end
+				if tostring(model):find("gpt%-oss") then payload.reasoning_effort = "low" end
+				local t = providerRouter:chatCompletions(payload)
+				local ru, what, syn = "", "", ""
+				if type(t) == "string" then
+					ru   = t:match('"ru"%s*:%s*"([^"]*)"') or ""
+					what = t:match('"what"%s*:%s*"([^"]*)"') or ""
+					syn  = t:match('"syn"%s*:%s*"([^"]*)"') or ""
+				end
+				InventoryItemDesc[nm] = { ru = ru, what = what, syn = syn }
+			end)
+			InventoryDescPending[nm] = nil
+		end)
+	end
+end
+
 function InventoryBeta2.InventoryLine()
+	pcall(function() InventoryBeta2.EnsureDescriptions(InventoryBeta2.CandidateNames()) end)
 	local backpackNames, handsName, guiNames = {}, nil, {}
 	-- enriched: имя + ToolTip чтобы ИИ понимала ЧТО это за предмет, а не только название
 	local function descOf(tool) return InventoryBeta2.DescribeTool(tool) end
@@ -3698,7 +3759,14 @@ function InventoryBeta2.SayInventory(wantName)
 end
 
 function InventoryBeta2.DoTake(name)
-	if name == "something" or name == "anything" or name == "thing" or name == "sth" or name == "что-нибудь" or name == "что-то" or name == "чего-нибудь" then name = "" end
+	local nm = norm(name)
+	if nm == "" or nm == "something" or nm == "anything" or nm == "thing"
+		or nm == "sth" or nm == "any" or nm == "random"
+		or nm == "что-нибудь" or nm == "что-то" or nm == "чего-нибудь"
+		or nm == "чтото" or nm == "чтонить" or nm == "что-нить" or nm == "чёнить" or nm == "чё-нибудь"
+		or nm == "чёто" or nm == "че-то" or nm == "любой" or nm == "любое" or nm == "рандом"
+		or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
+	then name = "" end
 	if name == "" then
 		local ch0 = getChar()
 		local held0 = ch0 and ch0:FindFirstChildOfClass("Tool")
@@ -3789,6 +3857,12 @@ end
 -- Использовать: если предмет назван — взять (даже из рюкзака) и сразу применить.
 -- Без названия — применить то, что уже в руках.
 function InventoryBeta2.DoUse(name)
+	local nm = norm(name)
+	if nm == "" or nm == "something" or nm == "anything" or nm == "thing" or nm == "sth"
+		or nm == "что-нибудь" or nm == "что-то" or nm == "чтото" or nm == "чтонить"
+		or nm == "что-нить" or nm == "чёнить" or nm == "чёто" or nm == "любой" or nm == "рандом"
+		or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
+	then name = nil end
 	if name and name ~= "" then
 		local tool, where = InventoryBeta2.FindTool(name)
 		if not tool then
@@ -5920,7 +5994,7 @@ local function handleQueuedChat(item)
         if okInv and invLine and invLine ~= "" then
             table.insert(apiMessages, {
                 role    = "system",
-                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Name before - is exact tag name.  Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай. Формат имени: 'Имя [описание]' — в тег копируй ТОЛЬКО имя до скобок. В скобках подсказка ЧТО это за предмет (еда/оружие/напиток) — используй её чтобы понять смысл, а не только буквы."
+                content = "CURRENT INVENTORY (live snapshot): " .. invLine .. ". Формат: 'Name (перевод — что это)'. В тег [DO:take/use/eat] копируй ТОЛЬКО латинское Name ДО круглых скобок, НИКОГДА не бери текст из скобок. Скобки — подсказка ЧТО это за предмет: по смыслу и переводу сопоставляй просьбу игрока (даже с опечаткой, уменьшительным или русским словом типа 'бутылку'/'биту') с этим предметом. Бери предметы ТОЛЬКО из этого списка, никогда не выдумывай."
             })
         end
     end
