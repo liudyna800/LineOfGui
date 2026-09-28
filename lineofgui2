@@ -264,6 +264,7 @@ local function saveSettings()
             "FollowConfirm="   .. b(cs.FollowConfirm,   true),
             "TokenEconomy="    .. b(cs.TokenEconomy,    false),
             "ReplyCache="      .. b(cs.ReplyCache,      false),
+            "SearchNotice="    .. b(cs.SearchNotice,    true),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
             "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
@@ -331,6 +332,7 @@ local function loadSettings()
         cs.FollowConfirm   = getBool("FollowConfirm",   true)
         cs.TokenEconomy    = getBool("TokenEconomy",    false)
         cs.ReplyCache      = getBool("ReplyCache",      false)
+        cs.SearchNotice    = getBool("SearchNotice",    true)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
         cs.Temperature     = getNum("Temperature",      0.7)
         cs.MaxTokens       = getNum("MaxTokens",        1024)
@@ -671,6 +673,7 @@ ClientSettings = {
     InventoryEnabled = true, -- v20 Beta 2: brat/ispolzovat predmety iz inventarya команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     ReplyCache = false,     -- v20 Beta 3: кэш ответов ИИ (повторный вопрос — мгновенно, без запроса)
+    SearchNotice = true,    -- v20 Beta 3: заготовленные сообщения "ищу в интернете/вики…" во время поиска
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     GameUnderstanding = false, -- v20 Beta 2: game understanding
     DangerSense = false, -- v20 Beta 2: чувство опасности (только с GameUnderstanding)
@@ -746,6 +749,7 @@ do
     if cs2.WebSearch       == nil then cs2.WebSearch       = false end
     if cs2.TokenEconomy    == nil then cs2.TokenEconomy    = false end
     if cs2.ReplyCache      == nil then cs2.ReplyCache      = false end
+    if cs2.SearchNotice    == nil then cs2.SearchNotice    = true  end
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     local savedGemini = loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
@@ -5957,6 +5961,31 @@ function lobReplyCacheServe(settings, cleanMsg, player, userId)
     return true
 end
 
+-- v20 Beta 3: заготовленные сообщения, пока ИИ ищет в интернете/вики.
+-- 3 варианта на каждый тип (всего 6) — чтобы не забанили за спам. Кулдаун 20с.
+_searchNoticeAt = { web = 0, game = 0 }
+_SEARCH_NOTICE = {
+    web = {
+        "Секундочку, поищу в интернете…",
+        "Щас гляну в сети, момент…",
+        "Погоди чуток, ищу инфу в интернете…",
+    },
+    game = {
+        "Секунд, загляну в вики по игре…",
+        "Момент, проверю инфу по игре…",
+        "Погоди немного, ищу по игре…",
+    },
+}
+function lobSendSearchNotice(kind)
+    if not ClientSettings.SearchNotice then return end
+    local list = _SEARCH_NOTICE[kind]
+    if type(list) ~= "table" or #list == 0 then return end
+    local now = os.clock()
+    if (now - (_searchNoticeAt[kind] or 0)) < 20 then return end
+    _searchNoticeAt[kind] = now
+    pcall(sendBotMessage, list[math.random(#list)])
+end
+
 local function handleQueuedChat(item)
     local _t0 = os.clock()
     local settings = ClientSettings
@@ -6142,6 +6171,7 @@ local function handleQueuedChat(item)
     -- сообщение и держало ответ до 8с. Теперь порог по СИМВОЛАМ (>=15) — короткий
     -- чат не ищет в вебе, а осмысленные запросы ищут как раньше.
     if settings.WebSearch and item.cleaned and charLen(item.cleaned) >= 12 then
+        if not item.isWorld then lobSendSearchNotice("web") end
         local searchResult = nil
         local searchDone = false
         task.spawn(function()
@@ -6196,6 +6226,7 @@ local function handleQueuedChat(item)
         end
         if isQ then
             _lastGameQ[item.userId] = nowQ
+            if not item.isWorld then lobSendSearchNotice("game") end
             local pi2 = fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
             print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
@@ -10167,6 +10198,18 @@ makeToggleRow(
     function(state)
         ClientSettings.ReplyCache = state
         if not state then _replyCache = {} end
+        saveSettings()
+    end
+)
+
+-- v20 Beta 3: сообщение во время поиска
+makeToggleRow(
+    automation,
+    "💬 Сообщение о поиске",
+    "Пока ИИ ищет в интернете/вики (это дольше), он отправляет короткое заготовленное сообщение «ищу…» (6 вариантов). Кулдаун 20с от спама.",
+    ClientSettings.SearchNotice ~= false,
+    function(state)
+        ClientSettings.SearchNotice = state
         saveSettings()
     end
 )
