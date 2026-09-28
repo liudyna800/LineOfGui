@@ -5967,8 +5967,8 @@ end
 _searchNoticeAt = { search = 0, busy = 0 }
 _botBusyCount = 0
 _SEARCH_NOTICE = {
-    search = { "One sec, looking it up…", "Hold on, let me check…", "Gimme a moment, searching…" },
-    busy = { "Still on your previous message, one sec…", "Hold on, I'm still answering the last one…", "Hang on, almost done with the previous…" },
+    search = { "Searching the internet…", "Looking up info online…", "Searching for information…" },
+    busy = { "Still searching, please wait…", "Hold on, I'm looking it up…", "One moment, still searching online…" },
 }
 function lobSendSearchNotice(kind, lang)
     if not ClientSettings.SearchNotice then return end
