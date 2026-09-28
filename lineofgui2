@@ -5961,27 +5961,30 @@ function lobReplyCacheServe(settings, cleanMsg, player, userId)
     return true
 end
 
--- v20 Beta 3: заготовленные сообщения, пока ИИ ищет в интернете/вики.
--- 3 варианта на каждый тип (всего 6) — чтобы не забанили за спам. Кулдаун 20с.
-_searchNoticeAt = { web = 0, game = 0 }
+-- v20 Beta 3: заготовленные сообщения, пока ИИ ищет/думает (на языке игрока).
+-- kind: "search" (начался поиск) / "busy" (игрок пишет, пока бот занят).
+-- По 3 варианта на тип и язык — чтобы Roblox не принял за спам.
+_searchNoticeAt = { search = 0, busy = 0 }
+_botBusyCount = 0
 _SEARCH_NOTICE = {
-    web = {
-        "Секундочку, поищу в интернете…",
-        "Щас гляну в сети, момент…",
-        "Погоди чуток, ищу инфу в интернете…",
+    search = {
+        ru = { "Секундочку, ищу информацию…", "Момент, сейчас гляну…", "Погоди чуток, ищу…" },
+        en = { "One sec, looking it up…", "Hold on, let me check…", "Gimme a moment, searching…" },
     },
-    game = {
-        "Секунд, загляну в вики по игре…",
-        "Момент, проверю инфу по игре…",
-        "Погоди немного, ищу по игре…",
+    busy = {
+        ru = { "Ещё отвечаю на прошлое, секунду…", "Погоди, я ещё думаю над прошлым сообщением…", "Секунд, договорю и отвечу…" },
+        en = { "Still on your previous message, one sec…", "Hold on, I'm still answering the last one…", "Hang on, almost done with the previous…" },
     },
 }
-function lobSendSearchNotice(kind)
+function lobSendSearchNotice(kind, lang)
     if not ClientSettings.SearchNotice then return end
-    local list = _SEARCH_NOTICE[kind]
+    local pack = _SEARCH_NOTICE[kind]
+    if type(pack) ~= "table" then return end
+    local list = pack[lang] or pack.ru
     if type(list) ~= "table" or #list == 0 then return end
     local now = os.clock()
-    if (now - (_searchNoticeAt[kind] or 0)) < 20 then return end
+    local cd = (kind == "busy") and 8 or 15
+    if (now - (_searchNoticeAt[kind] or 0)) < cd then return end
     _searchNoticeAt[kind] = now
     pcall(sendBotMessage, list[math.random(#list)])
 end
@@ -6171,7 +6174,7 @@ local function handleQueuedChat(item)
     -- сообщение и держало ответ до 8с. Теперь порог по СИМВОЛАМ (>=15) — короткий
     -- чат не ищет в вебе, а осмысленные запросы ищут как раньше.
     if settings.WebSearch and item.cleaned and charLen(item.cleaned) >= 12 then
-        if not item.isWorld then lobSendSearchNotice("web") end
+        if not item.isWorld then lobSendSearchNotice("search", getLangForUser(item.cleaned, item.userId)) end
         local searchResult = nil
         local searchDone = false
         task.spawn(function()
@@ -6226,7 +6229,7 @@ local function handleQueuedChat(item)
         end
         if isQ then
             _lastGameQ[item.userId] = nowQ
-            if not item.isWorld then lobSendSearchNotice("game") end
+            if not item.isWorld then lobSendSearchNotice("search", getLangForUser(item.cleaned, item.userId)) end
             local pi2 = fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
             print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
@@ -6862,7 +6865,9 @@ function runChatQueue(userId)
                 local item = dequeueChatItem(q)
                 if not item then break end
                 q.startedAt = os.clock()  -- обновляем при каждом новом item
+                _botBusyCount = (_botBusyCount or 0) + 1
                 local ok, err2 = pcall(handleQueuedChat, item)
+                _botBusyCount = math.max(0, (_botBusyCount or 1) - 1)
                 if not ok then
                     print("[LOB] handleQueuedChat error: " .. tostring(err2))
                 end
@@ -7269,6 +7274,7 @@ local function processChatMessage(player, rawMessage)
     local queueKey = player.UserId
     local maxQueue = tonumber(settings.MaxQueuePerUser) or 3
     if maxQueue < 1 then maxQueue = 1 end
+    local wasBusy = (_botBusyCount or 0) > 0
     local queued = enqueueChatItem(queueKey, {
         userId      = player.UserId,
         displayName = player.DisplayName,
@@ -7278,6 +7284,10 @@ local function processChatMessage(player, rawMessage)
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
+        -- v20 Beta 3: бот занят обработкой предыдущего — предупредим, чтобы не ждали молча
+        if wasBusy then
+            lobSendSearchNotice("busy", getLangForUser(rawMessage, player.UserId))
+        end
     else
         print("[LOB] drop: queue-full " .. player.Name)
     end
