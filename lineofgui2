@@ -6756,8 +6756,12 @@ local function handleQueuedChat(item)
         print("[LOB] reply time: " .. string.format("%.1fs", os.clock() - _t0) .. " for: " .. tostring(item.cleaned):sub(1, 40))
         local sok, serr = pcall(sendBotMessage, cleanText)
         if not sok then print("[LOB] send FAIL: " .. tostring(serr)) end
-        -- v20 Beta 3: кладём в кэш только чистые текстовые ответы (без действий)
-        if not actionName and not item.isWorld then lobReplyCachePut(settings, item.cleaned, cleanText) end
+        -- v20 Beta 3: кладём в кэш текстовые ответы (включая теги эмоций/движения),
+        -- но НЕ действия с предметами (их итог зависит от мира).
+        if (not item.isWorld) and actionName ~= "take" and actionName ~= "use"
+            and actionName ~= "eat" and actionName ~= "putaway" then
+            lobReplyCachePut(settings, item.cleaned, cleanText)
+        end
     end
 end
 
