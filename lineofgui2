@@ -3160,14 +3160,30 @@ local function startFollowingPlayer(targetPlayer)
     _followTarget = targetPlayer
 
     _followThread = task.spawn(function()
+        local lostAt = 0
         while _isFollowing do
-            local char = _followTarget and _followTarget.Character
+            -- цель вышла из игры — прекращаем и НЕ застываем на месте
+            if not _followTarget or not _followTarget.Parent then
+                print("[LOB] follow target left - stopping")
+                stopFollowing()
+                break
+            end
+            local char = _followTarget.Character
             local targetRoot = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
             if targetRoot then
+                lostAt = 0
                 -- Не идём если уже рядом (меньше 5 студ)
                 local myRoot2 = getLocalRootPart()
                 if myRoot2 and (myRoot2.Position - targetRoot.Position).Magnitude > 5 then
                     moveToPosition(targetRoot.Position, true)
+                end
+            else
+                -- нет персонажа (респавн) — ждём, но не вечно
+                if lostAt == 0 then lostAt = os.clock() end
+                if (os.clock() - lostAt) > 8 then
+                    print("[LOB] follow target gone (no character) - stopping")
+                    stopFollowing()
+                    break
                 end
             end
             task.wait(0.5)
@@ -6022,7 +6038,7 @@ function lobSmartWalkStart()
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not hum or not root or hum.Health <= 0 then task.wait(1) continue end
             -- не мешаем follow/goto/эмоциям/прыжкам
-            if _isFollowing or _isGoing or _isJumping or _isSpinning then task.wait(0.5) continue end
+            if _isFollowing or _isGoing or _isJumping or _isSpinning or _followMgrActive then task.wait(0.5) continue end
 
             local now = os.clock()
             local target = _smartWalk.target
@@ -6130,7 +6146,7 @@ end
 -- kind: "search" (начался поиск) / "busy" (игрок пишет, пока бот занят).
 -- По 3 варианта на тип — чтобы Roblox не принял за спам.
 _searchNoticeAt = { search = 0, busy = 0 }
-_botBusyCount = 0
+_botBusyByUser = {}
 _SEARCH_NOTICE = {
     search = { "Searching the internet…", "Looking up info online…", "Searching for information…" },
     busy = { "Still searching, please wait…", "Hold on, I'm looking it up…", "One moment, still searching online…" },
@@ -7022,9 +7038,10 @@ function runChatQueue(userId)
                 local item = dequeueChatItem(q)
                 if not item then break end
                 q.startedAt = os.clock()  -- обновляем при каждом новом item
-                _botBusyCount = (_botBusyCount or 0) + 1
+                _botBusyByUser = _botBusyByUser or {}
+                _botBusyByUser[userId] = (_botBusyByUser[userId] or 0) + 1
                 local ok, err2 = pcall(handleQueuedChat, item)
-                _botBusyCount = math.max(0, (_botBusyCount or 1) - 1)
+                _botBusyByUser[userId] = math.max(0, (_botBusyByUser[userId] or 1) - 1)
                 if not ok then
                     print("[LOB] handleQueuedChat error: " .. tostring(err2))
                 end
@@ -7436,7 +7453,7 @@ local function processChatMessage(player, rawMessage)
     -- (независимо от настроек памяти — иначе сообщения разных игроков блокируют друг друга)
     -- v20 Beta 3: бот занят (идёт поиск/обработка). Если тоггл «Сообщение о поиске»
     -- включён — НЕ отвечаем на новое, только предупреждаем «подожди». Выключен — как раньше (в очередь).
-    if ClientSettings.SearchNotice and (_botBusyCount or 0) > 0 then
+    if ClientSettings.SearchNotice and ((_botBusyByUser or {})[player.UserId] or 0) > 0 then
         lobSendSearchNotice("busy", getLangForUser(rawMessage, player.UserId))
         print("[LOB] drop: busy " .. player.Name)
         return
@@ -8323,6 +8340,7 @@ local lastPosition = nil
 local stuckTimer = 0
 
 trackConn(RunService.Heartbeat:Connect(function(dt)
+    _followMgrActive = (FollowManager.Active and FollowManager.Target ~= nil) and true or false
     if not FollowManager.Active or not FollowManager.Target then return end
     
     local myChar = LocalCharacter or Players.LocalPlayer.Character
