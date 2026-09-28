@@ -5889,6 +5889,24 @@ function lobReplyCachePut(settings, cleanMsg, text)
         end
     end
 end
+-- Отдаёт кэшированный ответ (если есть) и возвращает true. Живёт тут, а не в
+-- handleQueuedChat, чтобы не тратить лимит локалок той функции.
+function lobReplyCacheServe(settings, cleanMsg, player, userId)
+    if not settings.ReplyCache or cleanMsg == nil then return false end
+    local hit = _replyCache[lobReplyCacheKey(settings, cleanMsg)]
+    if not (hit and type(hit.text) == "string" and hit.text ~= "" and (os.clock() - hit.t) < _REPLY_CACHE_TTL) then
+        return false
+    end
+    print("[LOB] cache hit: " .. tostring(cleanMsg):sub(1, 40))
+    if settings.CameraLook and player and player.Character then
+        local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
+        if pRoot then pcall(smoothLookAt, pRoot.Position) end
+    end
+    local hist = getHistory(settings, userId)
+    if hist then appendHistory(hist, cleanMsg, hit.text) end
+    sendBotMessage(hit.text)
+    return true
+end
 
 local function handleQueuedChat(item)
     local _t0 = os.clock()
@@ -5908,20 +5926,7 @@ local function handleQueuedChat(item)
     if not item.isWorld and item.player and not item.player.Parent then return end
 
     -- v20 Beta 3: кэш ответов — повторный вопрос отвечаем мгновенно (без запроса к модели)
-    if settings.ReplyCache and not item.isWorld then
-        local cached = lobReplyCacheGet(settings, item.cleaned)
-        if cached then
-            print("[LOB] cache hit: " .. tostring(item.cleaned):sub(1, 40))
-            if settings.CameraLook and item.player and item.player.Character then
-                local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
-                if pRoot then smoothLookAt(pRoot.Position) end
-            end
-            local hist = getHistory(settings, item.userId)
-            if hist then appendHistory(hist, item.cleaned, cached) end
-            sendBotMessage(cached)
-            return
-        end
-    end
+    if not item.isWorld and lobReplyCacheServe(settings, item.cleaned, item.player, item.userId) then return end
 
     -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
