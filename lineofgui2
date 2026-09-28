@@ -1218,6 +1218,44 @@ local function postJson(url, headers, bodyTable)
     return decoded, respStatus, nil, nil, respHeaders
 end
 
+-- v20 Beta 3: учёт токенов и оценка стоимости ($/1M токенов, приблизительно)
+_tokenStats = { prompt = 0, completion = 0, requests = 0, cost = 0 }
+_tokenPrice = {
+    ["openai/gpt-oss-20b"] = { 0.10, 0.50 },
+    ["openai/gpt-oss-120b"] = { 0.15, 0.75 },
+    ["openai/gpt-oss-safeguard-20b"] = { 0.10, 0.50 },
+    ["gemini-2.5-flash"] = { 0.30, 2.50 },
+    ["gemini-2.5-flash-lite"] = { 0.10, 0.40 },
+    ["gemini-3-flash-preview"] = { 0.30, 2.50 },
+    ["gemini-3.1-flash-lite-preview"] = { 0.10, 0.40 },
+    ["gemini-3.5-flash-lite"] = { 0.10, 0.40 },
+    ["gemini-1.5-flash"] = { 0.075, 0.30 },
+    ["deepseek-chat"] = { 0.27, 1.10 },
+    ["deepseek-reasoner"] = { 0.55, 2.19 },
+    ["compound-beta"] = { 0.00, 0.00 },
+    ["compound-beta-mini"] = { 0.00, 0.00 },
+}
+_tokenPriceDefault = { 0.15, 0.60 }
+function lobTokenPrice(model)
+    if _tokenPrice[model] then return _tokenPrice[model] end
+    local m = tostring(model or ""):lower()
+    for k, v in pairs(_tokenPrice) do
+        if k ~= "" and m:find(k:lower(), 1, true) then return v end
+    end
+    return _tokenPriceDefault
+end
+function lobTrackUsage(model, usage)
+    if type(usage) ~= "table" then return end
+    local p = tonumber(usage.prompt_tokens or usage.promptTokenCount or usage.inputTokens) or 0
+    local c = tonumber(usage.completion_tokens or usage.candidatesTokenCount or usage.outputTokens or usage.completionTokenCount) or 0
+    if p <= 0 and c <= 0 then return end
+    _tokenStats.prompt = (_tokenStats.prompt or 0) + p
+    _tokenStats.completion = (_tokenStats.completion or 0) + c
+    _tokenStats.requests = (_tokenStats.requests or 0) + 1
+    local price = lobTokenPrice(model)
+    _tokenStats.cost = (_tokenStats.cost or 0) + (p / 1e6) * price[1] + (c / 1e6) * price[2]
+end
+
 -- Groq Provider
 -- §GROQ
 local GroqProvider = {}
@@ -1556,6 +1594,7 @@ function GroqProvider:chatCompletions(payload)
         return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or "")
     end
     
+    lobTrackUsage(payload.model, res.usage)
     local choice = res.choices and res.choices[1]
     if not choice then 
         return nil, "NoChoicesReturned" 
@@ -1803,6 +1842,7 @@ function GeminiProvider:chatCompletions(payload)
         return nil, errMsg
     end
 
+    lobTrackUsage(payload.model, res.usageMetadata)
     local cands = res.candidates
     if not cands or not cands[1] then
         -- Проверяем promptFeedback — если blocked, объясняем
@@ -1884,6 +1924,7 @@ function DeepSeekProvider:chatCompletions(payload)
         return nil, errMsg
     end
 
+    lobTrackUsage(payload.model, res.usage)
     local choice = res.choices and res.choices[1]
     if not choice then return nil, "NoChoicesReturned" end
     if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
@@ -10709,6 +10750,45 @@ do
             if statusSub.Text ~= sub2 then statusSub.Text = sub2 end
             statusDot.BackgroundColor3 = col
             task.wait(1)
+        end
+    end)
+end
+
+-- ═══ v20 Beta 3: карточка ТОКЕНОВ и СТОИМОСТИ ═══
+do
+    local tokSection = makeSectionCard(behaviorScroll, "Токены и стоимость", "")
+    local tokRow = Instance.new("Frame")
+    tokRow.Name = "TokenStatsRow"
+    tokRow.BackgroundColor3 = THEME.Button
+    tokRow.BackgroundTransparency = THEME.ButtonTransparency or 0.60
+    tokRow.Size = UDim2.new(1, -8, 0, 64)
+    tokRow.Parent = tokSection
+    makeCorner(tokRow, 22)
+    makeStroke(tokRow, 1, Color3.fromRGB(255,255,255), 0.78)
+
+    local tokMain = makeTextLabel(tokRow, "Токены: 0", 13, "semibold")
+    tokMain.Size = UDim2.new(1, -20, 0, 18)
+    tokMain.Position = UDim2.new(0, 12, 0, 7)
+
+    local tokSub = makeTextLabel(tokRow, "запросов: 0", 11, "medium")
+    tokSub.TextColor3 = THEME.TextDim
+    tokSub.Size = UDim2.new(1, -20, 0, 16)
+    tokSub.Position = UDim2.new(0, 12, 0, 26)
+
+    local tokCost = makeTextLabel(tokRow, "Стоимость: ~$0.0000", 13, "bold")
+    tokCost.TextColor3 = THEME.Accent
+    tokCost.Size = UDim2.new(1, -20, 0, 16)
+    tokCost.Position = UDim2.new(0, 12, 0, 44)
+
+    task.spawn(function()
+        while tokRow and tokRow.Parent do
+            local s = _tokenStats or {}
+            local p = s.prompt or 0
+            local c = s.completion or 0
+            tokMain.Text = "Токены: " .. tostring(p + c) .. "  (↑" .. tostring(p) .. " / ↓" .. tostring(c) .. ")"
+            tokSub.Text = "запросов: " .. tostring(s.requests or 0)
+            tokCost.Text = "Стоимость: ~$" .. string.format("%.4f", s.cost or 0)
+            task.wait(2)
         end
     end)
 end
