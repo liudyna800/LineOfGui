@@ -7263,9 +7263,9 @@ local function processChatMessage(player, rawMessage)
     
     -- Ключ очереди всегда per-user: каждый игрок имеет свою очередь обработки
     -- (независимо от настроек памяти — иначе сообщения разных игроков блокируют друг друга)
-    -- v20 Beta 3: бот занят (идёт поиск/обработка) — НЕ отвечаем на новое сообщение,
-    -- только предупреждаем «подожди». Раньше оно вставало в очередь и бот отвечал на него.
-    if (_botBusyCount or 0) > 0 then
+    -- v20 Beta 3: бот занят (идёт поиск/обработка). Если тоггл «Сообщение о поиске»
+    -- включён — НЕ отвечаем на новое, только предупреждаем «подожди». Выключен — как раньше (в очередь).
+    if ClientSettings.SearchNotice and (_botBusyCount or 0) > 0 then
         lobSendSearchNotice("busy", getLangForUser(rawMessage, player.UserId))
         print("[LOB] drop: busy " .. player.Name)
         return
