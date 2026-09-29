@@ -1,323 +1,878 @@
---[[ 
-  INFECTIOUS SMILE | RAYFIELD GUI for Delta (эмулятор)
-  По твоему скану PlaceId 5985232436:
-  Teams: Human (face.png) vs Smiling (616395480)
-  Оружие в Workspace.<Nick>.<Tool>: Cooldown NumberValue, Damage IntValue, SwingEvent RemoteEvent, Uses/MaxUses
-  Human тулзы из скана: Rusty Shovel D10 CD2, Chain D9 CD2.2, Branch D25 CD4.4, Bottle D25 CD2
-]]
+-- [[ Infectious Smile | Rayfield for Delta (mobile + PC) ]]
+-- Place ID: 5985232436 | by laughablehaha
+-- Executor: Delta (Android / iOS / Windows)
+-- UI: Rayfield (https://sirius.menu/rayfield)
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
-local RS = game:GetService("RunService")
-local WS = game:GetService("Workspace")
-local LIS = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
-local LP = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 
-getgenv().Smile = getgenv().Smile or {
-  NoCD=false, InfUses=false, AuraHuman=false, AuraSmiler=false, AuraR=22,
-  Hitbox=false, HitboxSize=10, ESP=false, AntiInfect=false, AntiKill=false,
-  Speed=false, SpeedVal=22, Fly=false, Bring=false, BringDist=7,
-}
-local S = getgenv().Smile
+local plr = Players.LocalPlayer
 
+--// Window
 local Window = Rayfield:CreateWindow({
-  Name = "Infectious Smile v1",
-  LoadingTitle = "Smile Scan Loaded",
-  LoadingSubtitle = "Human vs Smiling | by scan",
-  ConfigurationSaving = { Enabled = false },
+    Name = "Infectious Smile | Delta Hub",
+    LoadingTitle = "Infectious Smile",
+    LoadingSubtitle = "by Delta Hub | Rayfield",
+    ShowText = "Rayfield",
+    Theme = "Default",
+    ToggleUIKeybind = "K",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = {
+        Enabled = false,
+        FolderName = nil,
+        FileName = "InfectiousSmileDelta"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "",
+        RememberJoins = false
+    },
+    KeySystem = false,
 })
 
---// helpers (по скану)
-local function MyTeam()
-  if LP.Team then return LP.Team.Name end
-  -- fallback по лицу
-  local ch = LP.Character
-  if ch and ch:FindFirstChild("Head") then
-    for _,d in ipairs(ch.Head:GetChildren()) do
-      if d:IsA("Decal") and string.find(tostring(d.Texture),"616395480") then return "Smiling" end
+--// Helpers
+local function Notify(title, content, dur)
+    Rayfield:Notify({
+        Title = title,
+        Content = content,
+        Duration = dur or 3,
+        Image = 4483362458,
+    })
+end
+
+local function MyChar()
+    return plr.Character
+end
+
+local function MyHRP()
+    local c = MyChar()
+    if c then return c:FindFirstChild("HumanoidRootPart") end
+    return nil
+end
+
+local function MyHum()
+    local c = MyChar()
+    if c then return c:FindFirstChildOfClass("Humanoid") end
+    return nil
+end
+
+local function GetTools()
+    local t = {}
+    pcall(function()
+        if MyChar() then
+            for _, v in pairs(MyChar():GetChildren()) do
+                if v:IsA("Tool") then table.insert(t, v) end
+            end
+        end
+        for _, v in pairs(plr.Backpack:GetChildren()) do
+            if v:IsA("Tool") then table.insert(t, v) end
+        end
+    end)
+    return t
+end
+
+local function GetMainWeaponName()
+    local ok, val = pcall(function()
+        return plr:WaitForChild("Marketplace", 2)["Main Weapon"].Equipped.Value
+    end)
+    if ok and val and val ~= "Default" and val ~= "" then
+        return val
     end
-  end
-  return "Human"
-end
-local function IsEnemy(p)
-  if p==LP then return false end
-  if LP.Team and p.Team then return LP.Team ~= p.Team end
-  -- fallback: смайлер = лицо 616395480
-  local ch = p.Character
-  local isSmile = false
-  if ch and ch:FindFirstChild("Head") then
-    for _,d in ipairs(ch.Head:GetChildren()) do
-      if d:IsA("Decal") and string.find(tostring(d.Texture),"616395480") then isSmile=true end
-    end
-  end
-  if MyTeam()=="Human" then return isSmile else return not isSmile end
-end
-local function MyTools()
-  local out = {}
-  local ch = LP.Character
-  if ch then for _,t in ipairs(ch:GetChildren()) do if t:IsA("Tool") then table.insert(out,t) end end end
-  local bp = LP:FindFirstChild("Backpack")
-  if bp then for _,t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then table.insert(out,t) end end end
-  return out
-end
-local function BestTool()
-  local best, bd = nil, -1
-  for _,t in ipairs(MyTools()) do
-    local dmg = t:FindFirstChild("Damage")
-    local v = dmg and dmg.Value or 5
-    if v > bd then bd=v best=t end
-  end
-  return best
-end
-local function EquipBest()
-  pcall(function()
-    local ch = LP.Character if not ch then return end
-    if ch:FindFirstChildOfClass("Tool") then return end
-    local b = BestTool()
-    if b then ch:FindFirstChildOfClass("Humanoid"):EquipTool(b) end
-  end)
+    return "Bat"
 end
 
---// TAB HUMAN
-local T1 = Window:CreateTab("Human 🔨", 4483362458)
-T1:CreateSection("Оружие (из скана)")
+--// State
+local State = {
+    Speed = 16, SpeedEnabled = false,
+    InfJump = false,
+    Noclip = false,
+    Fly = false, FlySpeed = 50,
+    HitAura = false, HitboxSize = 15,
+    KillAura = false, KillTarget = nil,
+    InfectAura = false, InfectSize = 20, AutoInfectBox = false,
+    NoCooldownHuman = false, NoCooldownSmile = false,
+    ESP = false, ESPNames = true,
+    Fullbright = false,
+    AntiBlackhole = false, AntiKill = false,
+}
 
-T1:CreateToggle({Name="No Cooldown (CD=0)", CurrentValue=S.NoCD, Callback=function(v) S.NoCD=v end})
-T1:CreateToggle({Name="Inf Uses (Uses=999)", CurrentValue=S.InfUses, Callback=function(v) S.InfUses=v end})
-T1:CreateToggle({Name="Kill Aura Human (по Smiling)", CurrentValue=S.AuraHuman, Callback=function(v) S.AuraHuman=v if v then EquipBest() end end})
-T1:CreateSlider({Name="Aura Radius", Range={8,60}, Increment=1, CurrentValue=S.AuraR, Callback=function(v) S.AuraR=v end})
-T1:CreateButton({Name="Взять лучшее оружие (макс Damage)", Callback=function() EquipBest() end})
+--// Tabs
+local TabPlayer = Window:CreateTab("Player", 4483362458)
+local TabHuman = Window:CreateTab("Survivor", 4483362458)
+local TabSmile = Window:CreateTab("Smiler", 4483362458)
+local TabTP = Window:CreateTab("Teleports", 4483362458)
+local TabVisual = Window:CreateTab("Visual / Anti", 4483362458)
 
-T1:CreateSection("Защита")
-T1:CreateToggle({Name="Anti-Infect (выкл Infector локально)", CurrentValue=S.AntiInfect, Callback=function(v) S.AntiInfect=v end})
-T1:CreateToggle({Name="Anti-KillBricks", CurrentValue=S.AntiKill, Callback=function(v) S.AntiKill=v end})
+--================================================
+-- PLAYER
+--================================================
+TabPlayer:CreateSection("Movement (Delta Mobile)")
 
---// TAB SMILER
-local T2 = Window:CreateTab("Smiler 😊", 4483362458)
-T2:CreateSection("Заражение")
-T2:CreateToggle({Name="Infect Aura (трогать Humans)", CurrentValue=S.AuraSmiler, Callback=function(v) S.AuraSmiler=v end})
-T2:CreateToggle({Name="Bring Humans перед собой (visual+touch)", CurrentValue=S.Bring, Callback=function(v) S.Bring=v end})
-T2:CreateSection("Инфо")
-T2:CreateLabel("Ты: "..MyTeam().." | Смайлер быстрее человека, держись толпы")
+TabPlayer:CreateSlider({
+    Name = "WalkSpeed",
+    Range = {16, 250},
+    Increment = 1,
+    CurrentValue = 16,
+    Flag = "SpeedSlider",
+    Callback = function(v)
+        State.Speed = v
+        State.SpeedEnabled = (v ~= 16)
+        local h = MyHum()
+        if h then h.WalkSpeed = v end
+    end,
+})
 
---// TAB VISUAL/MOVE
-local T3 = Window:CreateTab("ESP / Move", 4483362458)
-T3:CreateToggle({Name="ESP (Human=зел, Smile=красн)", CurrentValue=S.ESP, Callback=function(v) S.ESP=v end})
-T3:CreateToggle({Name="Hitbox Expander", CurrentValue=S.Hitbox, Callback=function(v) S.Hitbox=v end})
-T3:CreateSlider({Name="Hitbox Size", Range={4,20}, Increment=1, CurrentValue=S.HitboxSize, Callback=function(v) S.HitboxSize=v end})
-T3:CreateToggle({Name="Speed", CurrentValue=S.Speed, Callback=function(v) S.Speed=v end})
-T3:CreateSlider({Name="Speed Val (деф 16)", Range={16,100}, Increment=1, CurrentValue=S.SpeedVal, Callback=function(v) S.SpeedVal=v end})
-T3:CreateToggle({Name="Fly (E вверх/Q вниз на эмуле)", CurrentValue=S.Fly, Callback=function(v) S.Fly=v end})
+TabPlayer:CreateSlider({
+    Name = "JumpPower",
+    Range = {50, 300},
+    Increment = 5,
+    CurrentValue = 50,
+    Flag = "JumpSlider",
+    Callback = function(v)
+        local h = MyHum()
+        if h then
+            h.UseJumpPower = true
+            h.JumpPower = v
+        end
+    end,
+})
 
---// LOOPS (ядро по скану)
-
--- NoCD + InfUses: Cooldown NumberValue=0, Uses/MaxUses=999
+-- keep speed applied (respawn proof)
 task.spawn(function()
-  while true do
-    task.wait(0.5)
-    if S.NoCD or S.InfUses then
-      for _,t in ipairs(MyTools()) do
-        pcall(function()
-          if S.NoCD then
-            local cd = t:FindFirstChild("Cooldown")
-            if cd and cd:IsA("NumberValue") then cd.Value = 0 end
-            local at = t:FindFirstChild("ActivateTick")
-            if at and at:IsA("NumberValue") then at.Value = 0 end
-          end
-          if S.InfUses then
-            local u = t:FindFirstChild("Uses")
-            if u and u:IsA("IntValue") then u.Value = 999 end
-            local m = t:FindFirstChild("MaxUses")
-            if m and m:IsA("IntValue") then m.Value = 999 end
-          end
-        end)
-      end
-    end
-  end
-end)
-
--- Kill Aura Human: бьем Smiling через Activate + SwingEvent + touch
-task.spawn(function()
-  while true do
-    task.wait(0.15)
-    if S.AuraHuman then
-      pcall(function()
-        local ch = LP.Character if not ch then return end
-        local hrp = ch:FindFirstChild("HumanoidRootPart") if not hrp then return end
-        local tool = ch:FindFirstChildOfClass("Tool")
-        if not tool then EquipBest() tool = ch:FindFirstChildOfClass("Tool") end
-        for _,p in ipairs(Players:GetPlayers()) do
-          if IsEnemy(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            local h = p.Character:FindFirstChildOfClass("Humanoid")
-            if h and h.Health>0 and (hrp.Position - p.Character.HumanoidRootPart.Position).Magnitude <= S.AuraR then
-              if tool then
-                tool:Activate()
-                local sw = tool:FindFirstChild("SwingEvent")
-                if sw and sw:IsA("RemoteEvent") then pcall(function() sw:FireServer() end) end
-                if tool:FindFirstChild("Handle") then
-                  pcall(function()
-                    firetouchinterest(tool.Handle, p.Character.HumanoidRootPart, 0) task.wait()
-                    firetouchinterest(tool.Handle, p.Character.HumanoidRootPart, 1)
-                  end)
-                else
-                  -- Chain/Shovel без Handle: бьем BodyAttach/первой MeshPart
-                  for _,part in ipairs(tool:GetChildren()) do
-                    if part:IsA("BasePart") then
-                      pcall(function()
-                        firetouchinterest(part, p.Character.HumanoidRootPart, 0) task.wait()
-                        firetouchinterest(part, p.Character.HumanoidRootPart, 1)
-                      end)
-                      break
-                    end
-                  end
+    while true do
+        task.wait(0.2)
+        if State.SpeedEnabled then
+            pcall(function()
+                local h = MyHum()
+                if h and h.WalkSpeed ~= State.Speed then
+                    h.WalkSpeed = State.Speed
                 end
-              end
+            end)
+        end
+    end
+end)
+
+TabPlayer:CreateToggle({
+    Name = "Infinite Jump",
+    CurrentValue = false,
+    Flag = "InfJump",
+    Callback = function(v) State.InfJump = v end,
+})
+
+UIS.JumpRequest:Connect(function()
+    if State.InfJump then
+        pcall(function()
+            MyHum():ChangeState(Enum.HumanoidStateType.Jumping)
+        end)
+    end
+end)
+
+TabPlayer:CreateToggle({
+    Name = "Noclip (сквозь стены)",
+    CurrentValue = false,
+    Flag = "Noclip",
+    Callback = function(v) State.Noclip = v end,
+})
+
+RunService.Stepped:Connect(function()
+    if State.Noclip then
+        pcall(function()
+            local c = MyChar()
+            if c then
+                for _, p in pairs(c:GetDescendants()) do
+                    if p:IsA("BasePart") and p.CanCollide then
+                        p.CanCollide = false
+                    end
+                end
             end
-          end
-        end
-      end)
+        end)
     end
-  end
 end)
 
--- Infect Aura Smiler: касание Humans своим телом (граб в игре через touch)
-task.spawn(function()
-  while true do
-    task.wait(0.2)
-    if S.AuraSmiler then
-      pcall(function()
-        local ch = LP.Character if not ch then return end
-        local hrp = ch:FindFirstChild("HumanoidRootPart") if not hrp then return end
-        for _,p in ipairs(Players:GetPlayers()) do
-          if IsEnemy(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            local h = p.Character:FindFirstChildOfClass("Humanoid")
-            if h and h.Health>0 and (hrp.Position - p.Character.HumanoidRootPart.Position).Magnitude <= S.AuraR then
-              pcall(function()
-                firetouchinterest(hrp, p.Character.HumanoidRootPart, 0) task.wait()
-                firetouchinterest(hrp, p.Character.HumanoidRootPart, 1)
-              end)
+-- Simple Fly (работает на Delta mobile: кнопка + джойстик)
+local flyConn, flyGyro, flyVel
+TabPlayer:CreateToggle({
+    Name = "Fly (мобильный)",
+    CurrentValue = false,
+    Flag = "FlyToggle",
+    Callback = function(v)
+        State.Fly = v
+        local hrp = MyHRP()
+        if not hrp then return end
+        if v then
+            flyGyro = Instance.new("BodyGyro", hrp)
+            flyGyro.P = 9e4
+            flyGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+            flyGyro.cframe = hrp.CFrame
+            flyVel = Instance.new("BodyVelocity", hrp)
+            flyVel.velocity = Vector3.new(0,0,0)
+            flyVel.maxForce = Vector3.new(9e9, 9e9, 9e9)
+            flyConn = RunService.RenderStepped:Connect(function()
+                if not State.Fly or not MyHRP() then return end
+                local hum = MyHum()
+                if hum then hum.PlatformStand = true end
+                local move = hum and hum.MoveDirection or Vector3.new(0,0,0)
+                local up = 0
+                if UIS:IsKeyDown(Enum.KeyCode.Space) then up = 1 end
+                if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then up = -1 end
+                pcall(function()
+                    flyVel.velocity = (move * State.FlySpeed) + Vector3.new(0, up * State.FlySpeed, 0)
+                    flyGyro.cframe = workspace.CurrentCamera.CFrame
+                end)
+            end)
+            Notify("Fly", "Fly ВКЛ. На телефоне используй джойстик для движения", 4)
+        else
+            if flyConn then flyConn:Disconnect() flyConn = nil end
+            if flyGyro then flyGyro:Destroy() flyGyro = nil end
+            if flyVel then flyVel:Destroy() flyVel = nil end
+            pcall(function() MyHum().PlatformStand = false end)
+        end
+    end,
+})
+
+TabPlayer:CreateSlider({
+    Name = "Fly Speed",
+    Range = {20, 200},
+    Increment = 5,
+    CurrentValue = 50,
+    Callback = function(v) State.FlySpeed = v end,
+})
+
+TabPlayer:CreateButton({
+    Name = "Reset Speed / Fly",
+    Callback = function()
+        State.SpeedEnabled = false
+        State.Fly = false
+        if flyConn then flyConn:Disconnect() flyConn = nil end
+        if flyGyro then flyGyro:Destroy() end
+        if flyVel then flyVel:Destroy() end
+        pcall(function()
+            MyHum().WalkSpeed = 16
+            MyHum().PlatformStand = false
+        end)
+        Notify("Player", "Скорость и Fly сброшены", 2)
+    end,
+})
+
+--================================================
+-- SURVIVOR (Human)
+--================================================
+TabHuman:CreateSection("Оружие выжившего")
+
+TabHuman:CreateDropdown({
+    Name = "Выбор оружия для No-Cooldown",
+    Options = {"Bat","Bottle","Katana","Branch","Spare","Chain","Pipe","Knife"},
+    CurrentOption = {"Bat"},
+    MultipleOptions = false,
+    Flag = "WeaponDrop",
+    Callback = function() end,
+})
+
+TabHuman:CreateButton({
+    Name = "Убрать Cooldown (1 раз)",
+    Callback = function()
+        for _, tool in pairs(GetTools()) do
+            pcall(function()
+                if tool:FindFirstChild("Cooldown") then tool.Cooldown.Value = 0 end
+            end)
+        end
+        Notify("Survivor", "Cooldown убран для оружия в инвентаре", 3)
+    end,
+})
+
+TabHuman:CreateToggle({
+    Name = "Auto No-Cooldown (спам)",
+    CurrentValue = false,
+    Flag = "NoCdHuman",
+    Callback = function(v)
+        State.NoCooldownHuman = v
+        if v then
+            task.spawn(function()
+                while State.NoCooldownHuman do
+                    task.wait(0.1)
+                    for _, tool in pairs(GetTools()) do
+                        pcall(function()
+                            local cd = tool:FindFirstChild("Cooldown")
+                            if cd and cd.Value ~= 0 then cd.Value = 0 end
+                        end)
+                    end
+                end
+            end)
+        end
+    end,
+})
+
+TabHuman:CreateButton({
+    Name = "Взять своё оружие (авто-телепорт к вендору)",
+    Callback = function()
+        task.spawn(function()
+            local hrp = MyHRP()
+            if not hrp then return end
+            local wName = GetMainWeaponName()
+            local bp = plr:FindFirstChild("Backpack")
+            local hum = MyHum()
+            if bp and bp:FindFirstChild(wName) then
+                hum:EquipTool(bp[wName])
+                Notify("Оружие", "Уже в рюкзаке: "..wName, 2)
+                return
             end
-          end
-        end
-      end)
-    end
-  end
-end)
+            local ok, vendorBox, detector = pcall(function()
+                local hb = Workspace.Map.HumanBase.Vendor.BatCollection.HitBox
+                local cd = Workspace.Map.HumanBase.Vendor.BatCollection.ClickDetector
+                return hb, cd
+            end)
+            if not ok or not vendorBox then
+                Notify("Ошибка", "Вендор не найден на этой карте", 3)
+                return
+            end
+            local old = hrp.CFrame
+            Notify("Оружие", "Телепорт к вендору за "..wName.." ...", 2)
+            local t0 = tick()
+            pcall(function() detector.MaxActivationDistance = 1e9 end)
+            repeat
+                task.wait(0.1)
+                hrp = MyHRP()
+                if not hrp then break end
+                hrp.CFrame = vendorBox.CFrame + Vector3.new(0,3,0)
+                pcall(function() fireclickdetector(detector) end)
+            until (bp and bp:FindFirstChild(wName)) or (tick()-t0 > 6)
+            task.wait(0.3)
+            if bp and bp:FindFirstChild(wName) and MyHum() then
+                MyHum():EquipTool(bp[wName])
+                Notify("Оружие", "Взято: "..wName, 2)
+            end
+            task.wait(0.4)
+            if MyHRP() then MyHRP().CFrame = old end
+        end)
+    end,
+})
 
--- Bring visual+touch (твой способ из Area51)
-RS.RenderStepped:Connect(function()
-  if not S.Bring then return end
-  pcall(function()
-    local ch = LP.Character if not ch then return end
-    local my = ch:FindFirstChild("HumanoidRootPart") if not my then return end
-    local idx=0
-    for _,p in ipairs(Players:GetPlayers()) do
-      if IsEnemy(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-        local e = p.Character.HumanoidRootPart
-        local h = p.Character:FindFirstChildOfClass("Humanoid")
-        if h and h.Health>0 then
-          idx=idx+1
-          local row=math.floor((idx-1)/3) local col=(idx-1)%3-1
-          e.CanCollide=false
-          e.CFrame = my.CFrame * CFrame.new(col*4, 0.5, -S.BringDist - row*4)
-          pcall(function() firetouchinterest(my, e, 0) firetouchinterest(my, e, 1) end)
-        end
-      end
-    end
-  end)
-end)
+TabHuman:CreateSection("Hit Aura / Kill Aura")
 
--- Hitbox
-task.spawn(function()
-  while true do
-    task.wait(1)
-    if S.Hitbox then
-      for _,p in ipairs(Players:GetPlayers()) do
-        if IsEnemy(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-          pcall(function()
-            local r=p.Character.HumanoidRootPart
-            r.Size=Vector3.new(S.HitboxSize,S.HitboxSize,S.HitboxSize)
-            r.Transparency=0.7 r.CanCollide=false
-          end)
-        end
-      end
-    end
-  end
-end)
+TabHuman:CreateSlider({
+    Name = "Hitbox Size (оружие)",
+    Range = {5, 60},
+    Increment = 1,
+    CurrentValue = 15,
+    Flag = "HitboxSlider",
+    Callback = function(v) State.HitboxSize = v end,
+})
 
--- ESP по Team (Human/Smiling из скана)
-local function ApplyESP(p)
-  if p==LP then return end
-  if not p.Character then return end
-  pcall(function()
-    local h=p.Character:FindFirstChild("S_ESP") if h then h:Destroy() end
-  end)
-  if not S.ESP then return end
-  if not IsEnemy(p) and MyTeam()==(p.Team and p.Team.Name) then
-    -- своих не подсвечиваем чтобы не лагало, только врагов
-    -- убери return если хочешь всех
-    return
-  end
-  local col = (p.Team and p.Team.Name=="Smiling") and Color3.fromRGB(255,0,0) or Color3.fromRGB(0,255,0)
-  local hl=Instance.new("Highlight") hl.Name="S_ESP"
-  hl.FillColor=col hl.OutlineColor=col hl.FillTransparency=0.6
-  hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop hl.Parent=p.Character
+local function ExpandWeaponHitbox(tool)
+    pcall(function()
+        for _, part in pairs(tool:GetDescendants()) do
+            if part:IsA("BasePart") and part:FindFirstChildOfClass("TouchTransmitter") then
+                part.Size = Vector3.new(State.HitboxSize, State.HitboxSize, State.HitboxSize)
+                part.Massless = true
+                part.Transparency = 0.7
+                part.CanCollide = false
+            end
+        end
+    end)
 end
-task.spawn(function() while true do task.wait(2) for _,p in ipairs(Players:GetPlayers()) do pcall(ApplyESP,p) end end end)
 
--- Anti-Infect / Anti-Kill: CanTouch=false локально (тач идет с клиента, сервер не увидит касание)
-task.spawn(function()
-  while true do
-    task.wait(2)
-    if S.AntiInfect then
-      pcall(function()
-        for _,d in ipairs(WS:GetDescendants()) do
-          local n=string.lower(d.Name)
-          if (string.find(n,"infect") and d:IsA("BasePart")) then
-            -- не трогаем Human-оружие, только части карты
-            if not d:IsDescendantOf(LP.Character) then d.CanTouch=false end
-          end
+TabHuman:CreateToggle({
+    Name = "Swing Aura (авто-удар)",
+    CurrentValue = false,
+    Flag = "SwingAura",
+    Callback = function(v)
+        State.HitAura = v
+        if v then
+            task.spawn(function()
+                while State.HitAura do
+                    task.wait(0.08)
+                    pcall(function()
+                        local c = MyChar()
+                        if not c then return end
+                        local tool = c:FindFirstChildOfClass("Tool")
+                        if not tool then return end
+                        ExpandWeaponHitbox(tool)
+                        local ev = tool:FindFirstChild("SwingEvent")
+                        if ev then ev:FireServer() end
+                    end)
+                end
+            end)
         end
-      end)
-    end
-    if S.AntiKill then
-      pcall(function()
-        local kb = WS:FindFirstChild("Map")
-        if kb then
-          for _,d in ipairs(kb:GetDescendants()) do
-            if d:IsA("BasePart") and (string.find(string.lower(d.Name),"kill") or d.Parent.Name=="KillBricks") then
-              d.CanTouch=false
+    end,
+})
+
+TabHuman:CreateParagraph({Title = "Как работает Kill Aura", Content = "Телепортируется к врагу (смайлу) и бьёт с увеличенным хитбоксом."})
+
+local function GetEnemies()
+    local list = {}
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= plr and p.Character then
+            local h = p.Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 then
+                local enemy = true
+                pcall(function()
+                    if plr.Team and p.Team and plr.Team == p.Team then enemy = false end
+                end)
+                if enemy then table.insert(list, p) end
             end
-          end
         end
-      end)
     end
-  end
+    return list
+end
+
+TabHuman:CreateToggle({
+    Name = "Kill All (по очереди телепорт + удар)",
+    CurrentValue = false,
+    Flag = "KillAll",
+    Callback = function(v)
+        State.KillAura = v
+        if v then
+            task.spawn(function()
+                Notify("Kill All", "Запущено. Выключается той же кнопкой.", 3)
+                while State.KillAura do
+                    local enemies = GetEnemies()
+                    if #enemies == 0 then task.wait(1.5) continue end
+                    local target = enemies[1]
+                    local t0 = tick()
+                    while State.KillAura and (tick()-t0 < 8) do
+                        task.wait(0.05)
+                        pcall(function()
+                            if not target.Parent then return end
+                            local th = target.Character and target.Character:FindFirstChildOfClass("Humanoid")
+                            if not th or th.Health <= 0 then return end
+                            local myC = MyChar()
+                            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+                            local mHRP = myC and myC:FindFirstChild("HumanoidRootPart")
+                            if not tHRP or not mHRP then return end
+                            local tool = myC:FindFirstChildOfClass("Tool")
+                            if not tool then
+                                local bp = plr.Backpack:FindFirstChild(GetMainWeaponName())
+                                if bp then MyHum():EquipTool(bp) end
+                                return
+                            end
+                            ExpandWeaponHitbox(tool)
+                            mHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(0,2,3), tHRP.Position)
+                            local sw = tool:FindFirstChild("SwingEvent")
+                            if sw then sw:FireServer() end
+                        end)
+                        local dead = true
+                        pcall(function()
+                            local th = target.Character:FindFirstChildOfClass("Humanoid")
+                            if th and th.Health > 0 then dead = false end
+                        end)
+                        if dead then break end
+                    end
+                    task.wait(0.3)
+                end
+            end)
+        end
+    end,
+})
+
+--================================================
+-- SMILER (Infected)
+--================================================
+TabSmile:CreateSection("Стать смайлом / заражать")
+
+TabSmile:CreateButton({
+    Name = "Стать Smiler (Be Smiler)",
+    Callback = function()
+        task.spawn(function()
+            local hrp = MyHRP()
+            if not hrp then return end
+            local ok, part = pcall(function()
+                return Workspace.Map.Infectors.Infector.Part
+            end)
+            if ok and part then
+                pcall(function()
+                    firetouchinterest(hrp, part, 0)
+                    task.wait(0.1)
+                    firetouchinterest(hrp, part, 1)
+                end)
+                Notify("Smiler", "Попытка заражения...", 2)
+            else
+                Notify("Smiler", "Infector не найден на карте", 3)
+            end
+        end)
+    end,
+})
+
+TabSmile:CreateSlider({
+    Name = "Infect Hitbox (длина Z)",
+    Range = {0, 100},
+    Increment = 1,
+    CurrentValue = 20,
+    Flag = "InfectSlider",
+    Callback = function(v)
+        State.InfectSize = v
+        pcall(function()
+            local torso = MyChar() and MyChar():FindFirstChild("Torso")
+            local p = torso and torso:FindFirstChild("Part")
+            if p and v > 0 then
+                p.Size = Vector3.new(7,2,v)
+                p.Massless = true
+                p.Transparency = 0.6
+            end
+        end)
+    end,
+})
+
+TabSmile:CreateToggle({
+    Name = "Auto Infect Hitbox (держать)",
+    CurrentValue = false,
+    Flag = "AutoInfectBox",
+    Callback = function(v)
+        State.AutoInfectBox = v
+        if v then
+            task.spawn(function()
+                while State.AutoInfectBox do
+                    task.wait(0.15)
+                    pcall(function()
+                        if State.InfectSize <= 0 then return end
+                        local torso = MyChar() and MyChar():FindFirstChild("Torso")
+                        local p = torso and torso:FindFirstChild("Part")
+                        if p then
+                            p.Size = Vector3.new(7,2,State.InfectSize)
+                            p.Massless = true
+                            p.Transparency = 0.6
+                        end
+                    end)
+                end
+            end)
+        end
+    end,
+})
+
+TabSmile:CreateToggle({
+    Name = "Auto No-Cooldown Infect",
+    CurrentValue = false,
+    Flag = "NoCdSmile",
+    Callback = function(v)
+        State.NoCooldownSmile = v
+        if v then
+            task.spawn(function()
+                while State.NoCooldownSmile do
+                    task.wait(0.05)
+                    pcall(function()
+                        local inf = MyChar() and MyChar():FindFirstChild("Infected")
+                        local ic = inf and inf:FindFirstChild("Infect")
+                        local cd = ic and ic:FindFirstChild("Cooldown")
+                        if cd then cd.Value = 0 end
+                    end)
+                end
+            end)
+        end
+    end,
+})
+
+TabSmile:CreateToggle({
+    Name = "Infect Aura (заражать рядом)",
+    CurrentValue = false,
+    Flag = "InfectAura",
+    Callback = function(v)
+        State.InfectAura = v
+        if v then
+            task.spawn(function()
+                while State.InfectAura do
+                    task.wait(0.15)
+                    pcall(function()
+                        local c = MyChar()
+                        local infected = c and c:FindFirstChild("Infected")
+                        local ev = infected and infected:FindFirstChild("InfectEvent")
+                        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                        if not ev or not hrp then return end
+                        for _, p in pairs(Players:GetPlayers()) do
+                            if p ~= plr and p.Character then
+                                local oh = p.Character:FindFirstChild("HumanoidRootPart")
+                                if oh and (hrp.Position - oh.Position).Magnitude <= 25 then
+                                    ev:FireServer("orient_upd", -131.01300048828125)
+                                    break
+                                end
+                            end
+                        end
+                    end)
+                end
+            end)
+        end
+    end,
+})
+
+--================================================
+-- TELEPORTS
+--================================================
+TabTP:CreateSection("Быстрые телепорты")
+
+local function TPto(cf)
+    pcall(function()
+        MyHRP().CFrame = cf
+    end)
+end
+
+TabTP:CreateButton({
+    Name = "К вендору (оружие)",
+    Callback = function()
+        pcall(function()
+            local hb = Workspace.Map.HumanBase.Vendor.BatCollection.HitBox
+            TPto(hb.CFrame + Vector3.new(0,4,0))
+        end)
+    end,
+})
+
+TabTP:CreateButton({
+    Name = "На спавн людей (HumanBase)",
+    Callback = function()
+        pcall(function()
+            local hb = Workspace.Map:FindFirstChild("HumanBase")
+            if hb then
+                local dest = hb:FindFirstChildOfClass("SpawnLocation") or hb:FindFirstChild("Spawn")
+                if dest and dest:IsA("BasePart") then
+                    TPto(dest.CFrame + Vector3.new(0,4,0))
+                else
+                    TPto(CFrame.new(0,20,0))
+                end
+            end
+        end)
+    end,
+})
+
+TabTP:CreateButton({
+    Name = "Наверх (Y +50, анти-застревание)",
+    Callback = function()
+        local hrp = MyHRP()
+        if hrp then TPto(hrp.CFrame + Vector3.new(0,50,0)) end
+    end,
+})
+
+local playerNames = {}
+local function RefreshPlayers()
+    table.clear(playerNames)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= plr then table.insert(playerNames, p.Name) end
+    end
+end
+RefreshPlayers()
+
+local PlayerDropdown = TabTP:CreateDropdown({
+    Name = "Телепорт к игроку",
+    Options = playerNames,
+    CurrentOption = {},
+    MultipleOptions = false,
+    Flag = "TPPlayer",
+    Callback = function(opt)
+        local name = type(opt) == "table" and opt[1] or opt
+        State.KillTarget = name
+    end,
+})
+
+TabTP:CreateButton({
+    Name = "Обновить список игроков",
+    Callback = function()
+        RefreshPlayers()
+        PlayerDropdown:Refresh(playerNames, true)
+        Notify("Teleports", "Список обновлён: "..#playerNames.." игроков", 2)
+    end,
+})
+
+TabTP:CreateButton({
+    Name = "Телепортироваться к выбранному",
+    Callback = function()
+        if not State.KillTarget then Notify("TP", "Сначала выбери игрока", 2) return end
+        pcall(function()
+            local t = Players:FindFirstChild(State.KillTarget)
+            local th = t and t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+            if th then TPto(th.CFrame + Vector3.new(0,3,0)) end
+        end)
+    end,
+})
+
+Players.PlayerAdded:Connect(function()
+    task.wait(0.5)
+    RefreshPlayers()
+    pcall(function() PlayerDropdown:Refresh(playerNames, true) end)
+end)
+Players.PlayerRemoving:Connect(function()
+    task.wait(0.5)
+    RefreshPlayers()
+    pcall(function() PlayerDropdown:Refresh(playerNames, true) end)
 end)
 
--- Speed / Fly
-RS.Stepped:Connect(function()
-  pcall(function()
-    local ch=LP.Character
-    if ch and ch:FindFirstChildOfClass("Humanoid") then
-      local h=ch:FindFirstChildOfClass("Humanoid")
-      if S.Speed then h.WalkSpeed=S.SpeedVal else if h.WalkSpeed~=16 then h.WalkSpeed=16 end end
-    end
-  end)
-end)
-local bv=nil
-RS.Heartbeat:Connect(function()
-  local ch=LP.Character if not ch or not ch:FindFirstChild("HumanoidRootPart") then return end
-  local hrp=ch.HumanoidRootPart
-  if S.Fly then
-    if not bv then bv=Instance.new("BodyVelocity") bv.MaxForce=Vector3.new(9e4,9e4,9e4) bv.Velocity=Vector3.zero bv.Parent=hrp end
-    bv.Velocity=ch:FindFirstChildOfClass("Humanoid").MoveDirection*50
-    if UIS:IsKeyDown(Enum.KeyCode.E) or UIS:IsKeyDown(Enum.KeyCode.Space) then bv.Velocity=bv.Velocity+Vector3.new(0,50,0) end
-    if UIS:IsKeyDown(Enum.KeyCode.Q) then bv.Velocity=bv.Velocity-Vector3.new(0,50,0) end
-  else if bv then bv:Destroy() bv=nil end end
+--================================================
+-- VISUAL / ANTI
+--================================================
+TabVisual:CreateSection("ESP")
+
+TabVisual:CreateToggle({
+    Name = "ESP Players (Highlight)",
+    CurrentValue = false,
+    Flag = "ESP",
+    Callback = function(v)
+        State.ESP = v
+        if v then
+            task.spawn(function()
+                while State.ESP do
+                    task.wait(0.5)
+                    pcall(function()
+                        for _, p in pairs(Players:GetPlayers()) do
+                            if p == plr then continue end
+                            local ch = p.Character
+                            if not ch then continue end
+                            if not ch:FindFirstChild("DeltaESP") then
+                                local hl = Instance.new("Highlight")
+                                hl.Name = "DeltaESP"
+                                hl.FillTransparency = 0.5
+                                hl.OutlineTransparency = 0
+                                if ch:FindFirstChild("Infected") then
+                                    hl.FillColor = Color3.fromRGB(255,0,0)
+                                else
+                                    hl.FillColor = Color3.fromRGB(0,255,0)
+                                end
+                                hl.Adornee = ch
+                                hl.Parent = ch
+                            else
+                                local hl = ch:FindFirstChild("DeltaESP")
+                                if ch:FindFirstChild("Infected") then
+                                    hl.FillColor = Color3.fromRGB(255,0,0)
+                                else
+                                    hl.FillColor = Color3.fromRGB(0,255,0)
+                                end
+                            end
+                            if State.ESPNames and ch:FindFirstChild("Head") and not ch.Head:FindFirstChild("DeltaName") then
+                                local bb = Instance.new("BillboardGui")
+                                bb.Name = "DeltaName"
+                                bb.Size = UDim2.new(0,100,0,30)
+                                bb.StudsOffset = Vector3.new(0,2.5,0)
+                                bb.AlwaysOnTop = true
+                                bb.Parent = ch.Head
+                                local tl = Instance.new("TextLabel")
+                                tl.Size = UDim2.new(1,0,1,0)
+                                tl.BackgroundTransparency = 1
+                                tl.TextStrokeTransparency = 0
+                                tl.TextScaled = true
+                                tl.Text = p.Name
+                                tl.Parent = bb
+                            end
+                        end
+                    end)
+                end
+            end)
+        else
+            for _, p in pairs(Players:GetPlayers()) do
+                pcall(function()
+                    local ch = p.Character
+                    if ch then
+                        local hl = ch:FindFirstChild("DeltaESP")
+                        if hl then hl:Destroy() end
+                        if ch:FindFirstChild("Head") and ch.Head:FindFirstChild("DeltaName") then
+                            ch.Head.DeltaName:Destroy()
+                        end
+                    end
+                end)
+            end
+        end
+    end,
+})
+
+TabVisual:CreateToggle({
+    Name = "Показывать имена (для ESP)",
+    CurrentValue = true,
+    Callback = function(v) State.ESPNames = v end,
+})
+
+TabVisual:CreateSection("Свет / Анти-чит")
+
+TabVisual:CreateToggle({
+    Name = "Fullbright (светлая карта)",
+    CurrentValue = false,
+    Callback = function(v)
+        State.Fullbright = v
+        if v then
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 14
+            Lighting.FogEnd = 1e5
+            Lighting.GlobalShadows = false
+        else
+            Lighting.Brightness = 1
+            Lighting.GlobalShadows = true
+        end
+    end,
+})
+
+TabVisual:CreateToggle({
+    Name = "Anti Blackhole (убрать притяжение)",
+    CurrentValue = false,
+    Callback = function(v)
+        State.AntiBlackhole = v
+        if v then
+            task.spawn(function()
+                while State.AntiBlackhole do
+                    task.wait(0.3)
+                    pcall(function()
+                        local c = MyChar()
+                        if c then
+                            for _, b in pairs(c:GetDescendants()) do
+                                if b:IsA("BodyMover") or b:IsA("VectorForce") then
+                                    b:Destroy()
+                                end
+                            end
+                        end
+                    end)
+                end
+            end)
+        end
+    end,
+})
+
+TabVisual:CreateToggle({
+    Name = "Anti Kill Bricks",
+    CurrentValue = false,
+    Callback = function(v)
+        State.AntiKill = v
+        if v then
+            task.spawn(function()
+                while State.AntiKill do
+                    task.wait(0.5)
+                    pcall(function()
+                        local map = Workspace:FindFirstChild("Map")
+                        if map then
+                            for _, part in pairs(map:GetDescendants()) do
+                                if part:IsA("BasePart") and string.find(string.lower(part.Name), "kill") then
+                                    part.CanTouch = false
+                                    part.CanQuery = false
+                                end
+                            end
+                        end
+                    end)
+                end
+            end)
+        end
+    end,
+})
+
+TabVisual:CreateButton({
+    Name = "Удалить AntiHack / Spearer (1 раз)",
+    Callback = function()
+        pcall(function()
+            local ah = Workspace.Map:FindFirstChild("AntiHack")
+            if ah then ah:Destroy() end
+            local sp = Workspace.Map:FindFirstChild("Misc")
+            if sp then
+                local s = sp:FindFirstChild("Spearer")
+                if s then s:Destroy() end
+            end
+        end)
+        Notify("Anti", "Попытка удаления выполнена", 2)
+    end,
+})
+
+pcall(function()
+    local VU = game:GetService("VirtualUser")
+    plr.Idled:Connect(function()
+        VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end)
 end)
 
-Rayfield:Notify({Title="Smile v1 ✅", Content="Роль: "..MyTeam().." | CD/Damage из скана", Duration=5})
-print("[SmileV1] loaded team="..MyTeam())
+Notify("Infectious Smile Hub", "Загружено! Приятной игры на Delta", 5)
+Rayfield:LoadConfiguration()
