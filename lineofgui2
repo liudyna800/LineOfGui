@@ -6016,9 +6016,11 @@ function lobSmartPick()
     local now = os.clock()
     local best, bestScore = nil, -1e12
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= Players.LocalPlayer then
-            local pr = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-            if pr and (_smartWalk.avoid[p.UserId] or 0) < now then
+        if p ~= Players.LocalPlayer and (_smartWalk.avoid[p.UserId] or 0) < now then
+            local tchar = p.Character
+            local pr = tchar and tchar:FindFirstChild("HumanoidRootPart")
+            local hu = tchar and tchar:FindFirstChildOfClass("Humanoid")
+            if pr and hu and hu.Health > 0 and not lobIsDangerTarget(p) then
                 local spoke = _lastChatAt[p.UserId] or 0
                 local recent = (now - spoke) < 60
                 local dist = (pr.Position - root.Position).Magnitude
@@ -6052,36 +6054,45 @@ function lobSmartPathMove(targetPos, cancelFn)
     local char = Players.LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not hum or not root then return false end
+    if not hum or not root then return "fail" end
     -- не идём, пока сидим/танцуем: останавливаем активную эмоцию перед ходьбой
     pcall(function() stopCurrentEmote() end)
     local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
     local ok = pcall(function() path:ComputeAsync(root.Position, targetPos) end)
     if not ok or path.Status ~= Enum.PathStatus.Success then
         pcall(function() hum:MoveTo(targetPos) end)
-        return false
+        return "nopath"
     end
-    for _, wp in ipairs(path:GetWaypoints()) do
-        if cancelFn and cancelFn() then return false end
-        local cur = Players.LocalPlayer.Character
-        local cr = cur and cur:FindFirstChild("HumanoidRootPart")
-        local ch = cur and cur:FindFirstChildOfClass("Humanoid")
-        if not cr or not ch or ch.Health <= 0 then return false end
-        if (cr.Position - wp.Position).Magnitude < 4 then continue end
+    local wps = path:GetWaypoints()
+    for i = 2, #wps do
+        if cancelFn and cancelFn() then return "cancelled" end
+        local wp = wps[i]
+        local c1 = Players.LocalPlayer.Character
+        local cr = c1 and c1:FindFirstChild("HumanoidRootPart")
+        local ch = c1 and c1:FindFirstChildOfClass("Humanoid")
+        if not cr or not ch or ch.Health <= 0 then return "fail" end
         if wp.Action == Enum.PathWaypointAction.Jump then ch.Jump = true end
         ch:MoveTo(wp.Position)
-        local arrived, t = false, 0
-        local conn = ch.MoveToFinished:Connect(function(r) arrived = r end)
-        while not arrived and t < 2.5 do
-            if cancelFn and cancelFn() then break end
-            local h2 = Players.LocalPlayer.Character
-            h2 = h2 and h2:FindFirstChildOfClass("Humanoid")
-            if not h2 or h2.Health <= 0 then break end
+        -- идём к точке с anti-stuck: если почти не двигаемся — прыгаем
+        local t, stuckT, lastPos = 0, 0, cr.Position
+        while t < 3 do
+            if cancelFn and cancelFn() then return "cancelled" end
+            local c2 = Players.LocalPlayer.Character
+            local r2 = c2 and c2:FindFirstChild("HumanoidRootPart")
+            local h2 = c2 and c2:FindFirstChildOfClass("Humanoid")
+            if not r2 or not h2 or h2.Health <= 0 then return "fail" end
+            if (r2.Position - wp.Position).Magnitude < 4 then break end
+            if (r2.Position - lastPos).Magnitude < 0.3 then
+                stuckT = stuckT + 0.1
+                if stuckT >= 0.6 then pcall(function() h2.Jump = true end) stuckT = 0 end
+            else
+                stuckT = 0
+                lastPos = r2.Position
+            end
             task.wait(0.1); t = t + 0.1
         end
-        pcall(function() conn:Disconnect() end)
     end
-    return true
+    return "arrived"
 end
 
 function lobSmartWalkStart()
@@ -6089,80 +6100,96 @@ function lobSmartWalkStart()
     _smartWalk.active = true
     _smartWalk.thread = task.spawn(function()
         while _smartWalk.active do
-            task.wait(0.4)
-            if not (ClientSettings.Enabled and ClientSettings.SmartWalk) then task.wait(1) continue end
-            local char = Players.LocalPlayer.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not hum or not root or hum.Health <= 0 then task.wait(1) continue end
-            -- не мешаем follow/goto/эмоциям/прыжкам
-            if _isFollowing or _isGoing or _isJumping or _isSpinning or _followMgrActive then task.wait(0.5) continue end
+            -- pcall на каждый тик: одна ошибка не убивает цикл ходьбы
+            local ok, err = pcall(function()
+                task.wait(0.35)
+                if not (ClientSettings.Enabled and ClientSettings.SmartWalk) then task.wait(1) return end
+                local char = Players.LocalPlayer.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                if not hum or not root or hum.Health <= 0 then task.wait(1) return end
+                -- не мешаем follow/goto/эмоциям/прыжкам и UI-следованию
+                if _isFollowing or _isGoing or _isJumping or _isSpinning or _followMgrActive then task.wait(0.5) return end
 
-            local now = os.clock()
-            local gw = _smartWalk
-            local target = gw.target
-            if target and (not target.Parent or (gw.avoid[target.UserId] or 0) > now) then
-                target = nil; gw.target = nil
-            end
-            if not target then
-                target = lobSmartPick()
-                gw.target = target
-                gw.targetSince = now
-                gw.arrivedAt = 0
-                gw.greeted = 0
-            end
+                local now = os.clock()
+                local gw = _smartWalk
+                local target = gw.target
+                -- сброс невалидной цели (ушёл / в игноре / нет персонажа / враг)
+                if target and (not target.Parent or (gw.avoid[target.UserId] or 0) > now
+                    or not target.Character or lobIsDangerTarget(target)) then
+                    target = nil; gw.target = nil
+                end
+                if not target then
+                    target = lobSmartPick()
+                    gw.target = target
+                    gw.targetSince = now
+                    gw.arrivedAt = 0
+                    gw.greeted = 0
+                    gw.moving = false
+                end
 
-            if target then
-                local tr = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-                if not tr then
-                    -- цель без персонажа (респавн) — не залипаем навсегда
-                    if (now - (gw.targetSince or now)) > 10 then gw.target = nil end
-                else
-                    local dist = (tr.Position - root.Position).Magnitude
-                    local spokeAt = _lastChatAt[target.UserId] or 0
-                    local spokeRecently = (now - spokeAt) < 15
-                    if dist > 9 then
-                        gw.arrivedAt = 0
-                        lobSmartPathMove(tr.Position, function()
-                            return (not gw.active) or gw.target ~= target or (gw.avoid[target.UserId] or 0) > os.clock()
-                        end)
+                if target then
+                    local tchar = target.Character
+                    local th = tchar and tchar:FindFirstChildOfClass("Humanoid")
+                    local tr = tchar and tchar:FindFirstChild("HumanoidRootPart")
+                    if not tr or not th or th.Health <= 0 then
+                        -- цель без персонажа/мертва — не залипаем
+                        if (now - (gw.targetSince or now)) > 10 then gw.target = nil end
                     else
-                        -- рядом: смотрим на игрока, пробуем заговорить, ждём ответа
-                        if gw.arrivedAt == 0 then gw.arrivedAt = now end
-                        pcall(function() smoothLookAt(tr.Position) end)
-                        if not spokeRecently and (gw.greeted or 0) == 0 then
-                            gw.greeted = now
-                            lobSmartGreet(target)
+                        local dist = (tr.Position - root.Position).Magnitude
+                        local spokeAt = _lastChatAt[target.UserId] or 0
+                        local spokeRecently = (now - spokeAt) < 15
+                        -- ГИСТЕРЕЗИС: идём если >11, стоим если <=8 (без дёрганья туда-сюда)
+                        if dist > 11 or (gw.moving and dist > 8) then
+                            gw.moving = true
+                            gw.arrivedAt = 0
+                            lobSmartPathMove(tr.Position, function()
+                                return (not gw.active) or gw.target ~= target or (gw.avoid[target.UserId] or 0) > os.clock()
+                            end)
+                            gw.moving = false
+                        else
+                            gw.moving = false
+                            if gw.arrivedAt == 0 then gw.arrivedAt = now end
+                            pcall(function() smoothLookAt(tr.Position) end)
+                            -- пробуем заговорить с молчуном (один раз)
+                            if not spokeRecently and (gw.greeted or 0) == 0 then
+                                gw.greeted = now
+                                lobSmartGreet(target)
+                            end
+                            -- рядом и молчит давно — уходим к другому
+                            local silentSince = math.max(spokeAt, gw.arrivedAt or 0)
+                            if (now - silentSince) > 15 then
+                                gw.avoid[target.UserId] = now + 15
+                                gw.target = nil
+                            end
+                            task.wait(0.5)
                         end
-                        -- рядом и молчит давно — уходим к другому
-                        local silentSince = math.max(spokeAt, gw.arrivedAt or 0)
-                        if (now - silentSince) > 15 then
-                            gw.avoid[target.UserId] = now + 15
+                        -- периодически меняем собеседника, даже если он говорит
+                        if gw.target and (now - (gw.targetSince or now)) > 45 then
+                            gw.avoid[target.UserId] = now + 10
                             gw.target = nil
                         end
-                        task.wait(0.5)
-                    end
-                    -- периодически меняем собеседника, даже если он говорит
-                    if gw.target and (now - (gw.targetSince or now)) > 45 then
-                        gw.avoid[target.UserId] = now + 10
-                        gw.target = nil
                     end
                 end
-            end
 
-            if not gw.target then
-                -- только что бросили цель — на след. тике сразу выберем новую
-                if target then task.wait(0.3) continue end
-                -- никого нет: бредём и изредка бормочем
-                local ang = math.random() * math.pi * 2
-                local rad = math.random(15, 90)
-                local dest = root.Position + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
-                lobSmartPathMove(dest, function() return (not gw.active) or gw.target ~= nil end)
-                if (now - (gw.lastIdle or 0)) > _SMART_WALK_IDLE_TALK_CD then
-                    gw.lastIdle = now
-                    local lines = { "hmm, quiet here…", "anyone around?", "where did everyone go?", "kinda bored…", "just walking around" }
-                    pcall(sendBotMessage, lines[math.random(#lines)])
+                if not gw.target then
+                    -- только что бросили цель — на след. тике сразу выберем новую
+                    if target then task.wait(0.3) return end
+                    -- никого нет: бредём и изредка бормочем
+                    local ang = math.random() * math.pi * 2
+                    local rad = math.random(15, 90)
+                    local dest = root.Position + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
+                    lobSmartPathMove(dest, function() return (not gw.active) or gw.target ~= nil end)
+                    if (now - (gw.lastIdle or 0)) > _SMART_WALK_IDLE_TALK_CD then
+                        gw.lastIdle = now
+                        local lines = { "hmm, quiet here…", "anyone around?", "where did everyone go?", "kinda bored…", "just walking around" }
+                        pcall(sendBotMessage, lines[math.random(#lines)])
+                    end
                 end
+            end)
+            if not ok then
+                print("[SMARTWALK] error: " .. tostring(err))
+                task.wait(0.5)
             end
         end
     end)
