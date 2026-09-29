@@ -1,1572 +1,2921 @@
--- // GUI TO LUA (MODIFIED) \\ --
-
--- // INSTANCES: 97 | SCRIPTS: 1 | MODULES: 2 \\ --
-
-local UI = {}
-
-UI["1"] = Instance.new("ScreenGui", game:GetService("CoreGui"))
-UI["1"]["IgnoreGuiInset"] = true
-UI["1"]["DisplayOrder"] = 0
-UI["1"]["ScreenInsets"] = Enum.ScreenInsets.DeviceSafeInsets
-UI["1"]["Name"] = [[BeanzHub]]
-UI["1"]["ResetOnSpawn"] = false
-
-UI["2"] = Instance.new("ModuleScript", UI["1"])
-UI["2"]["Name"] = [[DraggableObject]]
-
-UI["3"] = Instance.new("ModuleScript", UI["1"])
-UI["3"]["Name"] = [[Anims]]
-
-UI["4"] = Instance.new("Frame", UI["1"])
-UI["4"]["Active"] = true
-UI["4"]["BorderSizePixel"] = 0
-UI["4"]["BackgroundColor3"] = Color3.fromRGB(100, 100, 100)
-UI["4"]["AnchorPoint"] = Vector2.new(0.5, 1)
-UI["4"]["Size"] = UDim2.new(0.04902, 0, 0.00163, 0)
-UI["4"]["Position"] = UDim2.new(0.5, 0, 0.65046, 0)
-UI["4"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-
-UI["5"] = Instance.new("Frame", UI["4"])
-UI["5"]["BorderSizePixel"] = 0
-UI["5"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["5"]["ClipsDescendants"] = true
-UI["5"]["Size"] = UDim2.new(1, 0, 1, 0)
-UI["5"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5"]["Name"] = [[Title]]
-UI["5"]["BackgroundTransparency"] = 1
-
-UI["6"] = Instance.new("ImageLabel", UI["5"])
-UI["6"]["ZIndex"] = 3
-UI["6"]["BorderSizePixel"] = 0
-UI["6"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["6"]["ScaleType"] = Enum.ScaleType.Fit
-UI["6"]["Image"] = [[http://www.roblox.com/asset/?id=18187292776]]
-UI["6"]["Size"] = UDim2.new(1, 0, 1, 0)
-UI["6"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["6"]["BackgroundTransparency"] = 1
-
-UI["7"] = Instance.new("TextLabel", UI["5"])
-UI["7"]["TextWrapped"] = true
-UI["7"]["BorderSizePixel"] = 0
-UI["7"]["TextScaled"] = true
-UI["7"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["7"]["TextSize"] = 14
-UI["7"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["7"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["7"]["BackgroundTransparency"] = 1
-UI["7"]["RichText"] = true
-UI["7"]["Size"] = UDim2.new(1, 0, 1, 0)
-UI["7"]["ClipsDescendants"] = true
-UI["7"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["7"]["Text"] = [[Beanz]]
-UI["7"]["Position"] = UDim2.new(-0.78854, 0, 0, 0)
-
-UI["8"] = Instance.new("Frame", UI["5"])
-UI["8"]["Active"] = true
-UI["8"]["ZIndex"] = 2
-UI["8"]["BorderSizePixel"] = 0
-UI["8"]["BackgroundColor3"] = Color3.fromRGB(100, 100, 100)
-UI["8"]["AnchorPoint"] = Vector2.new(0.5, 0.5)
-UI["8"]["Size"] = UDim2.new(0.22235, 0, 1, 0)
-UI["8"]["Position"] = UDim2.new(0.11117, 0, 0.5, 0)
-UI["8"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["8"]["Name"] = [[Nackground]]
-
-UI["9"] = Instance.new("TextButton", UI["5"])
-UI["9"]["TextWrapped"] = true
-UI["9"]["BorderSizePixel"] = 0
-UI["9"]["TextSize"] = 14
-UI["9"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["9"]["TextScaled"] = true
-UI["9"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["9"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["9"]["ZIndex"] = 3
-UI["9"]["Size"] = UDim2.new(0.06157, 0, 0.59705, 0)
-UI["9"]["BackgroundTransparency"] = 0.95
-UI["9"]["Name"] = [[Delete]]
-UI["9"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["9"]["Text"] = [[X]]
-UI["9"]["Visible"] = false
-UI["9"]["Position"] = UDim2.new(0.92798, 0, 0.19969, 0)
-
-UI["a"] = Instance.new("UIStroke", UI["4"])
-UI["a"]["Thickness"] = 3
-
-UI["b"] = Instance.new("TextButton", UI["4"])
-UI["b"]["BorderSizePixel"] = 0
-UI["b"]["TextSize"] = 14
-UI["b"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["b"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["b"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["b"]["Name"] = [[fordawin]]
-UI["b"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["b"]["Visible"] = false
-
-UI["c"] = Instance.new("Frame", UI["4"])
-UI["c"]["ZIndex"] = 3
-UI["c"]["BorderSizePixel"] = 0
-UI["c"]["BackgroundColor3"] = Color3.fromRGB(131, 131, 131)
-UI["c"]["AnchorPoint"] = Vector2.new(0.5, 0)
-UI["c"]["ClipsDescendants"] = true
-UI["c"]["Size"] = UDim2.new(1, 0, 0, 0)
-UI["c"]["Position"] = UDim2.new(0.5, 0, 1, 0)
-UI["c"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["c"]["Name"] = [[Background]]
-
-UI["d"] = Instance.new("Frame", UI["c"])
-UI["d"]["ZIndex"] = 5
-UI["d"]["BorderSizePixel"] = 0
-UI["d"]["BackgroundColor3"] = Color3.fromRGB(67, 67, 67)
-UI["d"]["Size"] = UDim2.new(0.36, 0, 1, 0)
-UI["d"]["Position"] = UDim2.new(-0.36001, 0, 0.00185, 0)
-UI["d"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["d"]["Name"] = [[Popup]]
-
-UI["e"] = Instance.new("TextButton", UI["d"])
-UI["e"]["TextWrapped"] = true
-UI["e"]["BorderSizePixel"] = 0
-UI["e"]["TextSize"] = 14
-UI["e"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["e"]["TextScaled"] = true
-UI["e"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["e"]["FontFace"] = Font.new([[rbxasset://fonts/families/FredokaOne.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["e"]["ZIndex"] = 3
-UI["e"]["AnchorPoint"] = Vector2.new(0.5, 0.5)
-UI["e"]["Size"] = UDim2.new(0.23653, 0, 0.1, 0)
-UI["e"]["BackgroundTransparency"] = 1
-UI["e"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["e"]["Text"] = [[>]]
-UI["e"]["Rotation"] = 180
-UI["e"]["Position"] = UDim2.new(1.072, 0, 0.5, 0)
-
-UI["f"] = Instance.new("TextLabel", UI["d"])
-UI["f"]["TextWrapped"] = true
-UI["f"]["ZIndex"] = 5
-UI["f"]["BorderSizePixel"] = 0
-UI["f"]["TextScaled"] = true
-UI["f"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["f"]["TextSize"] = 14
-UI["f"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["f"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["f"]["BackgroundTransparency"] = 0.8
-UI["f"]["Size"] = UDim2.new(0.71053, 0, 0.18607, 0)
-UI["f"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["f"]["Text"] = [[Money autofarm, Part autofarm, Autotrain]]
-UI["f"]["Name"] = [[Description]]
-UI["f"]["Position"] = UDim2.new(0.14208, 0, 0.32532, 0)
-
-UI["10"] = Instance.new("UIPadding", UI["f"])
-UI["10"]["PaddingTop"] = UDim.new(0.1, 0)
-UI["10"]["PaddingRight"] = UDim.new(0.1, 0)
-UI["10"]["PaddingLeft"] = UDim.new(0.1, 0)
-UI["10"]["PaddingBottom"] = UDim.new(0.1, 0)
-
-UI["11"] = Instance.new("TextLabel", UI["d"])
-UI["11"]["TextWrapped"] = true
-UI["11"]["ZIndex"] = 5
-UI["11"]["BorderSizePixel"] = 0
-UI["11"]["TextScaled"] = true
-UI["11"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["11"]["TextSize"] = 14
-UI["11"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["11"]["TextColor3"] = Color3.fromRGB(0, 255, 0)
-UI["11"]["BackgroundTransparency"] = 1
-UI["11"]["Size"] = UDim2.new(0.59292, 0, 0.05907, 0)
-UI["11"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["11"]["Text"] = [[Working]]
-UI["11"]["Name"] = [[Status]]
-UI["11"]["Position"] = UDim2.new(0.20334, 0, 0.51299, 0)
-
-UI["12"] = Instance.new("TextLabel", UI["d"])
-UI["12"]["TextWrapped"] = true
-UI["12"]["ZIndex"] = 5
-UI["12"]["BorderSizePixel"] = 0
-UI["12"]["TextScaled"] = true
-UI["12"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["12"]["TextSize"] = 14
-UI["12"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["12"]["TextColor3"] = Color3.fromRGB(255, 255, 255)
-UI["12"]["BackgroundTransparency"] = 1
-UI["12"]["Size"] = UDim2.new(0.81409, 0, 0.15697, 0)
-UI["12"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["12"]["Text"] = [[Life Sentence GUI v1.6.1]]
-UI["12"]["Name"] = [[Title]]
-UI["12"]["Position"] = UDim2.new(0.09296, 0, 0.11951, 0)
-
-UI["13"] = Instance.new("TextButton", UI["d"])
-UI["13"]["TextWrapped"] = true
-UI["13"]["BorderSizePixel"] = 0
-UI["13"]["TextSize"] = 14
-UI["13"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["13"]["TextScaled"] = true
-UI["13"]["BackgroundColor3"] = Color3.fromRGB(86, 171, 0)
-UI["13"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["13"]["ZIndex"] = 5
-UI["13"]["Size"] = UDim2.new(0.48584, 0, 0.09407, 0)
-UI["13"]["Name"] = [[CopyScript]]
-UI["13"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["13"]["Text"] = [[Copy Script]]
-UI["13"]["Position"] = UDim2.new(0.25563, 0, 0.76031, 0)
-
-UI["14"] = Instance.new("UICorner", UI["13"])
-
-
-UI["15"] = Instance.new("UIPadding", UI["13"])
-UI["15"]["PaddingRight"] = UDim.new(0.1, 0)
-UI["15"]["PaddingLeft"] = UDim.new(0.1, 0)
-
-UI["16"] = Instance.new("TextButton", UI["d"])
-UI["16"]["TextWrapped"] = true
-UI["16"]["BorderSizePixel"] = 0
-UI["16"]["TextSize"] = 14
-UI["16"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["16"]["TextScaled"] = true
-UI["16"]["BackgroundColor3"] = Color3.fromRGB(43, 71, 255)
-UI["16"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["16"]["ZIndex"] = 5
-UI["16"]["Size"] = UDim2.new(0.48584, 0, 0.09407, 0)
-UI["16"]["Name"] = [[RunScript]]
-UI["16"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["16"]["Text"] = [[Run]]
-UI["16"]["Position"] = UDim2.new(0.25563, 0, 0.63067, 0)
-
-UI["17"] = Instance.new("UICorner", UI["16"])
-
-
-UI["18"] = Instance.new("UIPadding", UI["16"])
-UI["18"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["18"]["PaddingLeft"] = UDim.new(0.3, 0)
-
-UI["19"] = Instance.new("Frame", UI["c"])
-UI["19"]["ZIndex"] = 3
-UI["19"]["BorderSizePixel"] = 0
-UI["19"]["BackgroundColor3"] = Color3.fromRGB(0, 0, 0)
-UI["19"]["Size"] = UDim2.new(0.36, 0, 1, 0)
-UI["19"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["19"]["Name"] = [[OtherBackground]]
-UI["19"]["BackgroundTransparency"] = 0.9
-
-UI["1a"] = Instance.new("UIStroke", UI["19"])
-UI["1a"]["Thickness"] = 3
-
-UI["1b"] = Instance.new("ScrollingFrame", UI["c"])
-UI["1b"]["Active"] = true
-UI["1b"]["ZIndex"] = 3
-UI["1b"]["BorderSizePixel"] = 0
-UI["1b"]["ScrollingEnabled"] = false
-UI["1b"]["BackgroundColor3"] = Color3.fromRGB(0, 0, 0)
-UI["1b"]["Name"] = [[Main]]
-UI["1b"]["ScrollBarImageTransparency"] = 1
-UI["1b"]["Size"] = UDim2.new(0.32222, 0, 0.9746, 0)
-UI["1b"]["ScrollBarImageColor3"] = Color3.fromRGB(0, 0, 0)
-UI["1b"]["Position"] = UDim2.new(0.02645, 0, 0.0254, 0)
-UI["1b"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["1b"]["ScrollBarThickness"] = 8
-UI["1b"]["BackgroundTransparency"] = 1
-
-UI["1c"] = Instance.new("Frame", UI["1b"])
-UI["1c"]["BorderSizePixel"] = 0
-UI["1c"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["1c"]["Size"] = UDim2.new(1, 0, 1, 0)
-UI["1c"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["1c"]["Name"] = [[Buttons]]
-UI["1c"]["BackgroundTransparency"] = 1
-
-UI["1d"] = Instance.new("UIListLayout", UI["1c"])
-UI["1d"]["Padding"] = UDim.new(0.02, 0)
-UI["1d"]["SortOrder"] = Enum.SortOrder.LayoutOrder
-
-UI["1e"] = Instance.new("TextButton", UI["1c"])
-UI["1e"]["TextWrapped"] = true
-UI["1e"]["BorderSizePixel"] = 0
-UI["1e"]["TextSize"] = 14
-UI["1e"]["TextColor3"] = Color3.fromRGB(255, 255, 255)
-UI["1e"]["TextScaled"] = true
-UI["1e"]["BackgroundColor3"] = Color3.fromRGB(76, 76, 76)
-UI["1e"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["1e"]["ZIndex"] = 4
-UI["1e"]["Size"] = UDim2.new(0.89506, 0, 0.04818, 0)
-UI["1e"]["BackgroundTransparency"] = 1
-UI["1e"]["Name"] = [[Scripts]]
-UI["1e"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["1e"]["Text"] = [[Scripts]]
-UI["1e"]["Position"] = UDim2.new(-0, 0, 0.04028, 0)
-
-UI["1f"] = Instance.new("TextButton", UI["1c"])
-UI["1f"]["TextWrapped"] = true
-UI["1f"]["BorderSizePixel"] = 0
-UI["1f"]["TextSize"] = 14
-UI["1f"]["TextColor3"] = Color3.fromRGB(255, 255, 255)
-UI["1f"]["TextScaled"] = true
-UI["1f"]["BackgroundColor3"] = Color3.fromRGB(76, 76, 76)
-UI["1f"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["1f"]["ZIndex"] = 4
-UI["1f"]["Size"] = UDim2.new(0.89506, 0, 0.04818, 0)
-UI["1f"]["BackgroundTransparency"] = 1
-UI["1f"]["Name"] = [[Tools]]
-UI["1f"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["1f"]["Text"] = [[Tools]]
-UI["1f"]["Position"] = UDim2.new(-0, 0, 0.04028, 0)
-
-UI["20"] = Instance.new("TextButton", UI["1c"])
-UI["20"]["TextWrapped"] = true
-UI["20"]["BorderSizePixel"] = 0
-UI["20"]["TextSize"] = 14
-UI["20"]["TextColor3"] = Color3.fromRGB(255, 255, 255)
-UI["20"]["TextScaled"] = true
-UI["20"]["BackgroundColor3"] = Color3.fromRGB(76, 76, 76)
-UI["20"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["20"]["ZIndex"] = 4
-UI["20"]["Size"] = UDim2.new(0.89506, 0, 0.04818, 0)
-UI["20"]["BackgroundTransparency"] = 1
-UI["20"]["Name"] = [[Settings]]
-UI["20"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["20"]["Text"] = [[Settings]]
-UI["20"]["Position"] = UDim2.new(-0, 0, 0.04028, 0)
-
-UI["21"] = Instance.new("TextButton", UI["1c"])
-UI["21"]["TextWrapped"] = true
-UI["21"]["BorderSizePixel"] = 0
-UI["21"]["TextSize"] = 14
-UI["21"]["TextColor3"] = Color3.fromRGB(255, 255, 255)
-UI["21"]["TextScaled"] = true
-UI["21"]["BackgroundColor3"] = Color3.fromRGB(76, 76, 76)
-UI["21"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["21"]["ZIndex"] = 4
-UI["21"]["Size"] = UDim2.new(0.89506, 0, 0.04818, 0)
-UI["21"]["BackgroundTransparency"] = 1
-UI["21"]["Name"] = [[Moresoon]]
-UI["21"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["21"]["Text"] = [[More coming soon]]
-UI["21"]["Position"] = UDim2.new(-0, 0, 0.04028, 0)
-
-UI["22"] = Instance.new("Frame", UI["1b"])
-UI["22"]["ZIndex"] = 3
-UI["22"]["BorderSizePixel"] = 3
-UI["22"]["BackgroundColor3"] = Color3.fromRGB(76, 76, 76)
-UI["22"]["BorderMode"] = Enum.BorderMode.Inset
-UI["22"]["Size"] = UDim2.new(0.895, 0, 0.048, 0)
-UI["22"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["22"]["Name"] = [[Selector]]
-
-UI["23"] = Instance.new("Frame", UI["c"])
-UI["23"]["ZIndex"] = 4
-UI["23"]["BorderSizePixel"] = 0
-UI["23"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["23"]["Size"] = UDim2.new(0.59355, 0, 0.79593, 0)
-UI["23"]["Position"] = UDim2.new(0.38895, 0, 0.14791, 0)
-UI["23"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["23"]["Name"] = [[dontusethis]]
-UI["23"]["BackgroundTransparency"] = 0.9
-
-UI["24"] = Instance.new("UIStroke", UI["23"])
-UI["24"]["Enabled"] = false
-UI["24"]["Thickness"] = 2.5
-
-UI["25"] = Instance.new("UIStroke", UI["c"])
-UI["25"]["Thickness"] = 3
-
-UI["26"] = Instance.new("Folder", UI["c"])
-UI["26"]["Name"] = [[Tools]]
-
-UI["27"] = Instance.new("TextBox", UI["26"])
-UI["27"]["Visible"] = false
-UI["27"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["27"]["ZIndex"] = 3
-UI["27"]["BorderSizePixel"] = 0
-UI["27"]["TextWrapped"] = true
-UI["27"]["TextSize"] = 14
-UI["27"]["TextScaled"] = true
-UI["27"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["27"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["27"]["PlaceholderText"] = [[Search...]]
-UI["27"]["Size"] = UDim2.new(0.59573, 0, 0.09866, 0)
-UI["27"]["Position"] = UDim2.new(0.38645, 0, 0.02309, 0)
-UI["27"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["27"]["Text"] = [[]]
-
-UI["28"] = Instance.new("UICorner", UI["27"])
-
-
-UI["29"] = Instance.new("UIStroke", UI["27"])
-UI["29"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["29"]["Thickness"] = 2.7
-
-UI["2a"] = Instance.new("ScrollingFrame", UI["26"])
-UI["2a"]["Visible"] = false
-UI["2a"]["Active"] = true
-UI["2a"]["ZIndex"] = 3
-UI["2a"]["BorderSizePixel"] = 0
-UI["2a"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["2a"]["Name"] = [[Scroll]]
-UI["2a"]["Size"] = UDim2.new(0.54752, 0, 0.78291, 0)
-UI["2a"]["ScrollBarImageColor3"] = Color3.fromRGB(0, 0, 0)
-UI["2a"]["Position"] = UDim2.new(0.43466, 0, 0.1612, 0)
-UI["2a"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["2a"]["BackgroundTransparency"] = 1
-
-UI["2b"] = Instance.new("UIListLayout", UI["2a"])
-UI["2b"]["HorizontalAlignment"] = Enum.HorizontalAlignment.Center
-UI["2b"]["Wraps"] = true
-UI["2b"]["Padding"] = UDim.new(0.007, 0)
-UI["2b"]["SortOrder"] = Enum.SortOrder.LayoutOrder
-
-UI["2c"] = Instance.new("UIPadding", UI["2a"])
-UI["2c"]["PaddingTop"] = UDim.new(0.01, 0)
-
-UI["2d"] = Instance.new("TextButton", UI["2a"])
-UI["2d"]["TextWrapped"] = true
-UI["2d"]["BorderSizePixel"] = 0
-UI["2d"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["2d"]["TextSize"] = 14
-UI["2d"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["2d"]["TextScaled"] = true
-UI["2d"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["2d"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["2d"]["ZIndex"] = 3
-UI["2d"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["2d"]["Name"] = [[ChatSpy]]
-UI["2d"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["2d"]["Text"] = [[Chat Spy]]
-UI["2d"]["Position"] = UDim2.new(0.099, 0, 0.12146, 0)
--- Attributes
-UI["2d"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/dehoisted/Chat-Spy/main/source/main.lua]])
-UI["2d"]:SetAttribute([[Description]], [[Allows you to see private messages and messages on games with hidden chats.]])
-UI["2d"]:SetAttribute([[Recent]], [[]])
-UI["2d"]:SetAttribute([[Title]], [[Chat Spy]])
-UI["2d"]:SetAttribute([[Status]], [[Working]])
-
-UI["2e"] = Instance.new("UIPadding", UI["2d"])
-UI["2e"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["2e"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["2e"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["2e"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["2f"] = Instance.new("UICorner", UI["2d"])
-
-
-UI["30"] = Instance.new("UIStroke", UI["2d"])
-UI["30"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["30"]["Thickness"] = 2
-
-UI["31"] = Instance.new("TextButton", UI["2a"])
-UI["31"]["TextWrapped"] = true
-UI["31"]["BorderSizePixel"] = 0
-UI["31"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["31"]["TextSize"] = 14
-UI["31"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["31"]["TextScaled"] = true
-UI["31"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["31"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["31"]["ZIndex"] = 3
-UI["31"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["31"]["Name"] = [[CBypass]]
-UI["31"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["31"]["Text"] = [[Chat Bypass]]
-UI["31"]["Position"] = UDim2.new(0.099, 0, 0.17434, 0)
--- Attributes
-UI["31"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/main/cbypass.lua]])
-UI["31"]:SetAttribute([[Description]], [[Allows you to bypass roblox filter. Still W.I.P]])
-UI["31"]:SetAttribute([[Recent]], [[]])
-UI["31"]:SetAttribute([[Title]], [[Chat Bypass]])
-UI["31"]:SetAttribute([[Status]], [[Working]])
-
-UI["32"] = Instance.new("UIPadding", UI["31"])
-UI["32"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["32"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["32"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["32"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["33"] = Instance.new("UICorner", UI["31"])
-
-
-UI["34"] = Instance.new("UIStroke", UI["31"])
-UI["34"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["34"]["Thickness"] = 2
-
-UI["35"] = Instance.new("TextButton", UI["2a"])
-UI["35"]["TextWrapped"] = true
-UI["35"]["BorderSizePixel"] = 0
-UI["35"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["35"]["TextSize"] = 14
-UI["35"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["35"]["TextScaled"] = true
-UI["35"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["35"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["35"]["ZIndex"] = 3
-UI["35"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["35"]["Name"] = [[Dex]]
-UI["35"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["35"]["Text"] = [[Dex]]
-UI["35"]["Position"] = UDim2.new(0.099, 0, 0.22722, 0)
--- Attributes
-UI["35"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/refs/heads/main/dexwithtags.lua]])
-UI["35"]:SetAttribute([[Description]], [[]])
-UI["35"]:SetAttribute([[Recent]], [[]])
-UI["35"]:SetAttribute([[Title]], [[Dex]])
-UI["35"]:SetAttribute([[Status]], [[Working]])
-
-UI["36"] = Instance.new("UIPadding", UI["35"])
-UI["36"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["36"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["36"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["36"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["37"] = Instance.new("UICorner", UI["35"])
-
-
-UI["38"] = Instance.new("UIStroke", UI["35"])
-UI["38"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["38"]["Thickness"] = 2
-
-UI["39"] = Instance.new("TextButton", UI["2a"])
-UI["39"]["TextWrapped"] = true
-UI["39"]["BorderSizePixel"] = 0
-UI["39"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["39"]["TextSize"] = 14
-UI["39"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["39"]["TextScaled"] = true
-UI["39"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["39"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["39"]["ZIndex"] = 3
-UI["39"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["39"]["Name"] = [[GuiPath]]
-UI["39"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["39"]["Text"] = [[Gui Button Path]]
-UI["39"]["Position"] = UDim2.new(0.099, 0, 0.0157, 0)
--- Attributes
-UI["39"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/main/getguibuttonpath.lua]])
-UI["39"]:SetAttribute([[Description]], [[Allows you to copy paths to gui buttons and press them using K]])
-UI["39"]:SetAttribute([[Recent]], [[]])
-UI["39"]:SetAttribute([[Title]], [[Gui Button Path]])
-UI["39"]:SetAttribute([[Status]], [[Working]])
-
-UI["3a"] = Instance.new("UIPadding", UI["39"])
-UI["3a"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["3a"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["3a"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["3a"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["3b"] = Instance.new("UICorner", UI["39"])
-
-
-UI["3c"] = Instance.new("UIStroke", UI["39"])
-UI["3c"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["3c"]["Thickness"] = 2
-
-UI["3d"] = Instance.new("TextButton", UI["2a"])
-UI["3d"]["TextWrapped"] = true
-UI["3d"]["BorderSizePixel"] = 0
-UI["3d"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["3d"]["TextSize"] = 14
-UI["3d"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["3d"]["TextScaled"] = true
-UI["3d"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["3d"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["3d"]["ZIndex"] = 3
-UI["3d"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["3d"]["Name"] = [[InfiniteYield]]
-UI["3d"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["3d"]["Text"] = [[Infinite Yield]]
-UI["3d"]["Position"] = UDim2.new(0.099, 0, 0.06858, 0)
--- Attributes
-UI["3d"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source]])
-UI["3d"]:SetAttribute([[Description]], [[I mean how should i describe this lol]])
-UI["3d"]:SetAttribute([[Recent]], [[]])
-UI["3d"]:SetAttribute([[Title]], [[Infinite Yield]])
-UI["3d"]:SetAttribute([[Status]], [[Working]])
-
-UI["3e"] = Instance.new("UIPadding", UI["3d"])
-UI["3e"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["3e"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["3e"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["3e"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["3f"] = Instance.new("UICorner", UI["3d"])
-
-
-UI["40"] = Instance.new("UIStroke", UI["3d"])
-UI["40"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["40"]["Thickness"] = 2
-
-UI["41"] = Instance.new("TextButton", UI["2a"])
-UI["41"]["TextWrapped"] = true
-UI["41"]["BorderSizePixel"] = 0
-UI["41"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["41"]["TextSize"] = 14
-UI["41"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["41"]["TextScaled"] = true
-UI["41"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["41"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["41"]["ZIndex"] = 3
-UI["41"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["41"]["Name"] = [[RemoteSpy]]
-UI["41"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["41"]["Text"] = [[Simple Spy]]
-UI["41"]["Position"] = UDim2.new(0.099, 0, 0.17434, 0)
--- Attributes
-UI["41"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/infyiff/backup/main/SimpleSpyV3/main.lua]])
-UI["41"]:SetAttribute([[Description]], [[]])
-UI["41"]:SetAttribute([[Recent]], [[]])
-UI["41"]:SetAttribute([[Title]], [[Simple Spy v3]])
-UI["41"]:SetAttribute([[Status]], [[Working]])
-
-UI["42"] = Instance.new("UIPadding", UI["41"])
-UI["42"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["42"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["42"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["42"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["43"] = Instance.new("UICorner", UI["41"])
-
-
-UI["44"] = Instance.new("UIStroke", UI["41"])
-UI["44"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["44"]["Thickness"] = 2
-
-UI["45"] = Instance.new("Folder", UI["c"])
-UI["45"]["Name"] = [[Scripts]]
-
-UI["46"] = Instance.new("ScrollingFrame", UI["45"])
-UI["46"]["Active"] = true
-UI["46"]["ZIndex"] = 3
-UI["46"]["BorderSizePixel"] = 0
-UI["46"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["46"]["Name"] = [[Scroll]]
-UI["46"]["Size"] = UDim2.new(0.54752, 0, 0.78291, 0)
-UI["46"]["ScrollBarImageColor3"] = Color3.fromRGB(0, 0, 0)
-UI["46"]["Position"] = UDim2.new(0.43466, 0, 0.1612, 0)
-UI["46"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["46"]["BackgroundTransparency"] = 1
-
-UI["47"] = Instance.new("UIListLayout", UI["46"])
-UI["47"]["HorizontalAlignment"] = Enum.HorizontalAlignment.Center
-UI["47"]["Wraps"] = true
-UI["47"]["Padding"] = UDim.new(0.007, 0)
-UI["47"]["SortOrder"] = Enum.SortOrder.LayoutOrder
-
-UI["48"] = Instance.new("UIPadding", UI["46"])
-UI["48"]["PaddingTop"] = UDim.new(0.01, 0)
-
-UI["49"] = Instance.new("TextButton", UI["46"])
-UI["49"]["TextWrapped"] = true
-UI["49"]["BorderSizePixel"] = 0
-UI["49"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["49"]["TextSize"] = 14
-UI["49"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["49"]["TextScaled"] = true
-UI["49"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["49"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["49"]["ZIndex"] = 3
-UI["49"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["49"]["Name"] = [[Life sentence]]
-UI["49"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["49"]["Text"] = [[Life Sentence GUI]]
-UI["49"]["Position"] = UDim2.new(0.099, 0, 0.0157, 0)
--- Attributes
-UI["49"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/main/lifesentencenew.lua]])
-UI["49"]:SetAttribute([[Description]], [[Money autofarm, Part autofarm, Autotrain]])
-UI["49"]:SetAttribute([[Recent]], [[]])
-UI["49"]:SetAttribute([[Title]], [[Life Sentence GUI v1.7]])
-UI["49"]:SetAttribute([[Status]], [[Working]])
-
-UI["4a"] = Instance.new("UIPadding", UI["49"])
-UI["4a"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["4a"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["4a"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["4a"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["4b"] = Instance.new("UICorner", UI["49"])
-
-
-UI["4c"] = Instance.new("UIStroke", UI["49"])
-UI["4c"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["4c"]["Thickness"] = 2
-
-UI["4d"] = Instance.new("TextButton", UI["46"])
-UI["4d"]["TextWrapped"] = true
-UI["4d"]["BorderSizePixel"] = 0
-UI["4d"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["4d"]["TextSize"] = 14
-UI["4d"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["4d"]["TextScaled"] = true
-UI["4d"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["4d"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["4d"]["ZIndex"] = 3
-UI["4d"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["4d"]["Name"] = [[TSG]]
-UI["4d"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["4d"]["Text"] = [[BladeBall GUI]]
-UI["4d"]["Position"] = UDim2.new(0.099, 0, 0.06858, 0)
--- Attributes
-UI["4d"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/main/ATNBH.lua]])
-UI["4d"]:SetAttribute([[Description]], [[AutoParry,W.I.P]])
-UI["4d"]:SetAttribute([[Recent]], [[]])
-UI["4d"]:SetAttribute([[Title]], [[BladeBall GUI]])
-UI["4d"]:SetAttribute([[Status]], [[Working]])
-
-UI["4e"] = Instance.new("UIPadding", UI["4d"])
-UI["4e"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["4e"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["4e"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["4e"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["4f"] = Instance.new("UICorner", UI["4d"])
-
-
-UI["50"] = Instance.new("UIStroke", UI["4d"])
-UI["50"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["50"]["Thickness"] = 2
-
-UI["51"] = Instance.new("TextButton", UI["46"])
-UI["51"]["TextWrapped"] = true
-UI["51"]["BorderSizePixel"] = 0
-UI["51"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["51"]["TextSize"] = 14
-UI["51"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["51"]["TextScaled"] = true
-UI["51"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["51"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["51"]["ZIndex"] = 3
-UI["51"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["51"]["Name"] = [[UniversalAB]]
-UI["51"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["51"]["Text"] = [[Universal Aimbot]]
-UI["51"]["Position"] = UDim2.new(0.099, 0, 0.17434, 0)
--- Attributes
-UI["51"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/main/universalaimbot.lua]])
-UI["51"]:SetAttribute([[Description]], [[Sigma imbot fr]])
-UI["51"]:SetAttribute([[Recent]], [[]])
-UI["51"]:SetAttribute([[Title]], [[Universal Aimbot GUI]])
-UI["51"]:SetAttribute([[Status]], [[Working]])
-
-UI["52"] = Instance.new("UIPadding", UI["51"])
-UI["52"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["52"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["52"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["52"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["53"] = Instance.new("UICorner", UI["51"])
-
-
-UI["54"] = Instance.new("UIStroke", UI["51"])
-UI["54"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["54"]["Thickness"] = 2
-
-UI["55"] = Instance.new("TextBox", UI["45"])
-UI["55"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["55"]["ZIndex"] = 3
-UI["55"]["BorderSizePixel"] = 0
-UI["55"]["TextWrapped"] = true
-UI["55"]["TextSize"] = 14
-UI["55"]["TextScaled"] = true
-UI["55"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["55"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["55"]["PlaceholderText"] = [[Search...]]
-UI["55"]["Size"] = UDim2.new(0.59573, 0, 0.09866, 0)
-UI["55"]["Position"] = UDim2.new(0.38645, 0, 0.02309, 0)
-UI["55"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["55"]["Text"] = [[]]
-
-UI["56"] = Instance.new("UICorner", UI["55"])
-
-
-UI["57"] = Instance.new("UIStroke", UI["55"])
-UI["57"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["57"]["Thickness"] = 2.7
-
-UI["58"] = Instance.new("Folder", UI["c"])
-UI["58"]["Name"] = [[Settings]]
-
-UI["59"] = Instance.new("Frame", UI["58"])
-UI["59"]["Visible"] = false
-UI["59"]["ZIndex"] = 4
-UI["59"]["BorderSizePixel"] = 0
-UI["59"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["59"]["Size"] = UDim2.new(0.4441, 0, 0.13943, 0)
-UI["59"]["Position"] = UDim2.new(0.43515, 0, 0.17286, 0)
-UI["59"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["59"]["Name"] = [[Scroll]]
-
-UI["5a"] = Instance.new("TextLabel", UI["59"])
-UI["5a"]["TextWrapped"] = true
-UI["5a"]["ZIndex"] = 4
-UI["5a"]["BorderSizePixel"] = 0
-UI["5a"]["TextScaled"] = true
-UI["5a"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["5a"]["TextSize"] = 14
-UI["5a"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["5a"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5a"]["Size"] = UDim2.new(0.49731, 0, 0.52097, 0)
-UI["5a"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5a"]["Text"] = [[Fast Intro]]
-UI["5a"]["Name"] = [[Skip]]
-UI["5a"]["Position"] = UDim2.new(0.03317, 0, 0.18866, 0)
-
-UI["5b"] = Instance.new("TextButton", UI["59"])
-UI["5b"]["BorderSizePixel"] = 0
-UI["5b"]["TextSize"] = 14
-UI["5b"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5b"]["BackgroundColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5b"]["FontFace"] = Font.new([[rbxasset://fonts/families/SourceSansPro.json]], Enum.FontWeight.Regular, Enum.FontStyle.Normal)
-UI["5b"]["ZIndex"] = 4
-UI["5b"]["Size"] = UDim2.new(0.3, 0, 0.6, 0)
-UI["5b"]["BackgroundTransparency"] = 1
-UI["5b"]["Name"] = [[SkipButton]]
-UI["5b"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5b"]["Text"] = [[]]
-UI["5b"]["Position"] = UDim2.new(0.62772, 0, 0.16171, 0)
-
-UI["5c"] = Instance.new("UIStroke", UI["5b"])
-UI["5c"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-
-UI["5d"] = Instance.new("LocalScript", UI["1"])
-UI["5d"]["Name"] = [[gitgud]]
-
-UI["5e"] = Instance.new("TextButton", UI["1"])
-UI["5e"]["TextWrapped"] = true
-UI["5e"]["BorderSizePixel"] = 0
-UI["5e"]["TextXAlignment"] = Enum.TextXAlignment.Left
-UI["5e"]["TextSize"] = 14
-UI["5e"]["TextColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5e"]["TextScaled"] = true
-UI["5e"]["BackgroundColor3"] = Color3.fromRGB(255, 255, 255)
-UI["5e"]["FontFace"] = Font.new([[rbxasset://fonts/families/RobotoCondensed.json]], Enum.FontWeight.Bold, Enum.FontStyle.Normal)
-UI["5e"]["ZIndex"] = 3
-UI["5e"]["Size"] = UDim2.new(0.802, 0, 0.04627, 0)
-UI["5e"]["Name"] = [[Placeholder]]
-UI["5e"]["BorderColor3"] = Color3.fromRGB(0, 0, 0)
-UI["5e"]["Text"] = [[Life Sentence GUI]]
-UI["5e"]["Visible"] = false
-UI["5e"]["Position"] = UDim2.new(0.099, 0, 0.0157, 0)
--- Attributes
-UI["5e"]:SetAttribute([[loadstring]], [[https://raw.githubusercontent.com/pid4k/scripts/main/lifesentence.lua]])
-UI["5e"]:SetAttribute([[Description]], [[Money autofarm, Part autofarm, Autotrain]])
-UI["5e"]:SetAttribute([[Recent]], [[]])
-UI["5e"]:SetAttribute([[Title]], [[Life Sentence GUI v1.7]])
-UI["5e"]:SetAttribute([[Status]], [[Working]])
-
-UI["5f"] = Instance.new("UIPadding", UI["5e"])
-UI["5f"]["PaddingTop"] = UDim.new(0.3, 0)
-UI["5f"]["PaddingRight"] = UDim.new(0.3, 0)
-UI["5f"]["PaddingLeft"] = UDim.new(0.04, 0)
-UI["5f"]["PaddingBottom"] = UDim.new(0.3, 0)
-
-UI["60"] = Instance.new("UICorner", UI["5e"])
-
-
-UI["61"] = Instance.new("UIStroke", UI["5e"])
-UI["61"]["ApplyStrokeMode"] = Enum.ApplyStrokeMode.Border
-UI["61"]["Thickness"] = 2
-
--- Require G2L wrapper
-local G2L_REQUIRE = require;
-local G2L_MODULES = {};
-local function require(Module:ModuleScript)
-    local ModuleState = G2L_MODULES[Module];
-    if ModuleState then
-        if not ModuleState.Required then
-            ModuleState.Required = true;
-            ModuleState.Value = ModuleState.Closure();
-        end
-        return ModuleState.Value;
-    end;
-    return G2L_REQUIRE(Module);
-end
-
-G2L_MODULES[UI["2"]] = {
-Closure = function()
-    local script = UI["2"]
 --[[
-	@Author: Spynaz
-	@Description: Enables dragging on GuiObjects. Supports both mouse and touch.
-	
-	For instructions on how to use this module, go to this link:
-	https://devforum.roblox.com/t/simple-module-for-creating-draggable-gui-elements/230678
---]]
+================================================================================
+  LineOfBots — Argument Edition  (v1.0)
+================================================================================
+  Ассистент для аргументированного спора в чате Roblox.
 
-local UDim2_new = UDim2.new
+  ВОЗМОЖНОСТИ
+    * 3 режима ответа: Спокойный / Средний / Жёсткий (факты + точные вопросы)
+    * Провайдеры: Google Gemini (gemini-3.5-flash-lite) и DeepSeek (deepseek-flash = V4.1)
+    * Веб-ресёрч: незнакомые слова/сленг ищутся в Urban Dictionary, Wikipedia, DuckDuckGo
+    * Выбор одной или нескольких целей (список игроков с аватарами)
+    * Лог чата, ответ на конкретное сообщение, черновик -> «прогнать через ИИ»
+    * Авто-ответ на сообщения цели, авто-разбивка длинных ответов под лимит чата
 
-local UserInputService = game:GetService("UserInputService")
+  ЗАПУСК (экзекьютор Delta / любой с request())
+    1) Впиши API-ключи во вкладке «Настройки».
+    2) Execute -> появится окно. RightCtrl скрывает/показывает окно.
 
-local DraggableObject 		= {}
-DraggableObject.__index 	= DraggableObject
+  ВАЖНО
+    * Скрипт не читает чужие аккаунты и не трогает игру — только читает чат
+      и отправляет сообщения от твоего имени. Спам = бан чата: не ставь cooldown 0.
+    * Жёсткий режим намеренно НЕ использует мат, слюры, угрозы и доксинг.
+================================================================================
+]]
 
--- Sets up a new draggable object
-function DraggableObject.new(Object, second)
-	local self 			= {}
-	self.Object			= Object
-	self.SecondObject = second or nil
-	self.DragStarted	= nil
-	self.DragEnded		= nil
-	self.Dragged		= nil
-	self.Dragging		= false
-	
-	setmetatable(self, DraggableObject)
-	
-	return self
-end
+local APP_NAME    = "LineOfBots"
+local APP_EDITION = "Argument Edition"
+local APP_VERSION = "1.0.0"
 
--- Enables dragging
-function DraggableObject:Enable()
-	local object			= self.Object
-	local secondobject      = self.SecondObject
-	local dragInput			= nil
-	local dragStart			= nil
-	local startPos			= nil
-	local preparingToDrag	= false
-	
-	-- Updates the element
-	local function update(input)
-		local delta 		= input.Position - dragStart
-		local newPosition	= UDim2_new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		object.Position 	= newPosition
-	
-		return newPosition
-	end
-	local function start(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			preparingToDrag = true
-			--[[if self.DragStarted then
-				self.DragStarted()
-			end
-			
-			dragging	 	= true
-			dragStart 		= input.Position
-			startPos 		= Element.Position
-			--]]
+-- ══════════════════════════════════════════════════════════════════════════════
+--  1. НАСТРОЙКИ ПО УМОЛЧАНИЮ
+-- ══════════════════════════════════════════════════════════════════════════════
 
-			local connection 
-			connection = input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End and (self.Dragging or preparingToDrag) then
-					self.Dragging = false
-					connection:Disconnect()
-
-					if self.DragEnded and not preparingToDrag then
-						self.DragEnded()
-					end
-
-					preparingToDrag = false
-				end
-			end)
-		end
-	end
-	self.InputBegan = object.InputBegan:Connect(start)
-	if secondobject ~= nil then
-	self.InputBegan = secondobject.InputBegan:Connect(start)
-	end
-	
-	self.InputChanged = object.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-			dragInput = input
-		end
-	end)
-	
-	self.InputChanged2 = UserInputService.InputChanged:Connect(function(input)
-		if object.Parent == nil then
-			self:Disable()
-			return
-		end
-		
-		if preparingToDrag then
-			preparingToDrag = false
-			
-			if self.DragStarted then
-				self.DragStarted()
-			end
-			
-			self.Dragging	= true
-			dragStart 		= input.Position
-			startPos 		= object.Position
-		end
-		
-		if input == dragInput and self.Dragging then
-			local newPosition = update(input)
-			
-			if self.Dragged then
-				self.Dragged(newPosition)
-			end
-		end
-	end)
-end
-
--- Disables dragging
-function DraggableObject:Disable()
-	self.InputBegan:Disconnect()
-	self.InputChanged:Disconnect()
-	self.InputChanged2:Disconnect()
-	
-	if self.Dragging then
-		self.Dragging = false
-		
-		if self.DragEnded then
-			self.DragEnded()
-		end
-	end
-end
-
-return DraggableObject
-
-end
+local DEFAULTS = {
+	provider      = "gemini",                      -- "gemini" | "deepseek"
+	model         = "gemini-3.5-flash-lite",
+	keys          = { gemini = "", deepseek = "" }, -- API-ключи
+	mode          = "calm",                         -- "calm" | "mid" | "hard"
+	maxChars      = 200,                            -- лимит символов в чате Roblox
+	maxParts      = 2,                              -- на сколько сообщений можно разбить
+	answerLen     = "short",                        -- "short" | "medium" | "long"
+	useResearch   = true,                           -- искать незнакомые слова в интернете
+	useGrounding  = true,                           -- Google Search grounding (только Gemini)
+	autoReply     = false,                          -- авто-ответ на сообщения цели
+	autoTrigger   = "mention",                      -- "any" | "mention" | "insult"
+	autoCooldown  = 8,                              -- минимум секунд между авто-ответами
+	autoPerMinute = 5,                              -- максимум авто-ответов в минуту
+	showAll       = false,                          -- показывать в логе всех, а не только цели
+	showSelf      = true,                           -- показывать мои сообщения в логе
 }
-G2L_MODULES[UI["3"]] = {
-Closure = function()
-    local script = UI["3"]
-local anims = {}
-local mainfolder = "BeanzHub/"
-local paste = "Main.txt"
-local settingsfile = tostring(mainfolder..paste)
-local tweenService = game:GetService("TweenService")
-local Idkwhatthisis = script.Parent.Frame
-local main = Idkwhatthisis.Title
-Idkwhatthisis.Title.TextLabel.Visible = false
-Idkwhatthisis.Background.UIStroke.Enabled = false
-local Beanzdisplay = main.TextLabel
-introcompleted = false
-function resetdefault(file:string,placeholder:string,slots:number)
-	local torepeat = tostring(placeholder..",")
-	torepeat = torepeat:rep(slots)
-	torepeat = torepeat:sub(0,torepeat:len()-1)
-	writefile(file,torepeat)
-end
-function installfile()
-	if isfile then
-		if not isfolder("BeanzHub") then
-			makefolder("BeanzHub")
-		end
-		if not isfile(settingsfile) then
-			writefile(settingsfile,"")
-			resetdefault(settingsfile,"nil",10)
+
+-- Максимум токенов ответа под выбранную длину
+local ANSWER_TOKENS = { short = 320, medium = 700, long = 1200 }
+
+-- Температура модели под каждый режим
+local MODE_TEMP = { calm = 0.55, mid = 0.78, hard = 0.95 }
+
+-- ══════════════════════════════════════════════════════════════════════════════
+--  2. СЕРВИСЫ И ОКРУЖЕНИЕ
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local Players           = game:GetService("Players")
+local HttpService       = game:GetService("HttpService")
+local TextChatService   = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local LocalPlayer       = Players.LocalPlayer
+
+local ENV = (type(getgenv) == "function" and getgenv()) or _G
+
+local function executorName()
+	if type(identifyexecutor) == "function" then
+		local ok, name, ver = pcall(identifyexecutor)
+		if ok and name then
+			return tostring(name) .. (ver and (" " .. tostring(ver)) or "")
 		end
 	end
-	task.wait()
+	if type(getexecutorname) == "function" then
+		local ok, name = pcall(getexecutorname)
+		if ok and name then return tostring(name) end
+	end
+	return "unknown"
 end
 
-installfile()
-function checkvariable(file:string,variable:number):string
-	if isfile then
-	if readfile(file) == nil then
-		resetdefault(file,"nil",3)
+-- Функция HTTP-запроса: request / http_request / syn.request / http.request ...
+local function pickHttpFunction()
+	local direct = { "request", "http_request", "http_request_async", "syn_request" }
+	for _, name in ipairs(direct) do
+		local fn = ENV[name]
+		if type(fn) == "function" then return fn end
 	end
-	local filecontents = readfile(file)
-	local splitwordstable = filecontents:split(",")
-	local putbacksentence = ""
-	for option, word in splitwordstable do
-		if option == variable then
-			return word
+	local nested = { "syn", "http", "fluxus", "krnl" }
+	for _, name in ipairs(nested) do
+		local tbl = ENV[name]
+		if type(tbl) == "table" and type(tbl.request) == "function" then return tbl.request end
+	end
+	return nil
+end
+
+local HTTP_FN = pickHttpFunction()
+
+-- Родитель для GUI: gethui() скрывает окно от игры
+local function getGuiParent()
+	if type(gethui) == "function" then
+		local ok, parent = pcall(gethui)
+		if ok and parent then return parent end
+	end
+	if type(get_hidden_gui) == "function" then
+		local ok, parent = pcall(get_hidden_gui)
+		if ok and parent then return parent end
+	end
+	local ok, core = pcall(function() return game:GetService("CoreGui") end)
+	if ok and core then return core end
+	return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local function logInfo(...)
+	print(("[" .. APP_NAME .. "] "), ...)
+end
+-- ══════════════════════════════════════════════════════════════════════════════
+--  3. HTTP / JSON / СТРОКИ
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local function httpRequest(opts)
+	opts = opts or {}
+	local url     = opts.url
+	local method  = string.upper(opts.method or "GET")
+	local headers = opts.headers or {}
+	local body    = opts.body
+
+	if not url then return { ok = false, error = "URL не задан" } end
+
+	if HTTP_FN then
+		local ok, res = pcall(HTTP_FN, {
+			Url = url, Method = method, Headers = headers, Body = body,
+		})
+		if ok and type(res) == "table" then
+			return {
+				ok = true,
+				status = tonumber(res.StatusCode or res.Status or res.status) or 200,
+				body = res.Body or res.body or "",
+			}
+		end
+		if not ok then
+			logInfo("HTTP-функция упала:", tostring(res))
 		end
 	end
-	end
-end
-function writevariable(file:string,variable:number,check:string)
-	if isfile then
-	if readfile(file) == nil then
-		resetdefault(file,"nil",3)
-	end
-	local filecontents = readfile(file)
-	local splitwordstable = filecontents:split(",")
-	local putbacksentence = ""
-	for option, word in splitwordstable do
-		if option == variable then
-			putbacksentence = tostring(putbacksentence .. check .. ",")
-		else
-			if word ~= "" then
-				putbacksentence = tostring(putbacksentence .. word .. ",")
-			end
-		end										
-	end
-	putbacksentence = putbacksentence:sub(0,putbacksentence:len()-1)
-	writefile(file,putbacksentence)
-	end
-end
-local speed = 1
-if checkvariable(settingsfile,2) == "true" then
-	speed = 0
-	Idkwhatthisis.Background.Settings.Scroll.SkipButton.BackgroundTransparency = 0
-end
-function anims.Intro()
-	local properties = {Size = UDim2.fromScale(0.049,0.103)
-	}
-	local tweeninfo = TweenInfo.new(0.5,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false)
-	local tween = tweenService:Create(Idkwhatthisis,tweeninfo,properties)
-	tween:Play()
-	tween:GetPropertyChangedSignal("PlaybackState"):Connect(function()
-		if tween.PlaybackState == Enum.PlaybackState.Completed then
-			task.wait(0.4*speed)
-			local size = {Size = UDim2.fromScale(0.34,0.103)}
-			local beanpos = {Position = UDim2.fromScale(-0.384,0),
-				Rotation = -360
-			}
-			local resize = tweenService:Create(Idkwhatthisis,tweeninfo,size)
-			local beanidk = tweenService:Create(Idkwhatthisis.Title.ImageLabel,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),beanpos)
-			resize:Play()
-			beanidk:Play()
-			task.wait(0.4*speed)
-			local change = {Position = UDim2.fromScale(0,0)}
-			local textcomein = tweenService:Create(Idkwhatthisis.Title.TextLabel,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),change)
-			Idkwhatthisis.Title.TextLabel.Visible = true
-			textcomein:Play()
-			task.wait(0.8*speed)
-			Beanzdisplay.Text = [[  Beanz<font color="rgb(255,0,0)">z</font>]]
-			task.wait(0.4*speed)
-			Beanzdisplay.Text = [[   Beanz<font color="rgb(255,0,0)">zz</font>]]
-			task.wait(0.4*speed)
-			Beanzdisplay.Text = [[    Beanz<font color="rgb(255,0,0)">zzz</font>]]
-			task.wait(0.2*speed)
-			Beanzdisplay.Text = [[   Beanz<font color="rgb(255,0,0)">zz</font>]]
-			task.wait(0.2*speed)
-			Beanzdisplay.Text = [[  Beanz<font color="rgb(255,0,0)">z</font>]]
-			task.wait(0.2*speed)
-			Beanzdisplay.Text = [[ Beanz<font color="rgb(255,0,0)"></font>]]
-			task.wait(0.4*speed)
-			Beanzdisplay.Text = [[  Beanz<font color="rgb(42, 70, 255)">H</font>]]
-			task.wait(0.2*speed)
-			Beanzdisplay.Text = [[   Beanz<font color="rgb(42, 70, 255)">HU</font>]]
-			task.wait(0.2*speed)
-			Beanzdisplay.Text = [[    Beanz<font color="rgb(42, 70, 255)">HUB</font>]]
-			task.wait(0.3*speed)
-			local pos = {Position = UDim2.fromScale(0.5,0.324),
-				Size = UDim2.fromScale(0.45,0.082)
-			}
-			local center = tweenService:Create(Idkwhatthisis,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),pos)
-			center:Play()
-			task.wait(0.4*speed)
-			local backgroundtable = {Size = UDim2.fromScale(1,6.761)}
-			local openbackground = tweenService:Create(Idkwhatthisis.Background,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),backgroundtable)
-			openbackground:Play()
-			Idkwhatthisis.Background.UIStroke.Enabled = true
-			task.wait(0.4*speed)
-			introcompleted = true
+
+	if method == "GET" then
+		local ok, res = pcall(function() return game:HttpGet(url, true) end)
+		if ok and type(res) == "string" and #res > 0 then
+			return { ok = true, status = 200, body = res }
 		end
+	end
+
+	local ok, res = pcall(function()
+		return HttpService:RequestAsync({ Url = url, Method = method, Headers = headers, Body = body })
 	end)
+	if ok and type(res) == "table" then
+		return { ok = res.Success == true, status = res.StatusCode or 0, body = res.Body or "" }
+	end
+
+	return { ok = false, error = "Нет рабочей HTTP-функции (нужен экзекьютор с request())" }
+end
+
+local function jsonEncode(tbl)
+	local ok, res = pcall(function() return HttpService:JSONEncode(tbl) end)
+	if ok then return res end
+	return nil
+end
+
+local function jsonDecode(str)
+	if type(str) ~= "string" or str == "" then return nil end
+	local ok, res = pcall(function() return HttpService:JSONDecode(str) end)
+	if ok then return res end
+	return nil
+end
+
+local function trim(str)
+	return (tostring(str):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function urlEncode(str)
+	return (tostring(str):gsub("[^%w%-%._~]", function(ch)
+		return string.format("%%%02X", string.byte(ch))
+	end))
+end
+
+local function stripTags(str)
+	return (tostring(str):gsub("<[^>]*>", " "))
+end
+
+local HTML_ENTITIES = {
+	["&amp;"] = "&", ["&quot;"] = "\"", ["&#39;"] = "'", ["&apos;"] = "'",
+	["&lt;"] = "<", ["&gt;"] = ">", ["&nbsp;"] = " ", ["&mdash;"] = "-",
+	["&ndash;"] = "-", ["&laquo;"] = "\"", ["&raquo;"] = "\"", ["&hellip;"] = "...",
+}
+
+local function htmlDecode(str)
+	local text = tostring(str):gsub("&#(%d+);", function(num)
+		local code = tonumber(num)
+		if code and code > 0 and code < 1114112 then
+			local ok, ch = pcall(utf8.char, code)
+			if ok then return ch end
+		end
+		return "?"
+	end)
+	text = text:gsub("&#[xX](%x+);", function(hex)
+		local code = tonumber(hex, 16)
+		if code and code > 0 and code < 1114112 then
+			local ok, ch = pcall(utf8.char, code)
+			if ok then return ch end
+		end
+		return "?"
+	end)
+	for entity, char in pairs(HTML_ENTITIES) do
+		text = text:gsub(entity, char)
+	end
+	return text
+end
+
+local function urlDecode(str)
+	local text = tostring(str):gsub("+", " ")
+	return (text:gsub("%%(%x%x)", function(hex)
+		return string.char(tonumber(hex, 16))
+	end))
+end
+
+local function clampNumber(value, minimum, maximum, fallback)
+	local num = tonumber(value)
+	if not num then return fallback end
+	if num < minimum then return minimum end
+	if num > maximum then return maximum end
+	return num
+end
+
+local function splitBySeparator(text, separator)
+	local parts, lastIndex = {}, 1
+	while true do
+		local startIndex, endIndex = text:find(separator, lastIndex, true)
+		if not startIndex then break end
+		table.insert(parts, text:sub(lastIndex, startIndex - 1))
+		lastIndex = endIndex + 1
+	end
+	table.insert(parts, text:sub(lastIndex))
+	return parts
+end
+
+local function containsAny(text, list)
+	local lowered = string.lower(text)
+	for _, needle in ipairs(list) do
+		if string.find(lowered, needle, 1, true) then return true end
+	end
+	return false
+end
+
+logInfo(("v%s загружен | экзекьютор: %s | HTTP: %s")
+	:format(APP_VERSION, executorName(), HTTP_FN and "ок" or "нет"))
+-- ══════════════════════════════════════════════════════════════════════════════
+--  4. СОСТОЯНИЕ, КОНФИГ, ЦЕЛИ, ЛОГ
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local State = {
+	settings      = {},
+	keys          = { gemini = "", deepseek = "" },
+	targets       = {},     -- [userId] = true
+	draft         = "",
+	replyTo       = nil,    -- сообщение, на которое отвечаем
+	log           = {},     -- история чата
+	generating    = false,  -- идёт запрос к ИИ
+	autoStamps    = {},     -- времена авто-ответов
+	lastAiText    = "",
+	lastAiError   = "",
+	researchCache = {},     -- [термин] = { source = , text = }
+}
+
+for key, value in pairs(DEFAULTS) do
+	if key == "keys" then
+		State.keys.gemini   = value.gemini
+		State.keys.deepseek = value.deepseek
+	else
+		State.settings[key] = value
+	end
+end
+
+local App = { listeners = { log = {}, targets = {}, players = {}, status = {} } }
+
+local function emit(channel, ...)
+	for _, callback in ipairs(App.listeners[channel] or {}) do
+		local ok, err = pcall(callback, ...)
+		if not ok then logInfo("ошибка обработчика " .. channel .. ":", tostring(err)) end
+	end
+end
+
+local function onChange(channel, callback)
+	table.insert(App.listeners[channel], callback)
+end
+
+-- ── Конфиг на диске (если у экзекьютора есть writefile) ──────────────────────
+local CONFIG_DIR  = APP_NAME .. "_ArgumentEdition"
+local CONFIG_FILE = CONFIG_DIR .. "/config.json"
+
+local function hasFileApi()
+	return type(writefile) == "function" and type(readfile) == "function"
+end
+
+local function saveConfig()
+	if not hasFileApi() then return false, "нет writefile/readfile" end
+	if type(makefolder) == "function" and type(isfolder) == "function" then
+		pcall(function()
+			if not isfolder(CONFIG_DIR) then makefolder(CONFIG_DIR) end
+		end)
+	end
+	local payload = { settings = State.settings, keys = State.keys, targets = {} }
+	for userId in pairs(State.targets) do table.insert(payload.targets, userId) end
+	local encoded = jsonEncode(payload)
+	if not encoded then return false, "не удалось собрать JSON" end
+	local ok, err = pcall(writefile, CONFIG_FILE, encoded)
+	if not ok then return false, tostring(err) end
 	return true
 end
-function anims.Status()
-	if introcompleted == false then
-		return false
-	else
-		return true
-	end
-end
-return anims
 
+local function loadConfig()
+	if not hasFileApi() or type(isfile) ~= "function" then return false, "нет isfile/readfile" end
+	local exists = false
+	pcall(function() exists = isfile(CONFIG_FILE) end)
+	if not exists then return false, "config.json не найден" end
+	local raw = nil
+	pcall(function() raw = readfile(CONFIG_FILE) end)
+	local data = jsonDecode(raw)
+	if type(data) ~= "table" then return false, "битый config.json" end
+	if type(data.settings) == "table" then
+		for key, value in pairs(data.settings) do
+			if DEFAULTS[key] ~= nil then State.settings[key] = value end
+		end
+	end
+	if type(data.keys) == "table" then
+		State.keys.gemini   = data.keys.gemini or State.keys.gemini
+		State.keys.deepseek = data.keys.deepseek or State.keys.deepseek
+	end
+	State.targets = {}
+	if type(data.targets) == "table" then
+		for _, userId in ipairs(data.targets) do
+			local id = tonumber(userId)
+			if id then State.targets[id] = true end
+		end
+	end
+	return true
 end
+-- ── Игроки и цели ────────────────────────────────────────────────────────────
+local PlayerInfo = {}   -- [userId] = запись игрока
+
+local function findPlayerByUserId(userId)
+	if not userId or userId == 0 then return nil end
+	return Players:GetPlayerByUserId(userId)
+end
+
+local function findPlayerByName(name)
+	if type(name) ~= "string" then return nil end
+	local lowered = string.lower(name)
+	for _, player in ipairs(Players:GetPlayers()) do
+		if string.lower(player.Name) == lowered or string.lower(player.DisplayName) == lowered then
+			return player
+		end
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		if string.find(string.lower(player.Name), lowered, 1, true)
+			or string.find(string.lower(player.DisplayName), lowered, 1, true) then
+			return player
+		end
+	end
+	return nil
+end
+
+local function refreshPlayers()
+	local list, seen = {}, {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		local info = {
+			player   = player,
+			userId   = player.UserId,
+			name     = player.Name,
+			display  = player.DisplayName,
+			isSelf   = player == LocalPlayer,
+			isTarget = State.targets[player.UserId] == true,
+		}
+		PlayerInfo[player.UserId] = info
+		seen[player.UserId] = true
+		table.insert(list, info)
+	end
+	for userId in pairs(PlayerInfo) do
+		if not seen[userId] then
+			PlayerInfo[userId] = nil
+			State.targets[userId] = nil
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.isSelf ~= b.isSelf then return a.isSelf == true end
+		return string.lower(a.display) < string.lower(b.display)
+	end)
+	emit("players", list)
+	return list
+end
+
+local function targetList()
+	local list = {}
+	for userId in pairs(State.targets) do
+		local player = findPlayerByUserId(userId)
+		if player then table.insert(list, player) end
+	end
+	table.sort(list, function(a, b) return a.UserId < b.UserId end)
+	return list
+end
+
+local function targetNames()
+	local names = {}
+	for _, player in ipairs(targetList()) do table.insert(names, "@" .. player.Name) end
+	return table.concat(names, ", ")
+end
+
+local function setTarget(userId, value)
+	if value then State.targets[userId] = true else State.targets[userId] = nil end
+	if PlayerInfo[userId] then PlayerInfo[userId].isTarget = value == true end
+	emit("targets", targetList())
+end
+
+local function toggleTarget(userId)
+	setTarget(userId, State.targets[userId] ~= true)
+end
+
+-- ── Лог чата ─────────────────────────────────────────────────────────────────
+local LOG_LIMIT = 250
+local recentSignatures = {}
+
+local function isDuplicate(name, text)
+	local signature = string.lower(tostring(name)) .. "\1" .. string.lower(tostring(text))
+	local now = os.clock()
+	local last = recentSignatures[signature]
+	recentSignatures[signature] = now
+	if last and (now - last) < 1.5 then return true end
+	if #State.log > 40 and math.random(1, 20) == 1 then
+		local cleaned = {}
+		for key, stamp in pairs(recentSignatures) do
+			if (now - stamp) < 30 then cleaned[key] = stamp end
+		end
+		recentSignatures = cleaned
+	end
+	return false
+end
+
+local function pushLog(entry)
+	entry.time = entry.time or os.date("%H:%M:%S")
+	entry.isTarget = State.targets[entry.userId or 0] == true
+	table.insert(State.log, entry)
+	if #State.log > LOG_LIMIT then table.remove(State.log, 1) end
+	emit("log", entry, false)
+	return entry
+end
+
+local function clearLog()
+	State.log = {}
+	recentSignatures = {}
+	emit("log", nil, true)
+end
+
+local function recentContext(count, onlyTargets)
+	count = count or 14
+	local lines = {}
+	for index = #State.log, 1, -1 do
+		local entry = State.log[index]
+		local keep = (not onlyTargets) or entry.isTarget or entry.isSelf
+		if keep then
+			local who = entry.isSelf and (LocalPlayer.DisplayName .. " (я)") or entry.display
+			table.insert(lines, 1, who .. ": " .. entry.text)
+			if #lines >= count then break end
+		end
+	end
+	return table.concat(lines, "\n")
+end
+
+local function lastMessageFrom(userId)
+	for index = #State.log, 1, -1 do
+		local entry = State.log[index]
+		if entry.userId == userId and not entry.isSelf then return entry end
+	end
+	return nil
+end
+-- ══════════════════════════════════════════════════════════════════════════════
+--  5. UI-ТУЛКИТ
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local Theme = {
+	bg       = Color3.fromRGB(15, 16, 21),
+	panel    = Color3.fromRGB(24, 26, 34),
+	panel2   = Color3.fromRGB(33, 36, 47),
+	panel3   = Color3.fromRGB(42, 46, 59),
+	stroke   = Color3.fromRGB(52, 56, 70),
+	text     = Color3.fromRGB(234, 237, 245),
+	dim      = Color3.fromRGB(146, 153, 172),
+	accent   = Color3.fromRGB(124, 92, 255),
+	accent2  = Color3.fromRGB(72, 199, 142),
+	warn     = Color3.fromRGB(240, 186, 84),
+	danger   = Color3.fromRGB(233, 88, 88),
+	font     = Enum.Font.GothamMedium,
+	fontBold = Enum.Font.GothamBold,
 }
-local function SCRIPT_5d()
-local script = UI["5d"]
-	local Beanzanim = require(script.Parent.Anims)
-	local mainfolder = "BeanzHub/"
-	local paste = "Main.txt"
-	local settingsfile = tostring(mainfolder..paste)
-	function resetdefault(file:string,placeholder:string,slots:number)
-		local torepeat = tostring(placeholder..",")
-		torepeat = torepeat:rep(slots)
-		torepeat = torepeat:sub(0,torepeat:len()-1)
-		writefile(file,torepeat)
-	end
-	
-	function installfile()
-		if isfile then
-			if not isfolder("BeanzHub") then
-				makefolder("BeanzHub")
-			end
-			if not isfile(settingsfile) then
-				writefile(settingsfile,"")
-				resetdefault(settingsfile,"nil",10)
-			end
-		end
-		task.wait()
-	end
-	
-	installfile()
-	function checkvariable(file:string,variable:number):string
-		if readfile(file) == nil then
-			resetdefault(file,"nil",3)
-		end
-		local filecontents = readfile(file)
-		local splitwordstable = filecontents:split(",")
-		local putbacksentence = ""
-		for option, word in splitwordstable do
-			if option == variable then
-				return word
+
+local function create(className, props, children)
+	local inst = Instance.new(className)
+	if props then
+		for key, value in pairs(props) do
+			if key ~= "Parent" then
+				local ok, err = pcall(function() inst[key] = value end)
+				if not ok then logInfo("UI: " .. tostring(key) .. " -> " .. tostring(err)) end
 			end
 		end
 	end
-	function writevariable(file:string,variable:number,check:string)
-		if readfile(file) == nil then
-			resetdefault(file,"nil",3)
-		end
-		local filecontents = readfile(file)
-		local splitwordstable = filecontents:split(",")
-		local putbacksentence = ""
-		for option, word in splitwordstable do
-			if option == variable then
-				putbacksentence = tostring(putbacksentence .. check .. ",")
-			else
-				if word ~= "" then
-					putbacksentence = tostring(putbacksentence .. word .. ",")
-				end
-			end										
-		end
-		putbacksentence = putbacksentence:sub(0,putbacksentence:len()-1)
-		writefile(file,putbacksentence)
+	if children then
+		for _, child in ipairs(children) do child.Parent = inst end
 	end
-	local gui = script.Parent
-	local MainFrame = gui.Frame
-	local Title = MainFrame.Title
-	local MainFrameMenu = MainFrame.Background
-	local MainMenu = MainFrameMenu.Main
-	local scriptsearch = MainFrameMenu.Scripts.TextBox
-	local toolssearch = MainFrameMenu.Tools.TextBox
-	local settingsfolder = MainFrameMenu.Settings
-	local UIS = game:GetService("UserInputService")
-	local tweenService = game:GetService("TweenService")
-	local DraggableObject	= require(gui.DraggableObject)
-	local FrameDrag 		= DraggableObject.new(MainFrame)
-	Beanzanim.Intro()
-	local Popup = MainFrameMenu.Popup
-	local originalpopuppos = Popup.Position
-	local selectedscript = nil
-	local coloredbutton = gui.Frame.fordawin
-	local popupbutton = Popup.TextButton
-	local originalbuttonpos = popupbutton.Position
-	local current = "Scripts"
-	local everyClipboard = setclipboard or toclipboard or set_clipboard or (Clipboard and Clipboard.set)
-	local forpopup = {Position = UDim2.fromScale(0,0)}
-	popupbutton.Visible = false
-	Title.Delete.MouseButton1Click:Connect(function()
-		gui:Destroy()
+	if props and props.Parent then inst.Parent = props.Parent end
+	return inst
+end
+
+local function uicorner(inst, radius)
+	return create("UICorner", { Parent = inst, CornerRadius = UDim.new(0, radius or 8) })
+end
+
+local function uistroke(inst, color, thickness)
+	return create("UIStroke", {
+		Parent = inst, Color = color or Theme.stroke,
+		Thickness = thickness or 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+end
+
+local function uipadding(inst, top, right, bottom, left)
+	return create("UIPadding", {
+		Parent = inst,
+		PaddingTop = UDim.new(0, top or 0), PaddingRight = UDim.new(0, right or 0),
+		PaddingBottom = UDim.new(0, bottom or 0), PaddingLeft = UDim.new(0, left or 0),
+	})
+end
+
+local function uilist(inst, direction, padding, align)
+	return create("UIListLayout", {
+		Parent = inst,
+		FillDirection = direction or Enum.FillDirection.Vertical,
+		Padding = UDim.new(0, padding or 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = align or Enum.HorizontalAlignment.Left,
+		VerticalAlignment = Enum.VerticalAlignment.Top,
+	})
+end
+
+local function makeLabel(parent, text, opts)
+	opts = opts or {}
+	return create("TextLabel", {
+		Parent = parent,
+		BackgroundTransparency = 1,
+		Text = tostring(text or ""),
+		TextColor3 = opts.color or Theme.text,
+		TextSize = opts.size or 13,
+		Font = opts.bold and Theme.fontBold or Theme.font,
+		TextXAlignment = opts.align or Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextWrapped = opts.wrapped == true,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Size = opts.size2 or UDim2.new(1, 0, 0, opts.height or 18),
+		Position = opts.position or UDim2.new(0, 0, 0, 0),
+		LayoutOrder = opts.order or 0,
+		ClipsDescendants = true,
+	})
+end
+
+local function makeButton(parent, text, opts)
+	opts = opts or {}
+	local baseColor = opts.color or Theme.panel2
+	local hoverColor = opts.hover or Theme.panel3
+	local button = create("TextButton", {
+		Parent = parent,
+		Text = "",
+		AutoButtonColor = false,
+		BackgroundColor3 = baseColor,
+		BorderSizePixel = 0,
+		Size = opts.size2 or UDim2.new(1, opts.width or 0, 0, opts.height or 28),
+		Position = opts.position or UDim2.new(0, 0, 0, 0),
+		LayoutOrder = opts.order or 0,
+		ClipsDescendants = true,
+	})
+	uicorner(button, opts.radius or 7)
+	uistroke(button, opts.strokeColor or Theme.stroke)
+	makeLabel(button, text, {
+		size = opts.textSize or 12,
+		bold = opts.bold ~= false,
+		color = opts.textColor or Theme.text,
+		align = Enum.TextXAlignment.Center,
+		size2 = UDim2.new(1, -8, 1, 0),
+		position = UDim2.new(0, 4, 0, 0),
+	})
+	button.MouseEnter:Connect(function()
+		if opts.noHover then return end
+		TweenService:Create(button, TweenInfo.new(0.12), { BackgroundColor3 = hoverColor }):Play()
 	end)
-	for _, ok in game:GetService("CoreGui"):GetChildren() do
-		if gui.Name == ok.Name then
-			if gui == ok then continue end
-			ok:Destroy()
+	button.MouseLeave:Connect(function()
+		if opts.noHover then return end
+		TweenService:Create(button, TweenInfo.new(0.12), { BackgroundColor3 = baseColor }):Play()
+	end)
+	if opts.onClick then
+		button.MouseButton1Click:Connect(function()
+			local ok, err = pcall(opts.onClick)
+			if not ok then logInfo("ошибка кнопки:", tostring(err)) end
+		end)
+	end
+	return button
+end
+local function makeTextBox(parent, placeholder, opts)
+	opts = opts or {}
+	local box = create("TextBox", {
+		Parent = parent,
+		Text = opts.text or "",
+		PlaceholderText = placeholder or "",
+		PlaceholderColor3 = Theme.dim,
+		TextColor3 = Theme.text,
+		TextSize = opts.textSize or 13,
+		Font = Theme.font,
+		TextXAlignment = opts.align or Enum.TextXAlignment.Left,
+		TextYAlignment = opts.multiline and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+		MultiLine = opts.multiline == true,
+		ClearTextOnFocus = false,
+		BackgroundColor3 = Theme.panel,
+		BorderSizePixel = 0,
+		Size = opts.size2 or UDim2.new(1, 0, 0, opts.height or 28),
+		Position = opts.position or UDim2.new(0, 0, 0, 0),
+		LayoutOrder = opts.order or 0,
+		TextWrapped = opts.wrapped == true,
+		ClipsDescendants = true,
+	})
+	uicorner(box, opts.radius or 7)
+	uistroke(box, Theme.stroke)
+	uipadding(box, 0, 8, 0, 8)
+	return box
+end
+
+local function makeToggle(parent, labelText, initial, callback, opts)
+	opts = opts or {}
+	local row = create("TextButton", {
+		Parent = parent,
+		Text = "",
+		AutoButtonColor = false,
+		BackgroundColor3 = Theme.panel,
+		BorderSizePixel = 0,
+		Size = opts.size2 or UDim2.new(1, 0, 0, opts.height or 30),
+		LayoutOrder = opts.order or 0,
+	})
+	uicorner(row, 7)
+	uistroke(row, Theme.stroke)
+	makeLabel(row, labelText, {
+		size = opts.textSize or 12,
+		size2 = UDim2.new(1, -70, 1, 0),
+		position = UDim2.new(0, 10, 0, 0),
+		color = Theme.text,
+	})
+	local knobBg = create("Frame", {
+		Parent = row,
+		BackgroundColor3 = Theme.panel3,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, 40, 0, 18),
+		Position = UDim2.new(1, -50, 0.5, -9),
+	})
+	uicorner(knobBg, 9)
+	local knob = create("Frame", {
+		Parent = knobBg,
+		BackgroundColor3 = Theme.dim,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, 14, 0, 14),
+		Position = UDim2.new(0, 2, 0.5, -7),
+	})
+	uicorner(knob, 7)
+
+	local enabled = initial == true
+	local function render()
+		TweenService:Create(knobBg, TweenInfo.new(0.15), {
+			BackgroundColor3 = enabled and Theme.accent or Theme.panel3,
+		}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.15), {
+			Position = enabled and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7),
+			BackgroundColor3 = enabled and Theme.text or Theme.dim,
+		}):Play()
+	end
+	render()
+	local function get()
+		return enabled
+	end
+	local function set(value)
+		enabled = value == true
+		render()
+	end
+	App.toggleSetters = App.toggleSetters or {}
+	App.toggleSetters[labelText] = set
+	row.MouseButton1Click:Connect(function()
+		enabled = not enabled
+		render()
+		if callback then
+			local ok, err = pcall(callback, enabled)
+			if not ok then logInfo("ошибка переключателя:", tostring(err)) end
+		end
+	end)
+	return row, get, set
+end
+
+local function makeSegmented(parent, optionsList, initialKey, callback, opts)
+	opts = opts or {}
+	local row = create("Frame", {
+		Parent = parent,
+		BackgroundTransparency = 1,
+		Size = opts.size2 or UDim2.new(1, 0, 0, opts.height or 28),
+		LayoutOrder = opts.order or 0,
+	})
+	uilist(row, Enum.FillDirection.Horizontal, 6)
+	local buttons, current = {}, initialKey
+
+	local function render()
+		for key, button in pairs(buttons) do
+			button.BackgroundColor3 = (key == current) and Theme.accent or Theme.panel2
 		end
 	end
-	local forpopupbutton = {Position = UDim2.fromScale(1.072,0.5),
-		Rotation = 180
-	}
-	local tweenbacktable = {Position = originalpopuppos}
-	local tweenbacktablebutton = {Position = originalbuttonpos,
-		Rotation = -180
-	}
-	local popupanim = tweenService:Create(Popup,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),forpopup)
-	local buttonanim = tweenService:Create(popupbutton,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),forpopupbutton)
-	local backanim = tweenService:Create(Popup,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),tweenbacktable)
-	local backanimbutton = tweenService:Create(popupbutton,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),tweenbacktablebutton)
-	
-	repeat task.wait() until Beanzanim.Status()
-	Title.Delete.Visible = true
-	FrameDrag:Enable()
-	local selector = MainMenu.Selector
-	local multi = 0.068
-	function sendselector(thing,whereto)
-		local tabla = {Position = whereto}
-		local switch = tweenService:Create(thing,TweenInfo.new(0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),tabla)
-		switch:Play()
-		task.wait(0.2)
-		switch:Destroy()
+
+	for _, option in ipairs(optionsList) do
+		local button = makeButton(row, option.text, {
+			size2 = UDim2.new(1 / #optionsList, -4, 1, 0),
+			textSize = opts.textSize or 12,
+			radius = 7,
+			noHover = true,
+			onClick = function()
+				current = option.key
+				render()
+				if callback then callback(option.key, option.text) end
+			end,
+		})
+		buttons[option.key] = button
 	end
-	function toClipboard(txt)
-		if everyClipboard then
-			everyClipboard(tostring(txt))
+	render()
+	local function get()
+		return current
+	end
+	local function set(key)
+		if buttons[key] then
+			current = key
+			render()
 		end
 	end
-	for i, button in ipairs(MainMenu.Buttons:GetChildren()) do
-		if button:IsA("TextButton") then
-			button.MouseButton1Up:Connect(function()
-				if current == button.Name then return end
-				current = button.Name
-				local accpos = i-2
-				local pos = UDim2.fromScale(0,multi*accpos)
-				sendselector(selector,pos)
-				for _, folder in MainFrameMenu:GetChildren() do
-					if folder:IsA("Folder") then
-						local has = false
-						if folder:FindFirstChild("TextBox") then
-							has = true
-						end
-					folder.Scroll.Visible = false
-					if has then
-					folder.TextBox.Visible = false
-					end
-					if current == folder.Name then
-						folder.Scroll.Visible = true
-						if has then
-						folder.TextBox.Visible = true
-						end
-					end
-					end
-				end
+	return row, get, set
+end
+
+local function makeAvatar(parent, userId, size)
+	local frame = create("Frame", {
+		Parent = parent,
+		BackgroundColor3 = Theme.panel3,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, size or 34, 0, size or 34),
+		ClipsDescendants = true,
+	})
+	uicorner(frame, (size or 34) / 2)
+	local image = create("ImageLabel", {
+		Parent = frame,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=100&h=100", userId or 0),
+		ScaleType = Enum.ScaleType.Crop,
+	})
+	uicorner(image, (size or 34) / 2)
+	task.spawn(function()
+		local ok, content = pcall(function()
+			return Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+		end)
+		if ok and type(content) == "string" and content ~= "" then image.Image = content end
+	end)
+	return frame, image
+end
+
+local function makeScroll(parent, opts)
+	opts = opts or {}
+	local scroll = create("ScrollingFrame", {
+		Parent = parent,
+		Size = opts.size2 or UDim2.new(1, 0, 1, 0),
+		Position = opts.position or UDim2.new(0, 0, 0, 0),
+		BackgroundColor3 = opts.color or Theme.panel,
+		BackgroundTransparency = opts.transparent and 1 or 0,
+		BorderSizePixel = 0,
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 4,
+		ScrollBarImageColor3 = Theme.panel3,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		LayoutOrder = opts.order or 0,
+		ClipsDescendants = true,
+		ElasticBehavior = Enum.ElasticBehavior.Never,
+	})
+	uicorner(scroll, opts.radius or 8)
+	uistroke(scroll, Theme.stroke)
+	uipadding(scroll, 6, 6, 6, 6)
+	uilist(scroll, Enum.FillDirection.Vertical, opts.gap or 5)
+	return scroll
+end
+-- ══════════════════════════════════════════════════════════════════════════════
+--  6. ОКНО, ВКЛАДКИ, СТАТУС
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local UI = { tabs = {} }
+
+local viewport = Vector2.new(1280, 720)
+pcall(function()
+	local camera = workspace.CurrentCamera
+	if camera and camera.ViewportSize.X > 10 then viewport = camera.ViewportSize end
+end)
+
+local WIN_W = math.floor(clampNumber(viewport.X * 0.86, 350, 680, 620))
+local WIN_H = math.floor(clampNumber(viewport.Y * 0.74, 320, 470, 440))
+
+local screenGui = create("ScreenGui", {
+	Name = APP_NAME .. "_GUI",
+	ResetOnSpawn = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	DisplayOrder = 2147483647,
+	IgnoreGuiInset = true,
+})
+screenGui.Parent = getGuiParent()
+
+local window = create("Frame", {
+	Name = "Window",
+	Parent = screenGui,
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0.5, 0, 0.5, 0),
+	Size = UDim2.new(0, WIN_W, 0, WIN_H),
+	BackgroundColor3 = Theme.bg,
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+})
+uicorner(window, 12)
+uistroke(window, Theme.stroke, 1.4)
+
+local titleBar = create("Frame", {
+	Name = "TitleBar",
+	Parent = window,
+	Size = UDim2.new(1, 0, 0, 34),
+	BackgroundColor3 = Theme.panel,
+	BorderSizePixel = 0,
+})
+uicorner(titleBar, 12)
+create("Frame", {
+	Parent = titleBar,
+	Position = UDim2.new(0, 0, 1, -1),
+	Size = UDim2.new(1, 0, 0, 1),
+	BackgroundColor3 = Theme.stroke,
+	BorderSizePixel = 0,
+})
+
+local accentBar = create("Frame", {
+	Parent = titleBar,
+	Position = UDim2.new(0, 10, 0.5, -8),
+	Size = UDim2.new(0, 4, 0, 16),
+	BackgroundColor3 = Theme.accent,
+	BorderSizePixel = 0,
+})
+uicorner(accentBar, 2)
+
+makeLabel(titleBar, APP_NAME .. " • " .. APP_EDITION .. " v" .. APP_VERSION, {
+	size = 13, bold = true, color = Theme.text,
+	size2 = UDim2.new(1, -120, 1, 0), position = UDim2.new(0, 22, 0, 0),
+})
+
+local closeButton = makeButton(titleBar, "×", {
+	size2 = UDim2.new(0, 26, 0, 22), position = UDim2.new(1, -34, 0.5, -11),
+	radius = 6, color = Theme.panel2, hover = Theme.danger, textSize = 12,
+	onClick = function() screenGui.Enabled = false end,
+})
+local minimizeButton = makeButton(titleBar, "–", {
+	size2 = UDim2.new(0, 26, 0, 22), position = UDim2.new(1, -64, 0.5, -11),
+	radius = 6, color = Theme.panel2, textSize = 14,
+})
+
+-- перетаскивание окна
+do
+	local dragging, dragStart, startPos = false, nil, nil
+	titleBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = window.Position
+		end
+	end)
+	titleBar.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if not dragging or not dragStart then return end
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement
+			and input.UserInputType ~= Enum.UserInputType.Touch then return end
+		local delta = input.Position - dragStart
+		window.Position = UDim2.new(
+			startPos.X.Scale, startPos.X.Offset + delta.X,
+			startPos.Y.Scale, startPos.Y.Offset + delta.Y
+		)
+	end)
+end
+
+local tabBar = create("Frame", {
+	Parent = window,
+	Position = UDim2.new(0, 0, 0, 34),
+	Size = UDim2.new(1, 0, 0, 32),
+	BackgroundColor3 = Theme.panel,
+	BorderSizePixel = 0,
+})
+uipadding(tabBar, 4, 6, 4, 6)
+uilist(tabBar, Enum.FillDirection.Horizontal, 5)
+
+local footer = create("Frame", {
+	Parent = window,
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 0, 1, 0),
+	Size = UDim2.new(1, 0, 0, 24),
+	BackgroundColor3 = Theme.panel,
+	BorderSizePixel = 0,
+})
+
+local statusLabel = makeLabel(footer, "готов", {
+	size = 11, color = Theme.dim,
+	size2 = UDim2.new(1, -20, 1, 0), position = UDim2.new(0, 10, 0, 0), wrapped = false,
+})
+
+local body = create("Frame", {
+	Parent = window,
+	Position = UDim2.new(0, 0, 0, 66),
+	Size = UDim2.new(1, 0, 1, -90),
+	BackgroundTransparency = 1,
+})
+
+local statusResetToken = 0
+local function setStatus(text, color)
+	statusResetToken = statusResetToken + 1
+	local token = statusResetToken
+	statusLabel.Text = tostring(text)
+	statusLabel.TextColor3 = color or Theme.dim
+	if color and color ~= Theme.dim then
+		task.delay(6, function()
+			if statusResetToken == token then
+				statusLabel.Text = "готов"
+				statusLabel.TextColor3 = Theme.dim
+			end
+		end)
+	end
+end
+
+local TAB_DEFS = {
+	{ key = "targets",  text = " Цели" },
+	{ key = "chat",     text = " Чат" },
+	{ key = "settings", text = " Настройки" },
+	{ key = "info",     text = " Инфо" },
+}
+
+local tabButtons = {}
+local function selectTab(key)
+	for tabKey, frame in pairs(UI.tabs) do
+		frame.Visible = (tabKey == key)
+	end
+	for tabKey, button in pairs(tabButtons) do
+		button.BackgroundColor3 = (tabKey == key) and Theme.accent or Theme.panel2
+	end
+end
+
+for index, def in ipairs(TAB_DEFS) do
+	local button = makeButton(tabBar, def.text, {
+		size2 = UDim2.new(0, math.min(128, (WIN_W - 30) / 4), 1, 0),
+		textSize = 12, radius = 6, noHover = true,
+		order = index,
+		onClick = function() selectTab(def.key) end,
+	})
+	tabButtons[def.key] = button
+	local frame = create("Frame", {
+		Parent = body,
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Visible = false,
+	})
+	UI.tabs[def.key] = frame
+end
+
+minimizeButton.MouseButton1Click:Connect(function()
+	local minimized = body.Visible
+	body.Visible = not minimized
+	tabBar.Visible = not minimized
+	footer.Visible = not minimized
+	TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+		Size = minimized and UDim2.new(0, WIN_W, 0, WIN_H) or UDim2.new(0, WIN_W, 0, 34),
+	}):Play()
+end)
+-- ══════════════════════════════════════════════════════════════════════════════
+--  7. ВКЛАДКА «ЦЕЛИ» — список игроков с аватарами и мультивыбором
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local targetsTab = UI.tabs.targets
+uipadding(targetsTab, 8, 8, 8, 8)
+uilist(targetsTab, Enum.FillDirection.Vertical, 6)
+
+local targetsTop = create("Frame", {
+	Parent = targetsTab, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 30), LayoutOrder = 1,
+})
+uilist(targetsTop, Enum.FillDirection.Horizontal, 6)
+
+local searchBox = makeTextBox(targetsTop, "поиск по нику / display name...", {
+	size2 = UDim2.new(1, -250, 1, 0), order = 1,
+})
+makeButton(targetsTop, "⟳", {
+	size2 = UDim2.new(0, 34, 1, 0), order = 2, textSize = 13,
+	onClick = function() refreshPlayers() end,
+})
+makeButton(targetsTop, "Все цели", {
+	size2 = UDim2.new(0, 74, 1, 0), order = 3,
+	onClick = function()
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer then State.targets[player.UserId] = true end
+		end
+		emit("targets", targetList())
+	end,
+})
+makeButton(targetsTop, "Снять", {
+	size2 = UDim2.new(0, 58, 1, 0), order = 4,
+	onClick = function()
+		State.targets = {}
+		emit("targets", targetList())
+	end,
+})
+makeButton(targetsTop, "Сброс", {
+	size2 = UDim2.new(0, 34, 1, 0), order = 5, textSize = 12,
+	onClick = function()
+		if App.clearLogAndNotify then App.clearLogAndNotify() end
+	end,
+})
+
+local targetsInfo = makeLabel(targetsTab, "цели: нет", {
+	size = 11, color = Theme.dim, height = 15, LayoutOrder = 2,
+})
+
+local playersScroll = makeScroll(targetsTab, {
+	size2 = UDim2.new(1, 0, 1, -80), order = 3,
+})
+
+local function playerRowPassesFilter(info, query)
+	if query == "" then return true end
+	local haystack = string.lower(info.display .. " " .. info.name .. " " .. tostring(info.userId))
+	return string.find(haystack, query, 1, true) ~= nil
+end
+
+local function renderPlayers(list)
+	list = list or refreshPlayers()
+	local query = string.lower(trim(searchBox.Text or ""))
+
+	for _, child in ipairs(playersScroll:GetChildren()) do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+
+	local shown, targets = 0, 0
+	for userId in pairs(State.targets) do targets = targets + 1 end
+	targetsInfo.Text = ("игроков: %d | цели: %d%s"):format(#list, targets,
+		targets > 0 and (" | " .. targetNames()) or "")
+
+	for _, info in ipairs(list) do
+		if playerRowPassesFilter(info, query) then
+			shown = shown + 1
+			local row = create("TextButton", {
+				Parent = playersScroll,
+				Text = "",
+				AutoButtonColor = false,
+				BackgroundColor3 = info.isTarget and Theme.panel2 or Theme.panel,
+				BorderSizePixel = 0,
+				Size = UDim2.new(1, 0, 0, 46),
+				LayoutOrder = shown,
+			})
+			uicorner(row, 8)
+			uistroke(row, info.isTarget and Theme.accent or Theme.stroke)
+
+			local avatarFrame = makeAvatar(row, info.userId, 34)
+			avatarFrame.Position = UDim2.new(0, 6, 0.5, -17)
+
+			makeLabel(row, info.display .. (info.isSelf and "  (ты)" or ""), {
+				size = 13, bold = true, color = Theme.text,
+				size2 = UDim2.new(1, -210, 0, 18), position = UDim2.new(0, 48, 0, 6),
+			})
+			makeLabel(row, ("@%s • ID %d"):format(info.name, info.userId), {
+				size = 11, color = Theme.dim,
+				size2 = UDim2.new(1, -210, 0, 14), position = UDim2.new(0, 48, 0, 25),
+			})
+
+			local targetButton = makeButton(row, info.isTarget and "✓ Цель" or " Цель", {
+				size2 = UDim2.new(0, 76, 0, 26),
+				position = UDim2.new(1, -86, 0.5, -13),
+				color = info.isTarget and Theme.accent or Theme.panel2,
+				textSize = 11, radius = 6,
+				onClick = function() toggleTarget(info.userId) end,
+			})
+
+			if not info.isSelf then
+				makeButton(row, "⚡", {
+					size2 = UDim2.new(0, 30, 0, 26),
+					position = UDim2.new(1, -122, 0.5, -13),
+					color = Theme.panel2, textSize = 12, radius = 6,
+					onClick = function()
+						if App.generateForPlayer then App.generateForPlayer(info.userId, true) end
+					end,
+				})
+			end
+			row.MouseButton1Click:Connect(function()
+				if info.isSelf then return end
+				toggleTarget(info.userId)
 			end)
 		end
 	end
-	function changefocus(button:TextButton)
-		selectedscript = button
-		Popup.Title.Text = button:GetAttribute("Title")
-		Popup.Description.Text = button:GetAttribute("Description")
-		local scriptstatus = button:GetAttribute("Status")
-		if scriptstatus == "Working" then
-			Popup.Status.Text = scriptstatus
-			Popup.Status.TextColor3 = Color3.fromRGB(0, 255, 0)
-		elseif scriptstatus == "Not Working" then
-			Popup.Status.Text = scriptstatus
-			Popup.Status.TextColor3 = Color3.fromRGB(170,0,0)
+
+	if shown == 0 then
+		makeLabel(playersScroll, "ничего не найдено", {
+			size = 12, color = Theme.dim, height = 24, align = Enum.TextXAlignment.Center,
+		})
 	end
-	end
-	Popup.RunScript.MouseButton1Click:Connect(function()
-		if selectedscript == nil then return end
-		loadstring(game:HttpGet(selectedscript:GetAttribute("loadstring"), true))()
-	end)
-	Popup.CopyScript.MouseButton1Click:Connect(function()
-		if selectedscript == nil then return end
-		toClipboard(tostring("loadstring(game:HttpGet('"..selectedscript:GetAttribute("loadstring").."', true))()"))
-	end)
-	backanimbutton:GetPropertyChangedSignal("PlaybackState"):Connect(function(state)
-		if backanimbutton.PlaybackState == Enum.PlaybackState.Completed then
-			popupbutton.Rotation = 0
+end
+
+onChange("players", function(list) renderPlayers(list) end)
+onChange("targets", function()
+	renderPlayers()
+	if App.refreshChatHeader then App.refreshChatHeader() end
+end)
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function() renderPlayers() end)
+-- ══════════════════════════════════════════════════════════════════════════════
+--  8. ВКЛАДКА «ЧАТ» — лог, ответы, черновик
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local chatTab = UI.tabs.chat
+
+local chatHeader = create("Frame", {
+	Parent = chatTab, BackgroundTransparency = 1,
+	Position = UDim2.new(0, 8, 0, 8), Size = UDim2.new(1, -16, 0, 28),
+})
+uilist(chatHeader, Enum.FillDirection.Horizontal, 6)
+
+local chatHeaderLabel = makeLabel(chatHeader, "лог: нет цели выбранной", {
+	size = 11, color = Theme.dim, size2 = UDim2.new(1, -180, 1, 0),
+})
+
+local filterButton = makeButton(chatHeader, "Фильтр: цели", {
+	size2 = UDim2.new(0, 92, 1, 0), textSize = 11,
+	onClick = function()
+		State.settings.showAll = not State.settings.showAll
+		if App.refreshChatHeader then App.refreshChatHeader() end
+		if App.renderLog then App.renderLog() end
+	end,
+})
+do -- подпись живёт в дочернем TextLabel кнопки
+	local label = filterButton:FindFirstChildOfClass("TextLabel")
+	App.setFilterButtonLabel = function()
+		if label then
+			label.Text = State.settings.showAll and "Фильтр: все" or "Фильтр: цели"
 		end
+	end
+end
+
+makeButton(chatHeader, "Очистить лог", {
+	size2 = UDim2.new(0, 96, 1, 0), textSize = 11,
+	onClick = function() if App.clearLogAndNotify then App.clearLogAndNotify() end end,
+})
+
+-- строка «ответ на ...»
+local replyBar = create("Frame", {
+	Parent = chatTab,
+	Position = UDim2.new(0, 8, 0, 40), Size = UDim2.new(1, -16, 0, 26),
+	BackgroundColor3 = Theme.panel2, BorderSizePixel = 0,
+})
+uicorner(replyBar, 7)
+uistroke(replyBar, Theme.stroke)
+local replyLabel = makeLabel(replyBar, "↩ ответ: не выбран — нажми «↩» в логе, чтобы ответить на конкретное сообщение", {
+	size = 11, color = Theme.dim,
+	size2 = UDim2.new(1, -38, 1, 0), position = UDim2.new(0, 8, 0, 0),
+})
+local cancelReplyButton = makeButton(replyBar, "×", {
+	size2 = UDim2.new(0, 22, 0, 22), position = UDim2.new(1, -26, 0.5, -11),
+	textSize = 13, radius = 5, color = Theme.panel3, hover = Theme.danger,
+	onClick = function()
+		State.replyTo = nil
+		App.setReplyContext(nil)
+		setStatus("контекст ответа отменён — ответ уйдёт без привязки к сообщению", Theme.dim)
+	end,
+})
+
+local logScroll = makeScroll(chatTab, {
+	size2 = UDim2.new(1, -16, 1, -194),
+	position = UDim2.new(0, 8, 0, 70),
+})
+
+local bottomBlock = create("Frame", {
+	Parent = chatTab,
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 8, 1, -8),
+	Size = UDim2.new(1, -16, 0, 112),
+	BackgroundTransparency = 1,
+})
+uilist(bottomBlock, Enum.FillDirection.Vertical, 5)
+
+local counterLabel = makeLabel(bottomBlock, "0/200 • ~1 сообщение", {
+	size = 11, color = Theme.dim, height = 14, order = 1,
+})
+
+local draftBox = makeTextBox(bottomBlock, "черновик или готовый текст... (Tab не нужен, просто пиши)", {
+	size2 = UDim2.new(1, 0, 0, 52), multiline = true, wrapped = true, order = 2,
+})
+
+local buttonRow = create("Frame", {
+	Parent = bottomBlock, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 30), LayoutOrder = 3,
+})
+uilist(buttonRow, Enum.FillDirection.Horizontal, 5)
+
+local CHAT_BUTTONS = {
+	{ text = "✎ ИИ-переписать", color = Theme.panel2, action = "rewrite" },
+	{ text = "⚡ ИИ-ответ", color = Theme.accent, action = "autoReply" },
+	{ text = "➤ Отправить", color = Theme.accent2, action = "send" },
+	{ text = "× Очистить", color = Theme.panel2, action = "clear" },
+}
+
+for index, def in ipairs(CHAT_BUTTONS) do
+	makeButton(buttonRow, def.text, {
+		size2 = UDim2.new(0.25, -5, 1, 0),
+		order = index,
+		textSize = 11,
+		color = def.color,
+		textColor = (def.color == Theme.panel2) and Theme.text or Color3.fromRGB(12, 13, 17),
+		onClick = function()
+			local handler = App.chatActions and App.chatActions[def.action]
+			if handler then
+				local ok, err = pcall(handler)
+				if not ok then setStatus("ошибка: " .. tostring(err), Theme.danger) end
+			end
+		end,
+	})
+end
+
+local function updateCounter()
+	local length = #(draftBox.Text or "")
+	local limit = math.max(40, State.settings.maxChars or 200)
+	local parts = math.max(1, math.ceil(length / limit))
+	counterLabel.Text = ("%d/%d • ~%d сообщ."):format(length, limit, parts)
+	counterLabel.TextColor3 = (length > limit) and Theme.warn or Theme.dim
+end
+
+draftBox:GetPropertyChangedSignal("Text"):Connect(function()
+	State.draft = draftBox.Text or ""
+	updateCounter()
+end)
+
+App.focusDraft = function()
+	pcall(function() draftBox:CaptureFocus() end)
+end
+
+App.setDraft = function(text)
+	draftBox.Text = text or ""
+	State.draft = text or ""
+	updateCounter()
+end
+
+App.getDraft = function()
+	return draftBox.Text or ""
+end
+
+App.setReplyContext = function(entry)
+	State.replyTo = entry
+	if not entry then
+		replyLabel.Text = "↩ ответ: не выбран — нажми «↩» в логе, чтобы ответить на конкретное сообщение"
+		replyLabel.TextColor3 = Theme.dim
+	else
+		local preview = entry.text or ""
+		if #preview > 60 then preview = string.sub(preview, 1, 60) .. "..." end
+		replyLabel.Text = ("↩ ответ на @%s: \"%s\""):format(entry.name or "?", preview)
+		replyLabel.TextColor3 = Theme.warn
+	end
+end
+-- ── отображение лога ─────────────────────────────────────────────────────────
+local function logEntryVisible(entry)
+	if entry.isSelf then
+		return State.settings.showSelf ~= false
+	end
+	if State.settings.showAll then return true end
+	return entry.isTarget == true
+end
+
+local logRowCounter = 0
+
+local function addLogRow(entry)
+	logRowCounter = logRowCounter + 1
+	local isSelf, isTarget = entry.isSelf == true, entry.isTarget == true
+
+	local row = create("Frame", {
+		Parent = logScroll,
+		BackgroundColor3 = isTarget and Theme.panel2 or Theme.panel,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = logRowCounter,
+		ClipsDescendants = false,
+	})
+	uicorner(row, 8)
+	uistroke(row, isTarget and Theme.accent or Theme.stroke)
+	uipadding(row, 5, 6, 5, 6)
+	uilist(row, Enum.FillDirection.Vertical, 3)
+
+	local head = create("Frame", {
+		Parent = row, BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 16), LayoutOrder = 1,
+	})
+	local nameColor = isSelf and Theme.accent or (isTarget and Theme.accent2 or Theme.dim)
+	makeLabel(head, ("[%s] %s (@%s)"):format(entry.time or "--:--:--",
+		entry.display or "?", entry.name or "?"), {
+		size = 11, bold = true, color = nameColor,
+		size2 = UDim2.new(1, -70, 1, 0), position = UDim2.new(0, 0, 0, 0),
+	})
+
+	makeButton(head, "↩", {
+		size2 = UDim2.new(0, 30, 1, 0), position = UDim2.new(1, -62, 0, 0),
+		textSize = 11, radius = 5, color = Theme.panel3,
+		onClick = function()
+			App.setReplyContext(entry)
+			if entry.userId and entry.userId > 0 and not isSelf and not State.targets[entry.userId] then
+				setTarget(entry.userId, true)
+			end
+			App.focusDraft()
+			setStatus("выбрано сообщение для ответа", Theme.warn)
+		end,
+	})
+	makeButton(head, "⚡", {
+		size2 = UDim2.new(0, 30, 1, 0), position = UDim2.new(1, -30, 0, 0),
+		textSize = 11, radius = 5, color = Theme.panel3,
+		onClick = function()
+			if App.generateForEntry then App.generateForEntry(entry, true) end
+		end,
+	})
+
+	makeLabel(row, entry.text or "", {
+		size = 12, color = Theme.text, wrapped = true,
+		size2 = UDim2.new(1, 0, 0, 0), LayoutOrder = 2,
+		-- автоматическая высота под перенос текста
+	}).AutomaticSize = Enum.AutomaticSize.Y
+
+	return row
+end
+
+local function scrollLogToBottom()
+	task.defer(function()
+		pcall(function()
+			local canvasHeight = logScroll.AbsoluteCanvasSize.Y
+			logScroll.CanvasPosition = Vector2.new(0, math.max(0, canvasHeight - logScroll.AbsoluteSize.Y + 8))
+		end)
+	end)
+end
+
+App.renderLog = function()
+	for _, child in ipairs(logScroll:GetChildren()) do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+	logRowCounter = 0
+	for _, entry in ipairs(State.log) do
+		if logEntryVisible(entry) then addLogRow(entry) end
+	end
+	scrollLogToBottom()
+end
+
+App.refreshChatHeader = function()
+	local count = 0
+	for _ in pairs(State.targets) do count = count + 1 end
+	if count == 0 then
+		chatHeaderLabel.Text = "лог: цель не выбрана • выбери игрока во вкладке «Цели»"
+		chatHeaderLabel.TextColor3 = Theme.warn
+	else
+		chatHeaderLabel.Text = ("лог: цель %s"):format(targetNames())
+		chatHeaderLabel.TextColor3 = Theme.accent2
+	end
+	if App.setFilterButtonLabel then App.setFilterButtonLabel() end
+end
+
+App.clearLogAndNotify = function()
+	clearLog()
+	App.setReplyContext(nil)
+	setStatus("лог очищен", Theme.dim)
+end
+
+local function trimLogRows()
+	local guiRows = {}
+	for _, child in ipairs(logScroll:GetChildren()) do
+		if child:IsA("GuiObject") then table.insert(guiRows, child) end
+	end
+	while #guiRows > 300 do
+		local oldest = table.remove(guiRows, 1)
+		if oldest then oldest:Destroy() end
+	end
+end
+
+onChange("log", function(entry, reset)
+	if reset then
+		App.renderLog()
+		return
+	end
+	if not entry or not logEntryVisible(entry) then return end
+	addLogRow(entry)
+	trimLogRows()
+	scrollLogToBottom()
+end)
+-- ══════════════════════════════════════════════════════════════════════════════
+--  9. ВКЛАДКА «НАСТРОЙКИ»
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local PROVIDER_MODELS = {
+	gemini   = { "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash" },
+	deepseek = { "deepseek-flash", "deepseek-v4-pro" },
+}
+local MODEL_HINTS = {
+	gemini   = "gemini-3.5-flash-lite — самая быстрая и дешёвая, хватает для чата",
+	deepseek = "deepseek-flash = DeepSeek-V4.1-Flash, thinking отключается автоматически",
+}
+
+local settingsTab = UI.tabs.settings
+uipadding(settingsTab, 8, 8, 8, 8)
+uilist(settingsTab, Enum.FillDirection.Vertical, 6)
+
+local settingsScroll = makeScroll(settingsTab, { size2 = UDim2.new(1, 0, 1, -36), order = 1, gap = 6 })
+
+local function sectionTitle(text, order)
+	return makeLabel(settingsScroll, text, {
+		size = 11, bold = true, color = Theme.dim, height = 16, order = order,
+	})
+end
+
+local function hintLabel(text, order)
+	return makeLabel(settingsScroll, text, {
+		size = 10, color = Theme.dim, height = 14, order = order, wrapped = true,
+	})
+end
+
+-- ── провайдер ────────────────────────────────────────────────────────────────
+sectionTitle("ПРОВАЙДЕР И МОДЕЛЬ", 1)
+
+local keyBox, modelBox, modelsHint
+
+local function applyProvider(key)
+	State.settings.provider = key
+	local models = PROVIDER_MODELS[key] or {}
+	if keyBox then keyBox.Text = State.keys[key] or "" end
+	if modelBox then modelBox.Text = models[1] or "" end
+	if modelsHint then modelsHint.Text = MODEL_HINTS[key] or "" end
+	setStatus("провайдер: " .. key, Theme.accent)
+end
+
+local providerSegmented, getProviderSegmented, setProviderSegmented = makeSegmented(settingsScroll, {
+	{ key = "gemini",   text = "Google Gemini" },
+	{ key = "deepseek", text = "DeepSeek" },
+}, State.settings.provider, applyProvider, { order = 2 })
+
+local modelRow = create("Frame", {
+	Parent = settingsScroll, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 3,
+})
+uilist(modelRow, Enum.FillDirection.Horizontal, 6)
+
+modelBox = makeTextBox(modelRow, "имя модели", {
+	size2 = UDim2.new(1, -70, 1, 0), order = 1, text = State.settings.model,
+})
+
+local modelIndex = 1
+makeButton(modelRow, "▸ модель", {
+	size2 = UDim2.new(0, 64, 1, 0), order = 2, textSize = 11,
+	onClick = function()
+		local models = PROVIDER_MODELS[State.settings.provider] or {}
+		if #models == 0 then return end
+		modelIndex = (modelIndex % #models) + 1
+		modelBox.Text = models[modelIndex]
+	end,
+})
+
+modelsHint = hintLabel(MODEL_HINTS[State.settings.provider] or "", 4)
+
+sectionTitle("API-КЛЮЧ (хранится только локально)", 5)
+local keyRow = create("Frame", {
+	Parent = settingsScroll, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 6,
+})
+uilist(keyRow, Enum.FillDirection.Horizontal, 6)
+
+keyBox = makeTextBox(keyRow, "вставь API-ключ", {
+	size2 = UDim2.new(1, -150, 1, 0), order = 1, text = State.keys[State.settings.provider] or "",
+})
+local keyMask = hintLabel("(длина: 0) ключ хранится только в этом клиенте", 7)
+keyBox:GetPropertyChangedSignal("Text"):Connect(function()
+	State.keys[State.settings.provider] = trim(keyBox.Text or "")
+	keyMask.Text = ("(длина: %d) ключ хранится только в этом клиенте"):format(#(keyBox.Text or ""))
+end)
+
+makeButton(keyRow, "Вставить", {
+	size2 = UDim2.new(0, 70, 1, 0), order = 2, textSize = 11,
+	onClick = function()
+		local clipboardValue = nil
+		if type(getclipboard) == "function" then
+			local ok, value = pcall(getclipboard)
+			if ok then clipboardValue = value end
+		end
+		if clipboardValue and clipboardValue ~= "" then
+			keyBox.Text = trim(clipboardValue)
+			setStatus("ключ вставлен из буфера", Theme.accent2)
+		else
+			setStatus("буфер обмена недоступен — вставь ключ вручную", Theme.warn)
+		end
+	end,
+})
+makeButton(keyRow, "Тест", {
+	size2 = UDim2.new(0, 62, 1, 0), order = 3, textSize = 11,
+	onClick = function()
+		if App.testConnection then App.testConnection() end
+	end,
+})
+-- ── режим и длина ответа ─────────────────────────────────────────────────────
+sectionTitle("РЕЖИМ ОТВЕТА", 8)
+local modeSegmented, getMode, setModeSegmented = makeSegmented(settingsScroll, {
+	{ key = "calm", text = " Спокойный" },
+	{ key = "mid",  text = " Средний" },
+	{ key = "hard", text = " Жёсткий" },
+}, State.settings.mode, function(key)
+	State.settings.mode = key
+	local texts = {
+		calm = "вежливо, холодно, по фактам: требует конкретики и разбирает тезис по частям",
+		mid  = "то же, но с нажимом и легким сарказмом",
+		hard = "жёстко, со сленгом и давлением, но без мата, слюров и угроз",
+	}
+	setStatus("режим: " .. key .. " — " .. (texts[key] or ""), Theme.accent)
+end, { order = 9 })
+hintLabel("Спокойный = уровень Vox Veritatis: не оправдывается, а уточняет и разбивает аргумент.\n"
+	.. "Жёсткий = сленг и давление, но без нецензурщины (иначе бан чата).", 10)
+
+local lengthSegmented, getLength, setLengthSegmented = makeSegmented(settingsScroll, {
+	{ key = "short",  text = "Коротко" },
+	{ key = "medium", text = "Средне" },
+	{ key = "long",   text = "Длинно" },
+}, State.settings.answerLen, function(key) State.settings.answerLen = key end, { order = 11 })
+
+-- ── границы сообщений ────────────────────────────────────────────────────────
+sectionTitle("ГРАНИЦЫ СООБЩЕНИЙ (лимит чата Roblox)", 12)
+local limitsRow = create("Frame", {
+	Parent = settingsScroll, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 13,
+})
+uilist(limitsRow, Enum.FillDirection.Horizontal, 6)
+
+local charBox = makeTextBox(limitsRow, "200", {
+	size2 = UDim2.new(1, -150, 1, 0), order = 1, text = tostring(State.settings.maxChars),
+})
+charBox:GetPropertyChangedSignal("Text"):Connect(function()
+	State.settings.maxChars = math.floor(clampNumber(charBox.Text, 40, 500, 200))
+end)
+makeButton(limitsRow, "150", {
+	size2 = UDim2.new(0, 44, 1, 0), order = 2, textSize = 11,
+	onClick = function() charBox.Text = "150" end,
+})
+makeButton(limitsRow, "200", {
+	size2 = UDim2.new(0, 44, 1, 0), order = 3, textSize = 11,
+	onClick = function() charBox.Text = "200" end,
+})
+makeButton(limitsRow, "247", {
+	size2 = UDim2.new(0, 44, 1, 0), order = 4, textSize = 11,
+	onClick = function() charBox.Text = "247" end,
+})
+
+local partsSegmented, getParts, setPartsSegmented = makeSegmented(settingsScroll, {
+	{ key = 1, text = "1 сообщение" },
+	{ key = 2, text = "до 2" },
+	{ key = 3, text = "до 3" },
+}, State.settings.maxParts, function(key) State.settings.maxParts = key end, { order = 14 })
+hintLabel("Если ИИ не уложился в лимит — текст режется на части с пометкой [1/2]. "
+	.. "Roblox режет сообщения примерно на 200 символах, поэтому по умолчанию 200.", 15)
+
+-- ── поведение ────────────────────────────────────────────────────────────────
+sectionTitle("ПОВЕДЕНИЕ", 16)
+makeToggle(settingsScroll, "Искать незнакомые слова/сленг в интернете", State.settings.useResearch, function(value)
+	State.settings.useResearch = value
+	setStatus(value and "веб-ресёрч включён" or "веб-ресёрч выключен", Theme.dim)
+end, { order = 17 })
+makeToggle(settingsScroll, "Google Search grounding (только Gemini)", State.settings.useGrounding, function(value)
+	State.settings.useGrounding = value
+end, { order = 18 })
+makeToggle(settingsScroll, "Авто-ответ на сообщения цели", State.settings.autoReply, function(value)
+	State.settings.autoReply = value
+	setStatus(value and "авто-ответ ВКЛ — следи за cooldown!" or "авто-ответ выключен",
+		value and Theme.warn or Theme.dim)
+end, { order = 19 })
+makeToggle(settingsScroll, "Показывать мои сообщения в логе", State.settings.showSelf, function(value)
+	State.settings.showSelf = value
+	App.renderLog()
+end, { order = 20 })
+makeToggle(settingsScroll, "Показывать в логе всех игроков", State.settings.showAll, function(value)
+	State.settings.showAll = value
+	App.refreshChatHeader()
+	App.renderLog()
+end, { order = 21 })
+
+-- ── авто-ответ ───────────────────────────────────────────────────────────────
+sectionTitle("АВТО-ОТВЕТ", 22)
+local triggerSegmented, getTrigger, setTriggerSegmented = makeSegmented(settingsScroll, {
+	{ key = "any",     text = "Любое" },
+	{ key = "mention", text = "Обращение ко мне" },
+	{ key = "insult",  text = "Оскорбление/триггер" },
+}, State.settings.autoTrigger, function(key) State.settings.autoTrigger = key end, { order = 23 })
+
+local timingRow = create("Frame", {
+	Parent = settingsScroll, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 24,
+})
+uilist(timingRow, Enum.FillDirection.Horizontal, 6)
+makeLabel(timingRow, "cooldown, сек:", {
+	size = 11, color = Theme.dim, size2 = UDim2.new(0, 84, 1, 0), order = 1,
+})
+local cooldownBox = makeTextBox(timingRow, "8", {
+	size2 = UDim2.new(0, 48, 1, 0), order = 2, text = tostring(State.settings.autoCooldown),
+})
+cooldownBox:GetPropertyChangedSignal("Text"):Connect(function()
+	State.settings.autoCooldown = math.floor(clampNumber(cooldownBox.Text, 3, 120, 8))
+end)
+makeLabel(timingRow, "макс/мин:", {
+	size = 11, color = Theme.dim, size2 = UDim2.new(0, 62, 1, 0), order = 3,
+})
+local perMinuteBox = makeTextBox(timingRow, "5", {
+	size2 = UDim2.new(0, 48, 1, 0), order = 4, text = tostring(State.settings.autoPerMinute),
+})
+perMinuteBox:GetPropertyChangedSignal("Text"):Connect(function()
+	State.settings.autoPerMinute = math.floor(clampNumber(perMinuteBox.Text, 1, 20, 5))
+end)
+hintLabel("Cooldown меньше 5 секунд = риск мут-бана чата. Ставь 8-15 сек и максимум 1-3 сообщения на спор.", 25)
+-- ── действия с конфигом ──────────────────────────────────────────────────────
+local configRow = create("Frame", {
+	Parent = settingsScroll, BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 30), LayoutOrder = 26,
+})
+uilist(configRow, Enum.FillDirection.Horizontal, 6)
+makeButton(configRow, " Сохранить", {
+	size2 = UDim2.new(0.25, -5, 1, 0), order = 1, textSize = 11,
+	onClick = function()
+		local ok, err = saveConfig()
+		setStatus(ok and "конфиг сохранён" or ("не сохранён: " .. tostring(err)),
+			ok and Theme.accent2 or Theme.danger)
+	end,
+})
+makeButton(configRow, " Загрузить", {
+	size2 = UDim2.new(0.25, -5, 1, 0), order = 2, textSize = 11,
+	onClick = function()
+		local ok, err = loadConfig()
+		if ok then
+			App.syncSettingsUi()
+			setStatus("конфиг загружен", Theme.accent2)
+		else
+			setStatus("не загружен: " .. tostring(err), Theme.warn)
+		end
+	end,
+})
+makeButton(configRow, "↺ Сброс", {
+	size2 = UDim2.new(0.25, -5, 1, 0), order = 3, textSize = 11,
+	onClick = function()
+		for key, value in pairs(DEFAULTS) do
+			if key ~= "keys" then State.settings[key] = value end
+		end
+		App.syncSettingsUi()
+		setStatus("настройки сброшены", Theme.warn)
+	end,
+})
+makeButton(configRow, " Скрыть", {
+	size2 = UDim2.new(0.25, -5, 1, 0), order = 4, textSize = 11,
+	onClick = function() screenGui.Enabled = false end,
+})
+hintLabel("RightCtrl — быстро скрыть/показать окно. Повторный запуск скрипта тоже показывает окно.", 27)
+
+App.syncSettingsUi = function()
+	setProviderSegmented(State.settings.provider)
+	applyProvider(State.settings.provider)
+	modelBox.Text = State.settings.model
+	setModeSegmented(State.settings.mode)
+	setLengthSegmented(State.settings.answerLen)
+	setPartsSegmented(State.settings.maxParts)
+	setTriggerSegmented(State.settings.autoTrigger)
+	charBox.Text = tostring(State.settings.maxChars)
+	cooldownBox.Text = tostring(State.settings.autoCooldown)
+	perMinuteBox.Text = tostring(State.settings.autoPerMinute)
+
+	local setters = App.toggleSetters or {}
+	local toggleValues = {
+		["Искать незнакомые слова/сленг в интернете"] = State.settings.useResearch,
+		["Google Search grounding (только Gemini)"]   = State.settings.useGrounding,
+		["Авто-ответ на сообщения цели"]              = State.settings.autoReply,
+		["Показывать мои сообщения в логе"]           = State.settings.showSelf,
+		["Показывать в логе всех игроков"]            = State.settings.showAll,
+	}
+	for label, value in pairs(toggleValues) do
+		if setters[label] then setters[label](value) end
+	end
+
+	updateCounter()
+	App.refreshChatHeader()
+	App.renderLog()
+end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+--  10. ВКЛАДКА «ИНФО»
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local infoTab = UI.tabs.info
+uipadding(infoTab, 8, 8, 8, 8)
+local infoScroll = makeScroll(infoTab, { size2 = UDim2.new(1, 0, 1, -16), gap = 0 })
+
+local INFO_TEXT = table.concat({
+	"LineOfBots • Argument Edition v" .. APP_VERSION .. "  (" .. executorName() .. ")",
+	"",
+	"КАК ОТВЕЧАТЬ",
+	"1. Вкладка «Цели»: отметь одного или нескольких игроков кружком/кнопкой «Цель».",
+	"2. Вкладка «Чат»: тут идут сообщения выбранных игроков (кнопка «Фильтр» — показать всех).",
+	"3. Нажми «↩» у нужного сообщения — оно станет контекстом ответа.",
+	"4. Впиши свой текст (или оставь пустым) и нажми:",
+	"     • «✎ ИИ-переписать» — ИИ переделает твой черновик в аргумент и вставит в поле;",
+	"     • «⚡ ИИ-ответ» — ИИ сам ответит на сообщение цели и отправит в чат;",
+	"     • «➤ Отправить» — отправить то, что в поле (без ИИ).",
+	"5. Длинный текст автоматически режется на части по лимиту символов.",
+	"",
+	"РЕЖИМЫ",
+	"• Спокойный — вежливо, холодно, по фактам: «уточните, кто такой \"нему\"?», разбор тезиса,",
+	"   требование конкретики, указание логических ошибок, короткий контрольный вопрос.",
+	"• Средний — то же плюс нажим, ирония и сравнения.",
+	"• Жёсткий — резкий сленг, давление, сарказм. Без мата, слюров, угроз и доксинга.",
+	"",
+	"ВЕБ-РЕСЁРЧ",
+	"• Незнакомые слова и сленг из сообщения противника уходят в Urban Dictionary,",
+	"   Wikipedia и DuckDuckGo — их значения подставляются в промпт как факты.",
+	"• У Gemini дополнительно включается Google Search grounding (живой поиск).",
+	"",
+	"КЛЮЧИ API",
+	"• Gemini: aistudio.google.com/apikey  (модель gemini-3.5-flash-lite)",
+	"• DeepSeek: platform.deepseek.com  (модель deepseek-flash = V4.1-Flash)",
+	"Ключи хранятся только на этом устройстве в " .. CONFIG_FILE .. ".",
+	"",
+	"АВТО-ОТВЕТ",
+	"• Включается в «Настройках». Срабатывает только на сообщения выбранных целей,",
+	"   с cooldown и лимитом сообщений в минуту — чтобы не получить мут за спам.",
+	"",
+	"ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ",
+	"Скрипт не взламывает игру и ничего не отправляет от твоего имени без нажатия кнопки,",
+	"но автоматические сообщения в чате противоречат правилам Roblox — возможен мут/бан.",
+	"Используй по своей ответственности.",
+}, "\n")
+
+create("TextLabel", {
+	Parent = infoScroll,
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	Text = INFO_TEXT,
+	TextColor3 = Theme.text,
+	TextSize = 12,
+	Font = Theme.font,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	TextWrapped = true,
+})
+-- ══════════════════════════════════════════════════════════════════════════════
+--  11. ЧАТ: ПРИЁМ И ОТПРАВКА СООБЩЕНИЙ
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- ── разбивка текста под лимит символов ───────────────────────────────────────
+local ELLIPSIS = "..."          -- ASCII-многоточие: ровно 3 байта, в отличие от «…»
+local PREFIX_LENGTH = 6         -- длина префикса "[1/2] " при максимум 3 частях
+
+local function splitSentences(text)
+	local out, current = {}, {}
+	for index = 1, #text do
+		local char = text:sub(index, index)
+		table.insert(current, char)
+		if char == "." or char == "!" or char == "?" or char == "\n" then
+			table.insert(out, table.concat(current))
+			current = {}
+		end
+	end
+	if #current > 0 then table.insert(out, table.concat(current)) end
+	return out
+end
+
+local function wrapWords(text, limit)
+	local chunks, buffer = {}, ""
+	for word in text:gmatch("%S+") do
+		while #word > limit do
+			if #buffer > 0 then
+				table.insert(chunks, buffer)
+				buffer = ""
+			end
+			table.insert(chunks, word:sub(1, limit))
+			word = word:sub(limit + 1)
+		end
+		if #buffer == 0 then
+			buffer = word
+		elseif (#buffer + 1 + #word) <= limit then
+			buffer = buffer .. " " .. word
+		else
+			table.insert(chunks, buffer)
+			buffer = word
+		end
+	end
+	if #buffer > 0 then table.insert(chunks, buffer) end
+	return chunks
+end
+
+local function packText(text, limit)
+	local result = {}
+	for _, sentence in ipairs(splitSentences(text)) do
+		local clean = trim(sentence)
+		if clean ~= "" then
+			if #clean <= limit then
+				local last = result[#result]
+				if last and (#last + 1 + #clean) <= limit then
+					result[#result] = last .. " " .. clean
+				else
+					table.insert(result, clean)
+				end
+			else
+				for _, piece in ipairs(wrapWords(clean, limit)) do
+					table.insert(result, piece)
+				end
+			end
+		end
+	end
+	if #result == 0 then table.insert(result, trim(text)) end
+	return result
+end
+
+local function capParts(parts, limit, maxParts)
+	if #parts <= maxParts then return parts end
+	local keep = {}
+	for index = 1, maxParts - 1 do keep[index] = parts[index] end
+	local tail = table.concat(parts, " ", maxParts, #parts)
+	if #tail > limit then
+		tail = string.sub(tail, 1, math.max(1, limit - #ELLIPSIS)) .. ELLIPSIS
+	end
+	keep[maxParts] = tail
+	return keep
+end
+
+local function prepareMessages(text, maxParts)
+	local limit = math.max(40, State.settings.maxChars or 200)
+	maxParts = maxParts or State.settings.maxParts or 2
+
+	local parts = capParts(packText(text, limit), limit, maxParts)
+	if #parts > 1 then
+		-- освобождаем место под префикс вида "[1/2] "
+		local room = math.max(20, limit - PREFIX_LENGTH)
+		parts = capParts(packText(text, room), room, maxParts)
+	end
+
+	local messages = {}
+	for index, part in ipairs(parts) do
+		if #parts > 1 then
+			local prefix = ("[%d/%d] "):format(index, #parts)
+			local room = limit - #prefix
+			if #part > room then
+				part = string.sub(part, 1, math.max(1, room - #ELLIPSIS)) .. ELLIPSIS
+			end
+			part = prefix .. part
+		elseif #part > limit then
+			part = string.sub(part, 1, math.max(1, limit - #ELLIPSIS)) .. ELLIPSIS
+		end
+		messages[index] = part
+	end
+	return messages
+end
+
+-- ── отправка ─────────────────────────────────────────────────────────────────
+local cachedChannel = nil
+
+local function getTextChannel()
+	if cachedChannel and cachedChannel.Parent then return cachedChannel end
+	local channels = TextChatService:FindFirstChild("TextChannels")
+	if channels then
+		cachedChannel = channels:FindFirstChild("RBXGeneral")
+			or channels:FindFirstChildWhichIsA("TextChannel", true)
+	end
+	return cachedChannel
+end
+
+local function echoOwnMessage(text)
+	if State.settings.showSelf == false then return end
+	pushLog({
+		name = LocalPlayer.Name,
+		display = LocalPlayer.DisplayName,
+		userId = LocalPlayer.UserId,
+		text = text,
+		isSelf = true,
+		time = os.date("%H:%M:%S"),
+	})
+end
+
+local function sendChatMessage(text)
+	local clean = trim(text)
+	if clean == "" then return false, "пустой текст" end
+
+	local channel = getTextChannel()
+	if channel then
+		local ok = pcall(function() channel:SendAsync(clean) end)
+		if ok then
+			echoOwnMessage(clean)
+			return true
+		end
+	end
+
+	local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+	local sayRequest = chatEvents and chatEvents:FindFirstChild("SayMessageRequest")
+	if sayRequest then
+		local ok = pcall(function() sayRequest:FireServer(clean, "All") end)
+		if ok then
+			echoOwnMessage(clean)
+			return true
+		end
+	end
+
+	local remote = ReplicatedStorage:FindFirstChild("SayMessageRequest")
+	if remote and remote:IsA("RemoteEvent") then
+		local ok = pcall(function() remote:FireServer(clean, "All") end)
+		if ok then
+			echoOwnMessage(clean)
+			return true
+		end
+	end
+
+	return false, "чат недоступен (нет TextChannel/SayMessageRequest)"
+end
+
+local function sendChatText(text, delayBetween)
+	local messages = prepareMessages(text)
+	local sent = 0
+	for index, message in ipairs(messages) do
+		local ok, err = sendChatMessage(message)
+		if not ok then return false, tostring(err) end
+		sent = sent + 1
+		if index < #messages then task.wait(delayBetween or 0.9) end
+	end
+	return true, sent
+end
+
+App.sendChatMessage = sendChatMessage
+App.sendChatText = sendChatText
+App.prepareMessages = prepareMessages
+-- ── приём сообщений ──────────────────────────────────────────────────────────
+local INSULT_WORDS = {
+	"лох", "нуб", "нубло", "дебил", "даун", "дауненок", "тупой", "тупиц", "тупизд",
+	"идиот", "кринж", "слабо", "слился", "молчи", "школьник", "читер", "позор",
+	"позорник", "мамк", "мамка", "рофл", "бомж", "днище", "днищ", "отстой",
+	"нищеброд", "нытик", "плакса", "фейк", "фулл", "бред", "чушь", "аутист", "клоун",
+	"noob", "idiot", "stupid", "clown", "kid", "trash", "bot", "ez", "skill issue",
+	"cry", "salty", "fool", "dumb", "l2p", "get good", "git gud", "garbage", "weak",
+}
+
+local function isMentioned(text)
+	local lowered = string.lower(text)
+	local myName = string.lower(LocalPlayer.Name)
+	local myDisplay = string.lower(LocalPlayer.DisplayName)
+	if string.find(lowered, myName, 1, true) then return true end
+	if myDisplay ~= myName and string.find(lowered, myDisplay, 1, true) then return true end
+	if string.find(lowered, "@" .. myName, 1, true) then return true end
+	return false
+end
+
+local function autoTriggerMatches(entry)
+	local trigger = State.settings.autoTrigger or "any"
+	if trigger == "any" then return true end
+	if trigger == "insult" then return containsAny(entry.text, INSULT_WORDS) end
+	-- mention: прямое обращение или оскорбление в мой адрес
+	return isMentioned(entry.text) or containsAny(entry.text, INSULT_WORDS)
+end
+
+local function handleIncoming(info)
+	local text = trim(info.text or "")
+	if text == "" then return end
+	local userId = tonumber(info.userId) or 0
+	if isDuplicate(info.display or info.name, text) then return end
+
+	local isSelf = (userId == LocalPlayer.UserId)
+	local entry = pushLog({
+		name = info.name or "?",
+		display = info.display or info.name or "?",
+		userId = userId,
+		text = text,
+		isSelf = isSelf,
+		time = os.date("%H:%M:%S"),
+	})
+
+	if isSelf then return end
+	if not State.targets[userId] then return end
+	if State.settings.autoReply and App.maybeAutoReply and autoTriggerMatches(entry) then
+		task.spawn(function()
+			App.maybeAutoReply(entry)
+		end)
+	end
+end
+
+local function bindChat()
+	local bound = false
+
+	pcall(function()
+		TextChatService.MessageReceived:Connect(function(message)
+			local source = message.TextSource
+			if not source then return end
+			local displayName = source.DisplayName
+			if type(displayName) ~= "string" or displayName == "" then displayName = source.Name end
+			handleIncoming({
+				userId = source.UserId or 0,
+				name = source.Name or "?",
+				display = displayName or "?",
+				text = message.Text or "",
+			})
+		end)
+		bound = true
 	end)
 
-		local scripttable = {
-		["EmergencyHamburg"] = {
-			Text = "Emergency Hamburg Script",
-			Title = "Emergency Hamburg Script",
-			Description = "dsc.gg/beanzhub",
-			Loadstring = "https://raw.githubusercontent.com/pid4k/scripts/refs/heads/main/emergencyhamburg.lua",
-			Status = "Working",
-			
+	local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+	if not chatEvents then
+		local ok, result = pcall(function()
+			return ReplicatedStorage:WaitForChild("DefaultChatSystemChatEvents", 8)
+		end)
+		if ok then chatEvents = result end
+	end
+	if chatEvents then
+		local onMessageDoneFiltering = chatEvents:FindFirstChild("OnMessageDoneFiltering")
+		if onMessageDoneFiltering then
+			onMessageDoneFiltering.OnClientEvent:Connect(function(data)
+				if type(data) ~= "table" then return end
+				local speaker = data.FromSpeaker or "?"
+				local player = findPlayerByName(speaker)
+				handleIncoming({
+					userId = player and player.UserId or 0,
+					name = player and player.Name or speaker,
+					display = player and player.DisplayName or speaker,
+					text = data.Message or "",
+				})
+			end)
+			bound = true
+		end
+	end
+
+	-- грубый запасной вариант, если оба хука не привязались
+	if not bound then
+		local function attach(player)
+			player.Chatted:Connect(function(text, recipient)
+				if recipient and recipient ~= "" and recipient ~= "All" then return end
+				handleIncoming({
+					userId = player.UserId,
+					name = player.Name,
+					display = player.DisplayName,
+					text = tostring(text),
+				})
+			end)
+		end
+		for _, player in ipairs(Players:GetPlayers()) do attach(player) end
+		Players.PlayerAdded:Connect(attach)
+	end
+
+	return bound
+end
+
+logInfo(bindChat() and "чат подключён (TextChatService/legacy)" or "чат: запасной режим (Player.Chatted)")
+-- ══════════════════════════════════════════════════════════════════════════════
+--  12. ВЕБ-РЕСЁРЧ (сленг, незнакомые слова, факты)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local STOP_WORDS = {}
+for _, word in ipairs({
+	"это", "этот", "эта", "эти", "того", "чтобы", "когда", "тоже", "также", "уже",
+	"очень", "просто", "вообще", "почему", "зачем", "потому", "который", "которая",
+	"которые", "если", "было", "быть", "будет", "буду", "есть", "нету", "даже",
+	"меня", "тебя", "мне", "тебе", "нам", "вам", "себя", "свой", "свои", "его",
+	"еще", "ещё", "или", "для", "все", "всё", "они", "как", "так", "вот", "про",
+	"чел", "человек", "люди", "игра", "игру", "игре", "роблокс", "roblox", "типа",
+	"можно", "надо", "нужно", "будто", "якобы", "вроде", "короче", "наверное",
+	"this", "that", "what", "with", "have", "your", "you", "they", "them", "then",
+	"than", "there", "where", "when", "which", "would", "could", "should", "about",
+	"because", "just", "like", "very", "much", "some", "more", "only", "also",
+	"from", "into", "over", "under", "again", "still", "even", "well", "yeah",
+	"okay", "haha", "lol", "lmao", "game", "player", "people", "thing",
+}) do
+	STOP_WORDS[string.lower(word)] = true
+end
+
+local function truncateText(text, maxLength)
+	if #text <= maxLength then return text end
+	return (string.sub(text, 1, maxLength - 3) .. "...")
+end
+
+-- Пунктуация для обрезки краёв слова.
+-- ВАЖНО: многосимвольную пунктуацию (кавычки, тире) нельзя класть в класс [...],
+-- потому что Lua работает побайтово: байты E2/80/9C/9D/9E/93/94/AB пересекаются
+-- с вторыми байтами кириллицы (М, Н, О, Г, Д, Ы) и слово разваливалось бы.
+-- Поэтому ASCII-пунктуация идёт классом, а многобайтовые символы — отдельными
+-- строковыми паттернами (строка в паттерне сравнивается побайтово и целиком).
+local EDGE_ASCII = "[\"%[%]{}(),;:!?%.%-_]+"
+local EDGE_CHARS = { "«", "»", "“", "”", "„", "…", "—", "–", "‘", "’" }
+
+local function stripEdges(raw)
+	local cleaned = raw:gsub("^" .. EDGE_ASCII, ""):gsub(EDGE_ASCII .. "$", "")
+	for _, char in ipairs(EDGE_CHARS) do
+		cleaned = cleaned:gsub("^" .. char, ""):gsub(char .. "$", "")
+	end
+	return cleaned
+end
+
+local function tokenize(text)
+	local tokens, seen = {}, {}
+	for raw in string.gmatch(tostring(text), "%S+") do
+		local cleaned = stripEdges(raw)
+		if #cleaned >= 4 and not string.match(cleaned, "^%d+$") and not seen[cleaned] then
+			seen[cleaned] = true
+			table.insert(tokens, string.lower(cleaned))
+		end
+	end
+	return tokens
+end
+
+local function urbanLookup(term)
+	local response = httpRequest({
+		url = "https://api.urbandictionary.com/v0/define?term=" .. urlEncode(term),
+		headers = { ["Accept"] = "application/json" },
+	})
+	if not response.ok or response.status ~= 200 then return nil end
+	local data = jsonDecode(response.body)
+	local list = data and data.list
+	if type(list) ~= "table" or #list == 0 then return nil end
+	local best = list[1]
+	local definition = tostring(best.definition or ""):gsub("%[", ""):gsub("%]", "")
+	definition = trim(stripTags(htmlDecode(definition)))
+	if #definition < 5 then return nil end
+	local example = tostring(best.example or ""):gsub("%[", ""):gsub("%]", "")
+	example = trim(stripTags(htmlDecode(example)))
+	local text = truncateText(definition, 420)
+	if #example > 10 then
+		text = text .. " | пример: " .. truncateText(example, 160)
+	end
+	return { source = "Urban Dictionary", text = text }
+end
+
+local function wikiLookup(term)
+	for _, lang in ipairs({ "ru", "en" }) do
+		local url = ("https://%s.wikipedia.org/w/api.php?action=query&format=json"
+			.. "&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=%s")
+			:format(lang, urlEncode(term))
+		local response = httpRequest({ url = url, headers = { ["Accept"] = "application/json" } })
+		if response.ok and response.status == 200 then
+			local data = jsonDecode(response.body)
+			local pages = data and data.query and data.query.pages
+			if type(pages) == "table" then
+				for _, page in pairs(pages) do
+					local extract = page.extract
+					if type(extract) == "string" and #extract > 40 and page.missing ~= true then
+						return {
+							source = "Wikipedia (" .. lang .. ")",
+							text = truncateText(trim(extract), 500),
+						}
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+local function ddgLookup(query)
+	local url = "https://html.duckduckgo.com/html/?q=" .. urlEncode(query) .. "&kl=ru-ru"
+	local response = httpRequest({
+		url = url,
+		headers = {
+			["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+			["Accept-Language"] = "ru,en;q=0.8",
 		},
-		["MM2"] = {
-			Text = "Murder Mystery 2",
-			Title = "Murder Mystery 2",
-			Description = "W.I.P",
-			Loadstring = "https://raw.githubusercontent.com/pid4k/scripts/main/mm2.lua",
-			Status = "Not Working",
+	})
+	if not response.ok or type(response.body) ~= "string" or #response.body < 200 then return nil end
+	local snippets = {}
+	for snippet in string.gmatch(response.body, 'result__snippet[^>]*>(.-)</a>') do
+		local clean = trim(stripTags(htmlDecode(snippet)))
+		if #clean > 30 then table.insert(snippets, clean) end
+		if #snippets >= 3 then break end
+	end
+	if #snippets == 0 then
+		for snippet in string.gmatch(response.body, 'result__snippet[^>]*>(.-)</div>') do
+			local clean = trim(stripTags(htmlDecode(snippet)))
+			if #clean > 30 then table.insert(snippets, clean) end
+			if #snippets >= 3 then break end
+		end
+	end
+	if #snippets == 0 then return nil end
+	return { source = "DuckDuckGo", text = truncateText(table.concat(snippets, " / "), 600) }
+end
+
+local function researchTerm(term)
+	if State.researchCache[term] then return State.researchCache[term] end
+	local result = urbanLookup(term) or wikiLookup(term) or ddgLookup(term .. " slang meaning")
+	State.researchCache[term] = result or { source = "нет данных", text = "" }
+	return State.researchCache[term]
+end
+
+local function researchText(text, maxTerms)
+	if State.settings.useResearch == false then return "" end
+	maxTerms = maxTerms or 3
+	local candidates = tokenize(text)
+
+	local lines, fetched = {}, 0
+	for _, term in ipairs(candidates) do
+		if not STOP_WORDS[term] then
+			local info = State.researchCache[term]
+			if not info then
+				if fetched >= maxTerms then break end
+				fetched = fetched + 1
+				info = researchTerm(term)
+			end
+			if info and info.text and info.text ~= "" then
+				table.insert(lines, ("• «%s» (%s): %s"):format(term, info.source, info.text))
+			end
+		end
+	end
+	if #lines == 0 then return "" end
+	return "ЛЕКСИКА/ФАКТЫ ИЗ ИНТЕРНЕТА (используй только это, не выдумывай):\n"
+		.. table.concat(lines, "\n")
+end
+
+local function webSearch(query)
+	return ddgLookup(query) or wikiLookup(query)
+end
+
+App.researchText = researchText
+App.webSearch = webSearch
+-- ══════════════════════════════════════════════════════════════════════════════
+--  13. ПРОМПТЫ (строгие, под 3 режима)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local BASE_PROMPT = [[
+Ты — «LineOfBots», движок аргументации для чата Roblox. Ты пишешь сообщения ЗА игрока %MYNAME%.
+Цель: в споре выиграть по существу — точными фактами, разбором чужих слов и контрольными вопросами. Не эссе, а сообщение в игровой чат.
+
+ЖЕЛЕЗНЫЕ ПРАВИЛА
+1. Язык = язык последней реплики противника. Стиль живой, как в игровом чате, но грамотный.
+2. Никакого филлера: без извинений, без «я понимаю», без «давай жить дружно», без «это лишь моё мнение».
+3. Если противник говорит обобщённо или бессмыслицей («ты дегродище», «все знают», «нему», «он такой») — сначала требуй конкретики:
+   чего не хватает (кто именно, что именно, где, когда, по какому правилу), покажи, что без этого тезис пустой,
+   и только потом добавь свой аргумент и вопрос.
+   Пример реакции на «ты дегродище»: «Уточни тезис: что именно «дегродище»? Назови конкретный поступок и время — иначе это не аргумент, а ярлык.»
+   Пример реакции на «он пристал к нему»: «Кто такой «нему»? Назови ник. Без имени твоё «пристал» не привязано ни к кому.»
+4. Разбирай именно его фразу: цитируй кусок и ломай его. Не отвечай на воображаемый тезис.
+5. Переход на личности — верни разговор к предмету спора одной фразой и потребуй аргумент вместо ярлыка.
+6. Называй логическую ошибку, если она есть: подмена тезиса, соломенное чучело, апелляция к личности, ложная дилемма, обобщение, вывод из ничего.
+7. Факт важнее мнения: одна проверяемая деталь лучше трёх «я так думаю». Не уверен — не утверждай, спроси доказательство у него.
+8. Если дан блок «ЛЕКСИКА/ФАКТЫ ИЗ ИНТЕРНЕТА» — используй его как истину и коротко ссылайся (urbandict/wikipedia).
+9. СТРОГО ЗАПРЕЩЕНО: мат, слюры, оскорбления по расе/нации/религии/полу/внешности/здоровью, угрозы, доксинг,
+   упоминание родных, обвинения в реальных преступлениях. Это недопустимо ни в одном режиме.
+10. Не раскрывай, что текст сгенерирован ИИ, если прямо не спросили. Никаких служебных пометок («Ответ:», «Вариант:»),
+    markdown, звёздочек, кавычек вокруг всего текста, эмодзи-простыней (максимум один смайл).
+11. ФОРМАТ: только текст для чата. По умолчанию одно сообщение до %LIMIT% символов. Не влезает — верни части,
+    разделяя их строкой /// (не больше %PARTS% частей, каждая до %LIMIT% символов). Никаких пояснений вокруг.
+
+%MODE%
+]]
+
+local MODE_PROMPTS = {
+	calm = [[
+РЕЖИМ: СПОКОЙНЫЙ (холодный, вежливый, уверенный).
+- Тон ровный, без эмоций и без иронии. Ты не оправдываешься, ты разбираешь.
+- Схема: короткая реакция на его тезис -> требование конкретики или доказательства -> один свой аргумент -> короткий вопрос по существу.
+- Обращайся на «вы», если он так обращается, иначе нейтрально. Ни одного грубого слова, ни одного ярлыка.
+- Никогда не защищайся и не оправдывайся: смещай бремя доказывания на противника.
+]],
+	mid = [[
+РЕЖИМ: СРЕДНИЙ (уверенный, с нажимом).
+- Тон уверенный, с легкой иронией, но без мата и без оскорблений личности.
+- Приёмы: мягкий сарказм, сравнение, показ его же противоречия («ты сам только что сказал обратное»).
+- Схема та же, что в спокойном, но добавь давление: покажи, что его фраза не по делу, и поставь неудобный вопрос.
+]],
+	hard = [[
+РЕЖИМ: ЖЁСТКИЙ (резкий, со сленгом, но строго по фактам).
+- Тон прямой, рубленые фразы, игровой сленг: «не вывозишь», «слился», «аргумент уровня «сам такой»»,
+  «ноль аргументов — две эмоции», «это не спор, это истерика».
+- Бей по логике, а не по человеку: насмешка над аргументом разрешена, над внешностью и родными — нет.
+- Каждое сообщение: удар по его логике + требование конкретики + контрольный вопрос, на который трудно ответить.
+- Жёсткость = логика плюс сленг. Мат, слюры, угрозы и доксинг запрещены так же, как и в других режимах.
+]],
+}
+local function buildSystemPrompt()
+	local mode = State.settings.mode or "calm"
+	local limit = math.max(40, State.settings.maxChars or 200)
+	local parts = math.max(1, State.settings.maxParts or 2)
+	local prompt = BASE_PROMPT
+	prompt = prompt:gsub("%%MYNAME%%", LocalPlayer.DisplayName .. " (@" .. LocalPlayer.Name .. ")")
+	prompt = prompt:gsub("%%LIMIT%%", tostring(limit))
+	prompt = prompt:gsub("%%PARTS%%", tostring(parts))
+	prompt = prompt:gsub("%%MODE%%", MODE_PROMPTS[mode] or MODE_PROMPTS.calm)
+	return prompt
+end
+
+local function buildUserPrompt(opts)
+	opts = opts or {}
+	local limit = math.max(40, State.settings.maxChars or 200)
+	local parts = math.max(1, State.settings.maxParts or 2)
+	local blocks = {}
+
+	table.insert(blocks, "КОНТЕКСТ ЧАТА (последние сообщения, формат «ник: текст»):\n"
+		.. (opts.context or "нет данных"))
+	if opts.targetName then
+		table.insert(blocks, ("ЦЕЛЬ ОТВЕТА: %s (@%s)"):format(
+			opts.targetDisplay or opts.targetName, opts.targetName))
+	end
+	if opts.theirMessage and trim(opts.theirMessage) ~= "" then
+		table.insert(blocks, "ЕГО ПОСЛЕДНЯЯ РЕПЛИКА (отвечай именно на неё):\n" .. trim(opts.theirMessage))
+	end
+	if opts.draft and trim(opts.draft) ~= "" then
+		table.insert(blocks, "МОЙ ЧЕРНОВИК — перепиши своими словами, сохрани смысл, "
+			.. "но сделай аргументированнее, короче и увереннее:\n" .. trim(opts.draft))
+	else
+		table.insert(blocks, "ЧЕРНОВИКА НЕТ: сформулируй ответ сам.")
+	end
+	if opts.research and opts.research ~= "" then
+		table.insert(blocks, opts.research)
+	end
+	if opts.extra and opts.extra ~= "" then
+		table.insert(blocks, opts.extra)
+	end
+	table.insert(blocks, ("ФОРМАТ ОТВЕТА: только текст для чата. Лимит %d символов на сообщение, частей не больше %d.")
+		:format(limit, parts))
+	return table.concat(blocks, "\n\n")
+end
+
+local function sanitizeReply(text)
+	if type(text) ~= "string" then return "" end
+	local clean = text
+	clean = clean:gsub("```[%w]*", ""):gsub("```", "")
+	-- ВАЖНО: Lua-паттерны работают побайтово, поэтому кириллицу в классах
+	-- вида [Оо] использовать нельзя — она превращается в набор байтов.
+	-- Пишем варианты написания явными строками.
+	clean = clean:gsub("^%s*Ответ%s*[:%-]%s*", "")
+	clean = clean:gsub("^%s*ответ%s*[:%-]%s*", "")
+	clean = clean:gsub("^%s*ИИ%s*[:%-]%s*", "")
+	clean = clean:gsub("^%s*ии%s*[:%-]%s*", "")
+	clean = clean:gsub("^%s*Бот%s*[:%-]%s*", "")
+	clean = clean:gsub("^%s*бот%s*[:%-]%s*", "")
+	clean = clean:gsub("^%s*Вариант%s*%d+%s*[:%-.%)]%s*", "")
+	clean = clean:gsub("^%s*%d+[%)%.]%s*", "")
+	clean = clean:gsub("^\"(.-)\"$", "%1")
+	clean = clean:gsub("^«(.-)»$", "%1")
+	clean = clean:gsub("%*%*", ""):gsub("__", "")
+	clean = clean:gsub("[\r\t]", " ")
+	clean = clean:gsub(" +", " ")
+	clean = clean:gsub(" *\n *", " ")
+	return trim(clean)
+end
+
+local function splitReplyParts(text)
+	local pieces = splitBySeparator(text, "///")
+	local cleaned = {}
+	for _, piece in ipairs(pieces) do
+		local value = sanitizeReply(piece)
+		if value ~= "" then table.insert(cleaned, value) end
+	end
+	if #cleaned == 0 then
+		local fallback = sanitizeReply(text)
+		if fallback ~= "" then table.insert(cleaned, fallback) end
+	end
+	return cleaned
+end
+-- ══════════════════════════════════════════════════════════════════════════════
+--  14. ПРОВАЙДЕРЫ: GEMINI 3.5 FLASH LITE И DEEPSEEK V4.1 FLASH
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local function postJson(url, headers, bodyTable)
+	local payload = jsonEncode(bodyTable)
+	if not payload then return { ok = false, error = "не удалось собрать JSON запроса" } end
+	local finalHeaders = {}
+	for key, value in pairs(headers or {}) do finalHeaders[key] = value end
+	finalHeaders["Content-Type"] = "application/json"
+	return httpRequest({ url = url, method = "POST", headers = finalHeaders, body = payload })
+end
+
+-- ── Gemini: POST /v1beta/models/{model}:generateContent ──────────────────────
+local function geminiCall(cfg, model, useTools, keyInQuery)
+	local url = "https://generativelanguage.googleapis.com/v1beta/models/"
+		.. model .. ":generateContent"
+	local headers = {}
+	local apiKey = trim(cfg.apiKey or "")
+	if keyInQuery then
+		url = url .. "?key=" .. urlEncode(apiKey)
+	else
+		headers["x-goog-api-key"] = apiKey
+	end
+
+	local body = {
+		systemInstruction = { parts = { { text = cfg.system } } },
+		contents = { { role = "user", parts = { { text = cfg.user } } } },
+		generationConfig = {
+			temperature = cfg.temperature or 0.7,
+			maxOutputTokens = cfg.maxTokens or 512,
+			topP = 0.95,
+			candidateCount = 1,
 		},
-["UntitledBoxingGame"] = {
-			Text = "Untitled Boxing Game Script",
-			Title = "UBG Script",
-			Description = "autododge & antifeint",
-			Loadstring = "https://raw.githubusercontent.com/pid4k/scripts/refs/heads/main/untitledboxinggame.lua",
-			Status = "Working",
-			
-		}
+		safetySettings = {
+			{ category = "HARM_CATEGORY_HARASSMENT", threshold = "BLOCK_ONLY_HIGH" },
+			{ category = "HARM_CATEGORY_HATE_SPEECH", threshold = "BLOCK_ONLY_HIGH" },
+			{ category = "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold = "BLOCK_ONLY_HIGH" },
+			{ category = "HARM_CATEGORY_DANGEROUS_CONTENT", threshold = "BLOCK_ONLY_HIGH" },
+		},
 	}
-	for i,v in scripttable do
-		local clone = gui.Placeholder:Clone()
-		clone.Parent  = scriptsearch.Parent.Scroll
-		clone.Name = i
-		clone.Text = v.Text
-		clone:SetAttribute("Description",v.Description)
-		clone:SetAttribute("Title",v.Title)
-		clone:SetAttribute("loadstring",v.Loadstring)
-		clone:SetAttribute("Status",v.Status)
-		clone.Visible = true
+	if useTools then body.tools = { { googleSearch = {} } } end
+
+	local response = postJson(url, headers, body)
+	if not response.ok then
+		return { ok = false, error = response.error or "нет связи с API", status = 0 }
 	end
-	
-	local tooltable = {}
-	for i,v in tooltable do
-		local clone = gui.Placeholder:Clone()
-		clone.Parent  = toolssearch.Parent.Scroll
-		clone.Name = i
-		clone.Text = v.Text
-		clone:SetAttribute("Description",v.Description)
-		clone:SetAttribute("Title",v.Title)
-		clone:SetAttribute("loadstring",v.Loadstring)
-		clone:SetAttribute("Status",v.Status)
-		clone.Visible = true
+	local data = jsonDecode(response.body)
+	if type(data) ~= "table" then
+		return { ok = false, error = "ответ не JSON (HTTP " .. tostring(response.status) .. ")", status = response.status }
 	end
-	for _, button in scriptsearch.Parent.Scroll:GetChildren() do
-		if button:IsA("TextButton") then
-			button.MouseButton1Click:Connect(function()
-				
-				if selectedscript == button then return end
-				popupbutton.Visible = true
-				if popupanim.PlaybackState == Enum.PlaybackState.Playing or popupanim.PlaybackState == Enum.PlaybackState.Completed then
-					local duration = 0.4
-					local goto = {BackgroundColor3 = Color3.fromRGB(42, 70, 255),
-						BackgroundTransparency = 0.4
-					}
-					local dontgotoplsicantnamestuff = {BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-						BackgroundTransparency = 0
-					}
-						local addbackgroundcolor = tweenService:Create(button,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),goto)
-						local removebackgroundcolor = nil
-						if coloredbutton ~= nil then
-						removebackgroundcolor = tweenService:Create(coloredbutton,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),dontgotoplsicantnamestuff)
-						end
-						task.delay(duration,function()
-							addbackgroundcolor:Destroy()
-						if  coloredbutton ~= nil then
-							if removebackgroundcolor then
-							removebackgroundcolor:Destroy()
-							end
-						end
-						end)
-					coloredbutton = button
-					addbackgroundcolor:Cancel()
-					if  coloredbutton ~= nil then
-						if removebackgroundcolor then
-							removebackgroundcolor:Cancel()
-						end
-					end
-					popupanim:Cancel()
-					Popup.Position = originalpopuppos
-					addbackgroundcolor:Play()
-					if removebackgroundcolor then
-						removebackgroundcolor:Play()
-					end
-					popupanim:Play()
-					button.Rotation = 0
-					buttonanim:Play()
-					changefocus(button)
-					else local duration = 0.4
-					local goto = {BackgroundColor3 = Color3.fromRGB(42, 70, 255),
-						BackgroundTransparency = 0.4
-					}
-					local dontgotoplsicantnamestuff = {BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-						BackgroundTransparency = 0
-					}
-					local addbackgroundcolor = tweenService:Create(button,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),goto)
-					local removebackgroundcolor = tweenService:Create(coloredbutton,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),dontgotoplsicantnamestuff)
-					task.delay(duration,function()
-						addbackgroundcolor:Destroy()
-						removebackgroundcolor:Destroy()
-					end)
-					coloredbutton = button
-					popupanim:Play()
-					buttonanim:Play()
-					addbackgroundcolor:Play()
-					if coloredbutton ~= nil then
-						if removebackgroundcolor then
-							removebackgroundcolor:Play()
-						end
-					end
-					changefocus(button)
-				end
-			end)
-		end
-	end
-	for _, button in toolssearch.Parent.Scroll:GetChildren() do
-		if button:IsA("TextButton") then
-			button.MouseButton1Click:Connect(function()
-				if selectedscript == button then return end
-				popupbutton.Visible = true
-				if popupanim.PlaybackState == Enum.PlaybackState.Playing or popupanim.PlaybackState == Enum.PlaybackState.Completed then
-					local duration = 0.4
-					local goto = {BackgroundColor3 = Color3.fromRGB(42, 70, 255),
-						BackgroundTransparency = 0.4
-					}
-					local dontgotoplsicantnamestuff = {BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-						BackgroundTransparency = 0
-					}
-					local addbackgroundcolor = tweenService:Create(button,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),goto)
-					local removebackgroundcolor = nil
-					if coloredbutton ~= nil then
-						removebackgroundcolor = tweenService:Create(coloredbutton,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),dontgotoplsicantnamestuff)
-					end
-					task.delay(duration,function()
-						addbackgroundcolor:Destroy()
-						if  coloredbutton ~= nil then
-							if removebackgroundcolor then
-								removebackgroundcolor:Destroy()
-							end
-						end
-					end)
-					coloredbutton = button
-					addbackgroundcolor:Cancel()
-					if  coloredbutton ~= nil then
-						if removebackgroundcolor then
-							removebackgroundcolor:Cancel()
-						end
-					end
-					popupanim:Cancel()
-					Popup.Position = originalpopuppos
-					addbackgroundcolor:Play()
-					if removebackgroundcolor then
-						removebackgroundcolor:Play()
-					end
-					popupanim:Play()
-					button.Rotation = 0
-					buttonanim:Play()
-					changefocus(button)
-				else local duration = 0.4
-					local goto = {BackgroundColor3 = Color3.fromRGB(42, 70, 255),
-						BackgroundTransparency = 0.4
-					}
-					local dontgotoplsicantnamestuff = {BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-						BackgroundTransparency = 0
-					}
-					local addbackgroundcolor = tweenService:Create(button,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),goto)
-					local removebackgroundcolor = tweenService:Create(coloredbutton,TweenInfo.new(duration,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),dontgotoplsicantnamestuff)
-					task.delay(duration,function()
-						addbackgroundcolor:Destroy()
-						removebackgroundcolor:Destroy()
-					end)
-					coloredbutton = button
-					popupanim:Play()
-					buttonanim:Play()
-					addbackgroundcolor:Play()
-					if coloredbutton ~= nil then
-						if removebackgroundcolor then
-							removebackgroundcolor:Play()
-						end
-					end
-					changefocus(button)
-				end
-			end)
-		end
-	end
-	popupbutton.MouseButton1Click:Connect(function()
-		local dontgotoplsicantnamestuff = {BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-			BackgroundTransparency = 0
+	if data.error then
+		return {
+			ok = false,
+			error = tostring(data.error.message or "ошибка API"),
+			status = response.status,
 		}
-		backanim:Play()
-		backanimbutton:Play()
-		selectedscript = nil
-		local removebackgroundcolor = tweenService:Create(coloredbutton,TweenInfo.new(0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.In,0,false),dontgotoplsicantnamestuff)
-		removebackgroundcolor:Play()
-		coloredbutton = nil
-		task.wait(0.2)
-		popupbutton.Visible = false
-	end)
-	
-	scriptsearch:GetPropertyChangedSignal("Text"):Connect(function()
-		local text = string.lower(scriptsearch.Text)
-		for _, link in scriptsearch.Parent.Scroll:GetChildren() do
-			if link:IsA("TextButton") then
-				if string.find(string.lower(link.Text),text,1,true) then
-					link.Visible = true
-				else
-					link.Visible = false
+	end
+
+	local candidate = data.candidates and data.candidates[1]
+	local parts = candidate and candidate.content and candidate.content.parts
+	local text = ""
+	if type(parts) == "table" then
+		for _, part in ipairs(parts) do
+			if type(part.text) == "string" then text = text .. part.text end
+		end
+	end
+	if trim(text) == "" then
+		local reason = (data.promptFeedback and data.promptFeedback.blockReason)
+			or (candidate and candidate.finishReason) or "нет данных"
+		return { ok = false, error = "пустой ответ модели (" .. tostring(reason) .. ")", status = response.status }
+	end
+
+	local sources = 0
+	local grounding = candidate and candidate.groundingMetadata
+	if type(grounding) == "table" and type(grounding.groundingChunks) == "table" then
+		sources = #grounding.groundingChunks
+	end
+	return { ok = true, text = text, status = response.status, sources = sources, model = model }
+end
+
+local providers = {}
+
+providers.gemini = {
+	key = "gemini",
+	label = "Google Gemini",
+	models = PROVIDER_MODELS.gemini,
+	generate = function(cfg)
+		local apiKey = trim(cfg.apiKey or "")
+		if apiKey == "" then
+			return { ok = false, error = "укажи API-ключ Gemini во вкладке «Настройки»" }
+		end
+		local model = trim(cfg.model or "")
+		if model == "" then model = PROVIDER_MODELS.gemini[1] end
+
+		local attempts = {}
+		if cfg.useSearch then table.insert(attempts, { tools = true, query = false }) end
+		table.insert(attempts, { tools = false, query = false })
+		table.insert(attempts, { tools = false, query = true })
+
+		local lastError = nil
+		for _, attempt in ipairs(attempts) do
+			local result = geminiCall(cfg, model, attempt.tools, attempt.query)
+			if result.ok then return result end
+			lastError = result
+			local lowered = string.lower(tostring(result.error or ""))
+			if result.status == 404 or string.find(lowered, "not found", 1, true)
+				or string.find(lowered, "not supported", 1, true) then
+				break
+			end
+		end
+
+		for _, fallback in ipairs(PROVIDER_MODELS.gemini) do
+			if fallback ~= model then
+				local result = geminiCall(cfg, fallback, false, false)
+				if result.ok then return result end
+				lastError = result
+			end
+		end
+		return lastError or { ok = false, error = "Gemini не ответил" }
+	end,
+}
+-- ── DeepSeek: POST /chat/completions (модель deepseek-flash = V4.1-Flash) ─────
+providers.deepseek = {
+	key = "deepseek",
+	label = "DeepSeek",
+	models = PROVIDER_MODELS.deepseek,
+	generate = function(cfg)
+		local apiKey = trim(cfg.apiKey or "")
+		if apiKey == "" then
+			return { ok = false, error = "укажи API-ключ DeepSeek во вкладке «Настройки»" }
+		end
+		local model = trim(cfg.model or "")
+		if model == "" then model = PROVIDER_MODELS.deepseek[1] end
+
+		local function attempt(targetModel, withThinkingFlag)
+			local body = {
+				model = targetModel,
+				messages = {
+					{ role = "system", content = cfg.system },
+					{ role = "user", content = cfg.user },
+				},
+				stream = false,
+				max_tokens = cfg.maxTokens or 512,
+				temperature = cfg.temperature or 0.7,
+			}
+			if withThinkingFlag then body.thinking = { type = "disabled" } end
+
+			local response = postJson("https://api.deepseek.com/chat/completions",
+				{ ["Authorization"] = "Bearer " .. apiKey }, body)
+			if not response.ok then
+				return { ok = false, error = response.error or "нет связи с API", status = 0 }
+			end
+			local data = jsonDecode(response.body)
+			if type(data) ~= "table" then
+				return { ok = false, error = "ответ не JSON (HTTP " .. tostring(response.status) .. ")", status = response.status }
+			end
+			if data.error then
+				return { ok = false, error = tostring(data.error.message or "ошибка API"), status = response.status }
+			end
+			local choice = data.choices and data.choices[1]
+			local message = (choice and choice.message) or {}
+			local text = message.content
+			if type(text) ~= "string" or trim(text) == "" then text = message.reasoning_content end
+			if type(text) ~= "string" or trim(text) == "" then
+				return { ok = false, error = "пустой ответ модели", status = response.status }
+			end
+			return { ok = true, text = text, status = response.status, model = targetModel }
+		end
+
+		local result = attempt(model, true)
+		if not result.ok and result.status == 400 then
+			result = attempt(model, false)
+		end
+		if not result.ok then
+			for _, fallback in ipairs(PROVIDER_MODELS.deepseek) do
+				if fallback ~= model then
+					local retry = attempt(fallback, true)
+					if retry.ok then return retry end
+					result = retry
 				end
 			end
 		end
-	end)
-	toolssearch:GetPropertyChangedSignal("Text"):Connect(function()
-		local text = string.lower(toolssearch.Text)
-		for _, link in toolssearch.Parent.Scroll:GetChildren() do
-			if link:IsA("TextButton") then
-				if string.find(string.lower(link.Text),text,1,true) then
-					link.Visible = true
-				else
-					link.Visible = false
-				end
-			end
-		end
-	end)
-	
-	settingsfolder.Scroll.SkipButton.MouseButton1Click:Connect(function()
-		if settingsfolder.Scroll.SkipButton.BackgroundTransparency == 0 then -- on
-			writevariable(settingsfile,2,"false")
-			settingsfolder.Scroll.SkipButton.BackgroundTransparency = 1
+		return result
+	end,
+}
+
+local function getProvider()
+	local key = State.settings.provider or "gemini"
+	return providers[key] or providers.gemini, providers[key] and key or "gemini"
+end
+
+-- ── единая точка генерации ───────────────────────────────────────────────────
+local function generateReply(opts)
+	opts = opts or {}
+	local provider, providerKey = getProvider()
+	local mode = State.settings.mode or "calm"
+	local answerLen = State.settings.answerLen or "short"
+
+	local system = opts.system or buildSystemPrompt()
+	local user = opts.user or buildUserPrompt(opts)
+
+	local result = provider.generate({
+		apiKey = State.keys[providerKey],
+		model = opts.model or State.settings.model,
+		system = system,
+		user = user,
+		temperature = MODE_TEMP[mode] or 0.7,
+		maxTokens = ANSWER_TOKENS[answerLen] or 320,
+		useSearch = opts.useSearch == true and State.settings.useGrounding ~= false,
+	})
+
+	if not result.ok then
+		State.lastAiError = tostring(result.error or "неизвестная ошибка")
+		return { ok = false, error = State.lastAiError }
+	end
+
+	local parts = splitReplyParts(result.text)
+	if #parts == 0 then
+		State.lastAiError = "модель вернула пустой текст"
+		return { ok = false, error = State.lastAiError }
+	end
+
+	local joined = table.concat(parts, " ")
+	State.lastAiText = joined
+	State.lastAiError = ""
+	return {
+		ok = true,
+		text = joined,
+		parts = parts,
+		messages = prepareMessages(joined),
+		provider = providerKey,
+		model = result.model or State.settings.model,
+		sources = result.sources or 0,
+	}
+end
+
+App.generateReply = generateReply
+
+-- ── тест соединения ─────────────────────────────────────────────────────────
+App.testConnection = function()
+	if State.generating then
+		setStatus("уже идёт запрос, подожди", Theme.warn)
+		return
+	end
+	local provider, providerKey = getProvider()
+	if trim(State.keys[providerKey] or "") == "" then
+		setStatus(("нет API-ключа для %s"):format(provider.label), Theme.danger)
+		return
+	end
+	State.generating = true
+	setStatus(("проверяю %s / %s ..."):format(provider.label, tostring(State.settings.model)), Theme.warn)
+	task.spawn(function()
+		local result = provider.generate({
+			apiKey = State.keys[providerKey],
+			model = State.settings.model,
+			system = "Ты тестовый помощник. Отвечай одним словом.",
+			user = "Ответь одним словом: ок",
+			temperature = 0,
+			maxTokens = 16,
+			useSearch = false,
+		})
+		State.generating = false
+		if result.ok then
+			setStatus(("OK: %s / %s ответил: %s")
+				:format(provider.label, tostring(result.model or State.settings.model),
+					truncateText(trim(result.text), 30)), Theme.accent2)
 		else
-			writevariable(settingsfile,2,"true")
-			settingsfolder.Scroll.SkipButton.BackgroundTransparency =0
+			setStatus(("ошибка: %s"):format(tostring(result.error)), Theme.danger)
 		end
 	end)
 end
-task.spawn(SCRIPT_5d)
+-- ══════════════════════════════════════════════════════════════════════════════
+--  15. ДЕЙСТВИЯ: ИИ-ОТВЕТ, ПЕРЕПИСАТЬ, ОТПРАВИТЬ, АВТО-ОТВЕТ
+-- ══════════════════════════════════════════════════════════════════════════════
 
-return UI["1"], require;
+local function buildContext(entry)
+	local context = recentContext(16, true)
+	local targetName, targetDisplay, theirMessage = nil, nil, nil
+
+	if entry then
+		targetName = entry.name
+		targetDisplay = entry.display
+		theirMessage = entry.text
+	else
+		local targets = targetList()
+		if #targets > 0 then
+			local player = targets[1]
+			targetName = player.Name
+			targetDisplay = player.DisplayName
+			local last = lastMessageFrom(player.UserId)
+			if last then theirMessage = last.text end
+		end
+	end
+	return context, targetName, targetDisplay, theirMessage
+end
+
+local function modeLabel()
+	local names = { calm = "спокойный", mid = "средний", hard = "жёсткий" }
+	return names[State.settings.mode] or "спокойный"
+end
+
+-- entry — сообщение цели (может быть nil), draft — мой черновик,
+-- action — "draft" (вставить в поле) | "send" (сразу отправить)
+local function runGeneration(entry, draft, action, label)
+	if State.generating then
+		setStatus("запрос уже выполняется, подожди", Theme.warn)
+		return
+	end
+
+	local context, targetName, targetDisplay, theirMessage = buildContext(entry)
+	if not targetName and (not draft or trim(draft) == "") then
+		setStatus("нужна цель (вкладка «Цели») или свой черновик в поле", Theme.warn)
+		return
+	end
+
+	State.generating = true
+	setStatus(("⏳ %s • режим: %s"):format(label or "ИИ думает", modeLabel()), Theme.accent)
+
+	task.spawn(function()
+		local research = ""
+		if State.settings.useResearch ~= false then
+			local source = tostring(theirMessage or "") .. " " .. tostring(draft or "")
+			local ok, text = pcall(researchText, source, 2)
+			if ok and type(text) == "string" then research = text end
+		end
+
+		local result = generateReply({
+			context = context,
+			targetName = targetName,
+			targetDisplay = targetDisplay,
+			theirMessage = theirMessage,
+			draft = draft,
+			research = research,
+			useSearch = true,
+		})
+		State.generating = false
+
+		if not result.ok then
+			setStatus("ошибка ИИ: " .. tostring(result.error), Theme.danger)
+			return
+		end
+
+		local suffix = result.sources > 0 and (" • источников: %d"):format(result.sources) or ""
+
+		if action == "send" then
+			local messages = result.messages
+			for index, message in ipairs(messages) do
+				local ok, err = sendChatMessage(message)
+				if not ok then
+					setStatus("не отправлено: " .. tostring(err), Theme.danger)
+					return
+				end
+				if index < #messages then task.wait(0.9) end
+			end
+			setStatus(("отправлено: %d сообщ. • %s%s"):format(#messages, tostring(result.model), suffix),
+				Theme.accent2)
+		else
+			App.setDraft(result.text)
+			setStatus("текст готов — проверь в поле ввода и жми «Отправить»" .. suffix, Theme.accent2)
+		end
+	end)
+end
+
+App.generateForEntry = function(entry, sendNow)
+	runGeneration(entry, nil, sendNow and "send" or "draft")
+end
+
+App.generateForPlayer = function(userId, sendNow)
+	local entry = lastMessageFrom(userId)
+	if not entry then
+		setStatus("у этого игрока ещё нет сообщений в логе", Theme.warn)
+		return
+	end
+	runGeneration(entry, nil, sendNow and "send" or "draft")
+end
+
+App.chatActions = {}
+
+App.chatActions.rewrite = function()
+	local draft = App.getDraft()
+	runGeneration(State.replyTo, draft, "draft", "переписываю черновик")
+end
+
+App.chatActions.autoReply = function()
+	runGeneration(State.replyTo, nil, "send", "ИИ отвечает")
+end
+
+App.chatActions.send = function()
+	local draft = trim(App.getDraft())
+	if draft == "" then
+		setStatus("поле ввода пустое", Theme.warn)
+		return
+	end
+	task.spawn(function()
+		local ok, sent = sendChatText(draft, 0.9)
+		if ok then
+			App.setDraft("")
+			App.setReplyContext(nil)
+			setStatus(("отправлено: %d сообщ."):format(sent), Theme.accent2)
+		else
+			setStatus("не отправлено: " .. tostring(sent), Theme.danger)
+		end
+	end)
+end
+
+App.chatActions.clear = function()
+	App.setDraft("")
+	App.setReplyContext(nil)
+	setStatus("поле и контекст ответа очищены", Theme.dim)
+end
+
+App.maybeAutoReply = function(entry)
+	if State.generating then return end
+
+	local now = os.clock()
+	local fresh = {}
+	for _, stamp in ipairs(State.autoStamps) do
+		if (now - stamp) < 60 then table.insert(fresh, stamp) end
+	end
+	State.autoStamps = fresh
+
+	local maxPerMinute = math.max(1, State.settings.autoPerMinute or 5)
+	if #State.autoStamps >= maxPerMinute then
+		setStatus("лимит авто-ответов в минуту исчерпан", Theme.warn)
+		return
+	end
+
+	local cooldown = math.max(3, State.settings.autoCooldown or 8)
+	local lastStamp = State.autoStamps[#State.autoStamps]
+	if lastStamp and (now - lastStamp) < cooldown then return end
+
+	table.insert(State.autoStamps, now)
+	runGeneration(entry, nil, "send", "авто-ответ")
+end
+-- ══════════════════════════════════════════════════════════════════════════════
+--  16. ИНИЦИАЛИЗАЦИЯ, ХОТКЕЙ, ВОССТАНОВЛЕНИЕ КОНФИГА
+-- ══════════════════════════════════════════════════════════════════════════════
+
+Players.PlayerAdded:Connect(function()
+	task.defer(function() refreshPlayers() end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	PlayerInfo[player.UserId] = nil
+	State.targets[player.UserId] = nil
+	task.defer(function()
+		refreshPlayers()
+		emit("targets", targetList())
+	end)
+end)
+
+-- RightCtrl (или F4) — скрыть/показать окно
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.F4 then
+		screenGui.Enabled = not screenGui.Enabled
+	end
+end)
+
+local restored, restoreMessage = loadConfig()
+if not restored then
+	logInfo("конфиг не загружен: " .. tostring(restoreMessage))
+end
+
+App.syncSettingsUi()
+App.setDraft("")
+App.setReplyContext(nil)
+selectTab("targets")
+refreshPlayers()
+App.refreshChatHeader()
+App.renderLog()
+
+if not HTTP_FN then
+	setStatus("нет HTTP-функции экзекьютора — ИИ не сможет подключиться к API", Theme.danger)
+	logInfo("ВНИМАНИЕ: экзекьютор не даёт request()/http_request() — запросы к API работать не будут.")
+elseif restored then
+	setStatus("конфиг загружен, готов к спору", Theme.accent2)
+else
+	setStatus("готов • впиши API-ключ во вкладке «Настройки»", Theme.warn)
+end
+
+screenGui.Enabled = true
+
+-- доступ из консоли экзекьютора: LineOfBots.chatActions.send() и т.п.
+ENV.LineOfBots = App
+App.State = State
+App.UI = UI
+
+-- подгонка размеров, если GUI создан до полной загрузки камеры
+task.defer(function()
+	task.wait(1.5)
+	pcall(function()
+		local camera = workspace.CurrentCamera
+		if not camera then return end
+		local view = camera.ViewportSize
+		local size = window.AbsoluteSize
+		local newX, newY = size.X, size.Y
+		if size.X > view.X then newX = math.max(320, view.X - 16) end
+		if size.Y > view.Y then newY = math.max(280, view.Y - 32) end
+		if newX ~= size.X or newY ~= size.Y then
+			window.Size = UDim2.new(0, newX, 0, newY)
+		end
+	end)
+end)
+
+print([[
+================================================================
+  LineOfBots — Argument Edition v]] .. APP_VERSION .. [[  загружен
+----------------------------------------------------------------
+  Вкладка «Цели»      — выбери одного или нескольких игроков
+  Вкладка «Чат»       — лог, «↩ Ответить», «✎ ИИ-переписать», «⚡ ИИ-ответ»
+  Вкладка «Настройки» — провайдер (Gemini 3.5 Flash-Lite / DeepSeek V4.1 Flash),
+                        API-ключ, режим (спокойный/средний/жёсткий), лимит символов
+  RightCtrl / F4      — скрыть или показать окно
+----------------------------------------------------------------
+  API: Gemini — aistudio.google.com/apikey
+       DeepSeek — platform.deepseek.com
+  Помни: спам в чате наказывается мут-баном. Ставь cooldown 8+ сек.
+================================================================
+]])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
