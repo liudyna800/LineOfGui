@@ -6157,8 +6157,12 @@ function lobSmartWalkStart()
                             gw.moving = false
                         else
                             gw.moving = false
-                            if gw.arrivedAt == 0 then gw.arrivedAt = now end
-                            pcall(function() smoothLookAt(tr.Position) end)
+                            if gw.arrivedAt == 0 then
+                                gw.arrivedAt = now
+                                -- повернуться к игроку ОДИН раз на подходе (не каждый тик,
+                                -- иначе бот крутится между целью и говорящими)
+                                pcall(function() smoothLookAt(tr.Position) end)
+                            end
                             -- пробуем заговорить с молчуном (один раз)
                             if not spokeRecently and (gw.greeted or 0) == 0 then
                                 gw.greeted = now
@@ -6167,14 +6171,14 @@ function lobSmartWalkStart()
                             -- рядом и молчит давно — уходим к другому
                             local silentSince = math.max(spokeAt, gw.arrivedAt or 0)
                             if (now - silentSince) > 15 then
-                                gw.avoid[target.UserId] = now + 15
+                                gw.avoid[target.UserId] = now + 45
                                 gw.target = nil
                             end
                             task.wait(0.5)
                         end
                         -- периодически меняем собеседника, даже если он говорит
                         if gw.target and (now - (gw.targetSince or now)) > 45 then
-                            gw.avoid[target.UserId] = now + 10
+                            gw.avoid[target.UserId] = now + 25
                             gw.target = nil
                         end
                     end
