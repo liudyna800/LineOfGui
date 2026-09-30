@@ -5751,6 +5751,25 @@ end
 -- §CAM_LOOK
 local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
+    -- v20 Beta 3: анти-верчение. Кулдаун (не чаще раза в 1.5с) + в толпе (>3 рядом) не крутимся.
+    local now0 = os.clock()
+    if (now0 - (_lookAtAt or 0)) < 1.5 then return end
+    do
+        local r0 = getLocalRootPart()
+        if not r0 then return end
+        local nearN = 0
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= Players.LocalPlayer then
+                local pr = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+                if pr and (pr.Position - r0.Position).Magnitude < 18 then
+                    nearN = nearN + 1
+                    if nearN > 3 then break end
+                end
+            end
+        end
+        if nearN > 3 then return end
+    end
+    _lookAtAt = now0
     -- Проверяем ОБЕ системы движения: старую (_isFollowing/_isGoing) и новую (FollowManager)
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
     -- FollowManager объявлен ниже — проверяем через глобал, не вызывает nil-crash
