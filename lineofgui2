@@ -2589,6 +2589,14 @@ local function sendBotMessage(text)
     text = normalizeOneLine(text)
     if text == "" then return end
 
+    -- v20 Beta 3: антидубль исходящих — одинаковый текст дважды за 2с не отправляем
+    -- (лечит дубли в режиме ходьбы и при двойной обработке одного сообщения)
+    _lastSentText = _lastSentText or ""
+    _lastSentAt = _lastSentAt or 0
+    if text == _lastSentText and (os.clock() - _lastSentAt) < 2 then return end
+    _lastSentText = text
+    _lastSentAt = os.clock()
+
     local maxLen = 90
     local function deliver(part, depth)
         depth = depth or 0
