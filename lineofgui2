@@ -262,7 +262,6 @@ local function saveSettings()
             "AvatarAwareness=" .. b(cs.AvatarAwareness, false),
             "UsePlayerName="   .. b(cs.UsePlayerName,   true),
             "FollowConfirm="   .. b(cs.FollowConfirm,   true),
-            "TokenEconomy="    .. b(cs.TokenEconomy,    false),
             "ReplyCache="      .. b(cs.ReplyCache,      false),
             "SearchNotice="    .. b(cs.SearchNotice,    true),
             "SmartWalk="       .. b(cs.SmartWalk,       false),
@@ -332,7 +331,6 @@ local function loadSettings()
         cs.AvatarAwareness = getBool("AvatarAwareness", false)
         cs.UsePlayerName   = getBool("UsePlayerName",   true)
         cs.FollowConfirm   = getBool("FollowConfirm",   true)
-        cs.TokenEconomy    = getBool("TokenEconomy",    false)
         cs.ReplyCache      = getBool("ReplyCache",      false)
         cs.SearchNotice    = getBool("SearchNotice",    true)
         cs.SmartWalk       = getBool("SmartWalk",       false)
@@ -676,7 +674,7 @@ ClientSettings = {
     UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
     ActionsEnabled = true,  -- v16:
     InventoryEnabled = true, -- v20 Beta 2: brat/ispolzovat predmety iz inventarya команды и эмоции
-    TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
+    TokenEconomy = true,    -- v21: экономия токенов ВСЕГДА включена (короткий промпт, меньше расход)
     ReplyCache = false,     -- v20 Beta 3: кэш ответов ИИ (повторный вопрос — мгновенно, без запроса)
     SearchNotice = true,    -- v20 Beta 3: заготовленные сообщения "ищу в интернете/вики…" во время поиска
     SmartWalk = false,      -- v20 Beta 3: умная ходьба (бот сам ходит, ищет собеседников, бродит)
@@ -753,7 +751,7 @@ do
     if cs2.FollowConfirm   == nil then cs2.FollowConfirm   = true  end
     if cs2.AutoReply       == nil then cs2.AutoReply       = false end
     if cs2.WebSearch       == nil then cs2.WebSearch       = false end
-    if cs2.TokenEconomy    == nil then cs2.TokenEconomy    = false end
+    cs2.TokenEconomy = true  -- v21: жёстко включено, сохранённое значение игнорируется
     if cs2.ReplyCache      == nil then cs2.ReplyCache      = false end
     if cs2.SearchNotice    == nil then cs2.SearchNotice    = true  end
     if cs2.SmartWalk       == nil then cs2.SmartWalk       = false end
@@ -10702,17 +10700,7 @@ makeToggleRow(
     end
 )
 
--- v16: Экономия токенов
-makeToggleRow(
-    automation,
-    "⚡ Экономия токенов",
-    "Сокращает промпт для эмоций/команд. Меньше токенов, но ИИ может чуть хуже понимать контекст.",
-    ClientSettings.TokenEconomy == true,
-    function(state)
-        ClientSettings.TokenEconomy = state
-        saveSettings()
-    end
-)
+-- v21: «Экономия токенов» убрана как тоггл — теперь всегда включена (это фикс, не опция)
 
 -- v20 Beta 3: Кэширование ответов
 makeToggleRow(
