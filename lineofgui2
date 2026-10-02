@@ -5871,7 +5871,7 @@ function lobLineOfMemoryGet(userId)
     if userId == nil then return nil end
     local p = _LOM.profiles[userId]
     if not p then
-        p = { facts = {}, summary = "", name = "", lastSeen = os.clock(), updatedAt = 0, sinceUpdate = 0, busy = false }
+        p = { facts = {}, summary = "", name = "", lastSeen = os.clock(), updatedAt = 0, sinceUpdate = 0, busy = false, scheduled = false }
         _LOM.profiles[userId] = p
     end
     p.lastSeen = os.clock()
@@ -5883,9 +5883,11 @@ function lobLineOfMemoryBuildContext(userId)
     if not lobLineOfMemoryActive() then return "" end
     local p = lobLineOfMemoryGet(userId)
     if not p then return "" end
-    if (p.sinceUpdate or 0) >= _LOM_SUMMARIZE_AFTER and not p.busy then
+    if (p.sinceUpdate or 0) >= _LOM_SUMMARIZE_AFTER and not p.busy and not p.scheduled then
         p.sinceUpdate = 0
-        task.spawn(function() pcall(lobLineOfMemorySummarize, userId) end)
+        p.scheduled = true
+        -- откладываем, чтобы обобщение не конкурировало с ответом за rate-limit
+        task.delay(5, function() pcall(lobLineOfMemorySummarize, userId) end)
     end
     local parts = {}
     if p.summary and p.summary ~= "" then table.insert(parts, p.summary) end
@@ -5913,9 +5915,11 @@ end
 
 -- Сжимает накопленный диалог в короткий профиль. Дёшево: 1 запрос, мало токенов.
 function lobLineOfMemorySummarize(userId)
-    if not lobLineOfMemoryActive() then return end
     local p = _LOM.profiles[userId]
-    if not p or p.busy then return end
+    if not p then return end
+    p.scheduled = false
+    if not lobLineOfMemoryActive() then return end
+    if p.busy then return end
     local buf = _LOM.turns[userId]
     if not buf or #buf == 0 then return end
     p.busy = true
