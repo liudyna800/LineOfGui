@@ -2202,6 +2202,7 @@ local function makeSystemPrompt(settings)
                 "[DO:wave]=hi/bye  [DO:laugh]=haha/lol  [DO:agree]=yes  [DO:disagree]=no\n" ..
                 "[DO:shrug]=idk  [DO:dance]=dance  [DO:spin]=spin/крутись  [DO:jump]=jump  [DO:goto]=come here\n" ..
                 "[DO:follow]=follow me  [DO:stop]=stop  [DO:cheer]=nice/gg  [DO:sad]=rip\n" ..
+                "[DO:stay]=останься со мной/побудь  [DO:leave]=уходи/хватит\n" ..
                 "spin=крутиться НЕ танцевать! Example: [DO:laugh]haha  покрутись→[DO:spin]")
         else
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -2270,7 +2271,7 @@ local function makeSystemPrompt(settings)
     -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
     -- v20 Beta 2: honesty about abilities (static, fast)
     table.insert(parts,
-        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
+        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop/stay/leave), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
@@ -3394,6 +3395,21 @@ local ACTION_HANDLERS = {
         end
     end,
     stop     = function(_) stopFollowing() end,
+    -- v22: ИИ может управлять умной ходьбой
+    stay     = function(p)
+        local tgt = p or _smartWalk.target
+        if tgt and tgt.UserId then
+            _smartWalk.stayLockUid = tgt.UserId
+            _smartWalk.stayLockUntil = os.clock() + (_SW and _SW.STAY_LOCK_SEC or 120)
+            _smartWalk.nudgeStage = 0
+        end
+    end,
+    leave    = function(_)
+        if _smartWalk.target then
+            _smartWalk.state = "winddown"
+            _smartWalk.windUntil = os.clock() + (_SW and _SW.WIND_DOWN or 2.5)
+        end
+    end,
     -- ── Прыжки (1-10) ─────────────────────────────────────────────────────
     jump     = function(_) doJump(1) end,
     jump2    = function(_) doJump(2) end,
@@ -6182,7 +6198,8 @@ _smartWalk = {
     state = "wander", socialSince = 0, stayUntil = 0, windUntil = 0,
     lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
     nudgeStage = 0, lastNudgeAt = 0, sessionChats = 0, lastCountedChatAt = 0,
-    saidGoodbyeNudge = false,
+    saidGoodbyeNudge = false, travelSince = 0, stayLockUid = nil, stayLockUntil = 0,
+    botReplyAt = {}, swEventAt = {},
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6212,15 +6229,20 @@ _SW = {
     REVISIT_MIN    = 60,   -- через сколько минимум вернуться к знакомому
     REVISIT_MAX    = 150,
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
-    APPROACH_MAX   = 28,   -- максимум секунд на один подход
+    APPROACH_MAX   = 10,   -- максимум секунд на один подход (чаще переоцениваем)
     WANDER_MIN     = 18,
     WANDER_MAX     = 70,
     CLEAN_CD       = 60,
     OFFSET         = 2.5,  -- отступ вбок, чтобы не вставать в лицо/в путь
     REPATH_MOVE    = 8,    -- если цель ушла на столько от точки пути — пересчёт сразу
-    CATCHUP        = true, -- спринт при погоне за бегущим
+    CATCHUP        = true, -- лёгкий спринт только на КОРОТКОМ догоне
     CATCHUP_SPEED  = 20,
     CATCHUP_MAX    = 2.5,  -- секунд на один спринт
+    CATCHUP_DIST   = 60,   -- спринт только если цель ближе этого
+    GIVEUP_SPEED   = 26,   -- выше обычного бега (~16): не гонимся за «убегающим»
+    GIVEUP_DIST    = 60,   -- ...если он ещё и дальше этого
+    TRAVEL_MAX     = 20,   -- максимум секунд на добирание к одной цели
+    STAY_LOCK_SEC  = 120,  -- [DO:stay] держит визит к игроку
     CROWD_RADIUS   = 7,    -- радиус «компании» вокруг цели
     CROWD_PENALTY  = 140,  -- штраф за переполненную компанию
     LEASH          = 130,  -- не уходить дальше от дома при блуждании
@@ -6377,6 +6399,8 @@ end
 function lobSmartNudge(p, stage)
     if not ClientSettings.AutoReply then return end
     if not p or not p.Parent then return end
+    -- не подначиваем сразу после ответа бота
+    if (os.clock() - ((_smartWalk.botReplyAt or {})[p.UserId] or 0)) < 5 then return end
     local qk = "swn:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
     local stageText
@@ -6465,6 +6489,8 @@ function lobSmartGreet(p)
     if not ClientSettings.AutoReply then return end
     if not p or not p.Parent then return end
     local now = os.clock()
+    -- не здороваемся, если бот уже отвечал этому игроку только что (анти-дубль)
+    if (now - ((_smartWalk.botReplyAt or {})[p.UserId] or 0)) < 15 then return end
     local g = _smartWalk.greetAt
     if (now - (g[p.UserId] or 0)) < 120 then return end
     if (now - (_smartWalk.lastGreetAt or 0)) < 8 then return end
@@ -6708,6 +6734,7 @@ function lobSmartWalkStart()
                                 if rr2 and (rr2.affinity or 0) > 0 then
                                     rr2.revisitAt = os.clock() + math.random(_SW.REVISIT_MIN, _SW.REVISIT_MAX)
                                 end
+                                if gw.stayLockUid == target.UserId then gw.stayLockUid = nil gw.stayLockUntil = 0 end
                                 gw.target = nil
                                 gw.leaveAt = now
                                 gw.state = "wander"
@@ -6716,61 +6743,78 @@ function lobSmartWalkStart()
                         elseif dist > _SW.RESUME_DIST or (gw.moving and dist > _SW.STOP_DIST) then
                             gw.moving = true
                             gw.arrivedAt = 0
-                            -- живая цель: предсказание движения + личный отступ вбок, чтобы не толкаться
-                            local function livePos()
-                                local c = target.Character
-                                local r = c and c:FindFirstChild("HumanoidRootPart")
-                                if not r then return nil end
-                                local v = r.AssemblyLinearVelocity
-                                local off = r.CFrame.RightVector * (_SW.OFFSET * (gw.offsetSide or 1))
-                                return r.Position + Vector3.new(v.X, 0, v.Z) * 0.35 + off
-                            end
-                            local function cancelApproach()
-                                return (not gw.active) or gw.target ~= target
-                                    or (gw.avoid[target.UserId] or 0) > os.clock()
-                            end
-                            -- догоняем бегущего: короткий спринт с честным откатом скорости
+                            if (gw.travelSince or 0) == 0 then gw.travelSince = now end
+
                             local tvel = tr.AssemblyLinearVelocity
                             local tspeed = Vector3.new(tvel.X, 0, tvel.Z).Magnitude
-                            local boost = _SW.CATCHUP and tspeed > 8 and dist > 25
-                            local baseWS = hum.WalkSpeed
-                            if boost then
-                                gw.baseWalkSpeed = baseWS
-                                pcall(function() hum.WalkSpeed = _SW.CATCHUP_SPEED end)
-                            end
-                            local res
-                            if boost then
-                                local okB = pcall(function()
-                                    res = lobSmartApproach(livePos, cancelApproach, _SW.STOP_DIST, _SW.CATCHUP_MAX)
-                                end)
-                                if not okB then res = "fail" end
-                                pcall(function() hum.WalkSpeed = baseWS end)
-                                gw.baseWalkSpeed = nil
-                            else
-                                res = lobSmartApproach(livePos, cancelApproach, _SW.STOP_DIST)
-                            end
-                            gw.moving = false
-                            if res == "nopath" then
+                            -- НЕ играем в догонялки: цель убегает быстро/далеко → ищем нового
+                            local giveUp = false
+                            if tspeed > _SW.GIVEUP_SPEED and dist > _SW.GIVEUP_DIST then giveUp = true end
+                            if (now - (gw.travelSince or now)) > _SW.TRAVEL_MAX and dist > _SW.STOP_DIST then giveUp = true end
+
+                            if giveUp then
+                                gw.moving = false
                                 gw.reachFail[target.UserId] = os.clock() + _SW.REACH_FAIL_SEC
-                                gw.avoid[target.UserId] = os.clock() + 20
+                                gw.avoid[target.UserId] = os.clock() + 45
                                 gw.target = nil
-                            elseif res == "stuck" then
-                                gw.stuckCount = (gw.stuckCount or 0) + 1
-                                local c0 = Players.LocalPlayer.Character
-                                local r0 = c0 and c0:FindFirstChild("HumanoidRootPart")
-                                if r0 then
-                                    table.insert(gw.stuckZones, { pos = r0.Position, expireAt = os.clock() + _SW.STUCK_ZONE_SEC })
-                                    -- короткий шаг вбок, чтобы разъехаться с препятствием
-                                    pcall(function() hum:MoveTo(r0.Position + r0.CFrame.RightVector * (gw.offsetSide or 1) * 8) end)
-                                    task.wait(0.5)
+                                gw.travelSince = 0
+                            else
+                                -- живая цель: предсказание движения + личный отступ вбок
+                                local function livePos()
+                                    local c = target.Character
+                                    local r = c and c:FindFirstChild("HumanoidRootPart")
+                                    if not r then return nil end
+                                    local v = r.AssemblyLinearVelocity
+                                    local off = r.CFrame.RightVector * (_SW.OFFSET * (gw.offsetSide or 1))
+                                    return r.Position + Vector3.new(v.X, 0, v.Z) * 0.35 + off
                                 end
-                                pcall(function() hum.Jump = true end)
-                                if gw.stuckCount >= 2 then
-                                    gw.avoid[target.UserId] = os.clock() + _SW.AVOID_SEC
+                                local function cancelApproach()
+                                    return (not gw.active) or gw.target ~= target
+                                        or (gw.avoid[target.UserId] or 0) > os.clock()
+                                end
+                                -- спринт только на КОРОТКОМ догоне, чтобы не превращать в погоню
+                                local boost = _SW.CATCHUP and tspeed > 8 and dist > 25 and dist < _SW.CATCHUP_DIST
+                                local baseWS = hum.WalkSpeed
+                                if boost then
+                                    gw.baseWalkSpeed = baseWS
+                                    pcall(function() hum.WalkSpeed = _SW.CATCHUP_SPEED end)
+                                end
+                                local res
+                                if boost then
+                                    local okB = pcall(function()
+                                        res = lobSmartApproach(livePos, cancelApproach, _SW.STOP_DIST, _SW.CATCHUP_MAX)
+                                    end)
+                                    if not okB then res = "fail" end
+                                    pcall(function() hum.WalkSpeed = baseWS end)
+                                    gw.baseWalkSpeed = nil
+                                else
+                                    res = lobSmartApproach(livePos, cancelApproach, _SW.STOP_DIST)
+                                end
+                                gw.moving = false
+                                if res == "nopath" then
+                                    gw.reachFail[target.UserId] = os.clock() + _SW.REACH_FAIL_SEC
+                                    gw.avoid[target.UserId] = os.clock() + 20
                                     gw.target = nil
+                                    gw.travelSince = 0
+                                elseif res == "stuck" then
+                                    gw.stuckCount = (gw.stuckCount or 0) + 1
+                                    local c0 = Players.LocalPlayer.Character
+                                    local r0 = c0 and c0:FindFirstChild("HumanoidRootPart")
+                                    if r0 then
+                                        table.insert(gw.stuckZones, { pos = r0.Position, expireAt = os.clock() + _SW.STUCK_ZONE_SEC })
+                                        pcall(function() hum:MoveTo(r0.Position + r0.CFrame.RightVector * (gw.offsetSide or 1) * 8) end)
+                                        task.wait(0.5)
+                                    end
+                                    pcall(function() hum.Jump = true end)
+                                    if gw.stuckCount >= 2 then
+                                        gw.avoid[target.UserId] = os.clock() + _SW.AVOID_SEC
+                                        gw.target = nil
+                                        gw.travelSince = 0
+                                    end
+                                elseif res == "arrived" then
+                                    gw.stuckCount = 0
+                                    gw.travelSince = 0
                                 end
-                            elseif res == "arrived" then
-                                gw.stuckCount = 0
                             end
                         else
                             -- SOCIAL: реалистичный визит (подход → общение → сворачивание)
@@ -6782,6 +6826,7 @@ function lobSmartWalkStart()
                                 gw.sessionChats = 0
                                 gw.nudgeStage = 0
                                 gw.saidGoodbyeNudge = false
+                                gw.travelSince = 0
                                 lobRelNoteMet(target.UserId, target.DisplayName or target.Name)
                             end
                             if gw.arrivedAt == 0 then
@@ -6826,6 +6871,15 @@ function lobSmartWalkStart()
                             local rr = _rel[target.UserId]
                             local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
 
+                            -- [DO:stay] от ИИ: держимся с этим игроком, не уходим и не подначиваем
+                            local stayLocked = (gw.stayLockUid == target.UserId) and (now < (gw.stayLockUntil or 0))
+                            if stayLocked then
+                                gw.nudgeStage = 0
+                                gw.saidGoodbyeNudge = false
+                                gw.lastInteract = now
+                                gw.stayUntil = math.max(gw.stayUntil or 0, now + _SW.CHAT_EXTEND)
+                            end
+
                             local doLeave, withFarewell = false, false
                             if saidBye then
                                 doLeave = true
@@ -6846,6 +6900,8 @@ function lobSmartWalkStart()
                                     doLeave, withFarewell = true, true
                                 end
                             end
+
+                            if stayLocked and not saidBye then doLeave = false end
 
                             if doLeave then
                                 gw.state = "winddown"
@@ -6957,6 +7013,10 @@ function lobReplyCacheServe(settings, cleanMsg, player, userId)
     local hist = getHistory(settings, userId)
     if hist then appendHistory(hist, cleanMsg, hit.text) end
     sendBotMessage(hit.text)
+    if type(userId) == "number" then
+        _smartWalk.botReplyAt = _smartWalk.botReplyAt or {}
+        _smartWalk.botReplyAt[userId] = os.clock()
+    end
     return true
 end
 
@@ -7851,6 +7911,15 @@ local function handleQueuedChat(item)
         print("[LOB] reply time: " .. string.format("%.1fs", os.clock() - _t0) .. " for: " .. tostring(item.cleaned):sub(1, 40))
         local sok, serr = pcall(sendBotMessage, cleanText)
         if not sok then print("[LOB] send FAIL: " .. tostring(serr)) end
+        -- v22: отмечаем, что бот только что говорил этому игроку (анти-дубль приветствий)
+        do
+            local ruid = item.userId
+            if item.isWorld and item.player then ruid = item.player.UserId end
+            if type(ruid) == "number" then
+                _smartWalk.botReplyAt = _smartWalk.botReplyAt or {}
+                _smartWalk.botReplyAt[ruid] = os.clock()
+            end
+        end
         -- v20 Beta 3: кладём в кэш текстовые ответы (включая теги эмоций/движения),
         -- но НЕ действия с предметами (их итог зависит от мира).
         if (not item.isWorld) and actionName ~= "take" and actionName ~= "use"
