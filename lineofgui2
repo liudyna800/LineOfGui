@@ -6181,6 +6181,8 @@ _smartWalk = {
     stuckZones = {}, home = nil, offsetSide = 1, baseWalkSpeed = nil,
     state = "wander", socialSince = 0, stayUntil = 0, windUntil = 0,
     lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
+    nudgeStage = 0, lastNudgeAt = 0, sessionChats = 0, lastCountedChatAt = 0,
+    saidGoodbyeNudge = false,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6203,6 +6205,12 @@ _SW = {
     WANDER_PAUSE   = 0.35, -- шанс остановиться осмотреться после прогулки
     WANDER_PAUSE_MIN = 1.5,
     WANDER_PAUSE_MAX = 4.0,
+    NUDGE_T1       = 15,   -- «ты тут?» если замолчал известный/общавшийся игрок
+    NUDGE_T2       = 35,   -- «почему молчишь?»
+    NUDGE_T3       = 60,   -- «будешь отвечать? скажи что-то… ладно, я пойду»
+    NUDGE_LEAVE    = 90,   -- после финальной реплики столько ждём и уходим
+    REVISIT_MIN    = 60,   -- через сколько минимум вернуться к знакомому
+    REVISIT_MAX    = 150,
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
     APPROACH_MAX   = 28,   -- максимум секунд на один подход
     WANDER_MIN     = 18,
@@ -6220,8 +6228,11 @@ _SW = {
     STUCK_ZONE_R   = 10,
 }
 
-function lobSmartWalkNoteChat(userId)
-    if userId then _lastChatAt[userId] = os.clock() end
+function lobSmartWalkNoteChat(userId, name)
+    if userId then
+        _lastChatAt[userId] = os.clock()
+        pcall(lobRelNoteChat, userId, name)
+    end
 end
 
 function lobSmartWalkLeave(userId)
@@ -6306,6 +6317,86 @@ function lobSmartFarewell(p)
     if okQ then runChatQueue(qk) end
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- §RELATIONS — память знакомств за сессию: к кому подходил, сколько общался,
+-- насколько «друг». Растёт от общения; влияет на приветствие (не «впервые»),
+-- на периодические возвращения и на отношение в самом чате.
+-- ═══════════════════════════════════════════════════════════════════════════
+_rel = _rel or {}
+function lobRelGet(uid)
+    if uid == nil then return nil end
+    local r = _rel[uid]
+    if not r then
+        r = { firstAt = os.clock(), lastSeen = os.clock(), chats = 0, meetings = 0,
+              affinity = 0, revisitAt = 0, name = "", lastApproachAt = 0 }
+        _rel[uid] = r
+    end
+    return r
+end
+function lobRelNoteChat(uid, name)
+    local r = lobRelGet(uid); if not r then return end
+    r.chats = (r.chats or 0) + 1
+    r.affinity = math.min(30, (r.affinity or 0) + 1)
+    r.lastSeen = os.clock()
+    if type(name) == "string" and name ~= "" then r.name = name:sub(1, 24) end
+end
+function lobRelNoteMet(uid, name)
+    local r = lobRelGet(uid); if not r then return end
+    r.meetings = (r.meetings or 0) + 1
+    r.lastApproachAt = os.clock()
+    r.lastSeen = os.clock()
+    if type(name) == "string" and name ~= "" then r.name = name:sub(1, 24) end
+end
+function lobRelLevel(uid)
+    local r = _rel[uid]
+    if not r then return 0, "new" end
+    local a = r.affinity or 0
+    if a >= 14 then return 2, "close friend"
+    elseif a >= 6 then return 1, "friend"
+    elseif (r.meetings or 0) > 0 or a > 0 then return 0, "acquaintance"
+    else return 0, "new" end
+end
+-- Короткий контекст для ИИ (и для чата, и для приветствия).
+function lobRelHint(uid)
+    local r = _rel[uid]
+    if not r then return "" end
+    local known = (r.meetings or 0) > 0 or (r.chats or 0) > 0
+    if not known then return "" end
+    local lvl, label = lobRelLevel(uid)
+    local nm = (r.name ~= "" and r.name) or "this player"
+    local ago = os.clock() - (r.lastSeen or os.clock())
+    local parts = { "You already know " .. nm .. " from this session (" .. label .. ")." }
+    if (r.meetings or 0) > 0 then table.insert(parts, "You have walked up to them " .. r.meetings .. " time(s).") end
+    if (r.chats or 0) > 0 then table.insert(parts, "You have exchanged about " .. r.chats .. " message(s) with them.") end
+    if ago > 45 then table.insert(parts, "Last contact was about " .. math.floor(ago) .. "s ago.") end
+    table.insert(parts, "Do NOT act like you are meeting them for the first time; treat them as someone you remember.")
+    return table.concat(parts, " ")
+end
+
+-- Эскалация при молчании знакомого: «ты тут?» → «почему молчишь?» → «ладно, я пойду».
+function lobSmartNudge(p, stage)
+    if not ClientSettings.AutoReply then return end
+    if not p or not p.Parent then return end
+    local qk = "swn:" .. tostring(p.UserId)
+    local nm = tostring(p.DisplayName or p.Name)
+    local stageText
+    if stage == 1 then
+        stageText = "They went quiet mid-hangout. Ask casually if they are still there / why they went silent. ONE short line, in your own style and language."
+    elseif stage == 2 then
+        stageText = "They still have not answered. Ask them to reply / say something, a bit impatient but still friendly. ONE short line."
+    else
+        stageText = "They keep ignoring you. Say you get it — they are quiet — and that you will head off for now, in a friendly way. ONE short line."
+    end
+    local relHint = lobRelHint(p.UserId)
+    local okQ = enqueueChatItem(qk, {
+        player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
+        cleaned = "[SYSTEM: You are hanging out with " .. nm .. (relHint ~= "" and (". " .. relHint) or "")
+            .. " " .. stageText .. "]",
+        isWorld = true,
+    }, 1)
+    if okQ then runChatQueue(qk) end
+end
+
 -- Выбор лучшего собеседника: свежесть чата, близость, спокойствие, взгляд в нашу сторону
 function lobSmartPick()
     local char = Players.LocalPlayer.Character
@@ -6353,6 +6444,12 @@ function lobSmartPick()
                             end
                         end
                         if crowd >= 2 then score = score - _SW.CROWD_PENALTY * crowd end
+                        -- знакомых ищем чаще, а по «времени навестить» — целенаправленно
+                        local rr = _rel[p.UserId]
+                        if rr then
+                            score = score + (rr.affinity or 0) * 4
+                            if (rr.revisitAt or 0) > 0 and now > rr.revisitAt then score = score + 250 end
+                        end
                         score = score + math.random() * 6
                         if score > bestScore then best, bestScore = p, score end
                     end
@@ -6375,9 +6472,17 @@ function lobSmartGreet(p)
     _smartWalk.lastGreetAt = now
     local qk = "sw:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
+    local relHint = lobRelHint(p.UserId)
+    local body
+    if relHint ~= "" then
+        body = "[SYSTEM: You are walking up to " .. nm .. " again. " .. relHint ..
+            " Greet them like an old acquaintance (NOT a first meeting) and continue where you left off. ONE short casual line, in character. If they earlier told you to go away, do not greet.]"
+    else
+        body = "[SYSTEM: You just walked up to " .. nm .. " for the first time. Greet them in ONE short casual line and try to start a light chat, in character. If they earlier told you to go away, do not greet.]"
+    end
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
-        cleaned = "[SYSTEM: You just walked up to " .. nm .. " and they stay quiet. Greet them in ONE short casual line and try to start a light chat, in character. If they earlier told you to go away, do not greet.]",
+        cleaned = body,
         isWorld = true,
     }, 1)
     if okQ then runChatQueue(qk) end
@@ -6574,6 +6679,13 @@ function lobSmartWalkStart()
                         gw.socialSince = 0
                         gw.stayUntil = 0
                         gw.lastInteract = 0
+                        gw.nudgeStage = 0
+                        gw.lastNudgeAt = 0
+                        gw.sessionChats = 0
+                        gw.lastCountedChatAt = 0
+                        gw.saidGoodbyeNudge = false
+                        local rr0 = _rel[target.UserId]
+                        if rr0 then rr0.revisitAt = 0 end
                     end
                 end
 
@@ -6592,6 +6704,10 @@ function lobSmartWalkStart()
                                 task.wait(0.25)
                             else
                                 gw.avoid[target.UserId] = now + _SW.RETURN_CD
+                                local rr2 = _rel[target.UserId]
+                                if rr2 and (rr2.affinity or 0) > 0 then
+                                    rr2.revisitAt = os.clock() + math.random(_SW.REVISIT_MIN, _SW.REVISIT_MAX)
+                                end
                                 gw.target = nil
                                 gw.leaveAt = now
                                 gw.state = "wander"
@@ -6655,11 +6771,6 @@ function lobSmartWalkStart()
                                 end
                             elseif res == "arrived" then
                                 gw.stuckCount = 0
-                                if gw.state ~= "social" then
-                                    gw.socialSince = os.clock()
-                                    gw.stayUntil = os.clock() + _SW.MIN_STAY
-                                end
-                                gw.state = "social"
                             end
                         else
                             -- SOCIAL: реалистичный визит (подход → общение → сворачивание)
@@ -6668,6 +6779,10 @@ function lobSmartWalkStart()
                                 gw.state = "social"
                                 gw.socialSince = now
                                 gw.stayUntil = now + _SW.MIN_STAY
+                                gw.sessionChats = 0
+                                gw.nudgeStage = 0
+                                gw.saidGoodbyeNudge = false
+                                lobRelNoteMet(target.UserId, target.DisplayName or target.Name)
                             end
                             if gw.arrivedAt == 0 then
                                 gw.arrivedAt = now
@@ -6676,6 +6791,13 @@ function lobSmartWalkStart()
                             end
                             if (now - (gw.lastFaceAt or 0)) > 6 then lobSmartFace(tr.Position) end
 
+                            -- считаем каждое НОВОЕ сообщение один раз
+                            if spokeAt > (gw.lastCountedChatAt or 0) then
+                                gw.lastCountedChatAt = spokeAt
+                                gw.sessionChats = (gw.sessionChats or 0) + 1
+                                gw.nudgeStage = 0
+                                gw.saidGoodbyeNudge = false
+                            end
                             local spokeRecently = (now - spokeAt) < 12
                             if spokeRecently then
                                 gw.stayUntil = math.max(gw.stayUntil or 0, now + _SW.CHAT_EXTEND)
@@ -6694,18 +6816,43 @@ function lobSmartWalkStart()
                             end
                             if looking and dist < 14 then gw.lastInteract = now end
 
-                            -- игрок попрощался → сразу сворачиваемся
                             local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
                             local lastAct = gw.lastInteract
                             if not lastAct or lastAct <= 0 then lastAct = gw.arrivedAt or now end
                             local quietFor = now - lastAct
+                            -- для «ну ты молчишь» важна тишина именно в ЧАТЕ, а не взгляд
+                            local quietChat = now - math.max(spokeAt, gw.arrivedAt or 0)
                             local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
-                            local visitOver = minMet and (now > (gw.stayUntil or 0)) and quietFor > 10
-                            local tooLong = (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30
-                            if saidBye or visitOver or tooLong then
+                            local rr = _rel[target.UserId]
+                            local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
+
+                            local doLeave, withFarewell = false, false
+                            if saidBye then
+                                doLeave = true
+                            elseif (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30 then
+                                doLeave, withFarewell = true, true
+                            elseif wasTalking then
+                                -- знакомый/общавшийся замолчал: эскалация реплик, а не резкий уход
+                                if quietChat > _SW.NUDGE_T3 and (gw.nudgeStage or 0) < 3 then
+                                    gw.nudgeStage = 3; gw.lastNudgeAt = now; gw.saidGoodbyeNudge = true; lobSmartNudge(target, 3)
+                                elseif quietChat > _SW.NUDGE_T2 and (gw.nudgeStage or 0) < 2 then
+                                    gw.nudgeStage = 2; gw.lastNudgeAt = now; lobSmartNudge(target, 2)
+                                elseif quietChat > _SW.NUDGE_T1 and (gw.nudgeStage or 0) < 1 then
+                                    gw.nudgeStage = 1; gw.lastNudgeAt = now; lobSmartNudge(target, 1)
+                                end
+                                if (gw.nudgeStage or 0) >= 3 and quietChat > _SW.NUDGE_LEAVE then doLeave = true end
+                            else
+                                if minMet and (now > (gw.stayUntil or 0)) and quietFor > 10 then
+                                    doLeave, withFarewell = true, true
+                                end
+                            end
+
+                            if doLeave then
                                 gw.state = "winddown"
                                 gw.windUntil = now + _SW.WIND_DOWN
-                                if (now - spokeAt) < 120 then lobSmartFarewell(target) end
+                                if withFarewell and not gw.saidGoodbyeNudge and (now - spokeAt) < 120 then
+                                    lobSmartFarewell(target)
+                                end
                             end
                             task.wait(0.4)
                         end
@@ -6883,6 +7030,14 @@ local function handleQueuedChat(item)
         local lomCtx = lobLineOfMemoryBuildContext(item.userId)
         if lomCtx ~= "" then
             table.insert(apiMessages, { role = "system", content = lomCtx })
+        end
+    end
+
+    -- §RELATIONS: знакомство за сессию — чтобы ИИ не вёл себя как в первый раз
+    if not item.isWorld and item.userId then
+        local rh = lobRelHint(item.userId)
+        if rh ~= "" then
+            table.insert(apiMessages, { role = "system", content = "RELATIONSHIP (session memory): " .. rh })
         end
     end
 
@@ -8005,7 +8160,7 @@ local function processChatMessage(player, rawMessage)
 
     -- v20 Beta 3: умная ходьба — кто общается; и «уйди» → отойти к другим
     if ClientSettings.SmartWalk then
-        lobSmartWalkNoteChat(player.UserId)
+        lobSmartWalkNoteChat(player.UserId, player.DisplayName or player.Name)
         if lobIsLeaveCommand(rawMessage) then lobSmartWalkLeave(player.UserId) end
         if lobIsFarewellCommand(rawMessage) then
             _smartWalk.farewellFrom = _smartWalk.farewellFrom or {}
@@ -11103,7 +11258,7 @@ makeToggleRow(
 makeToggleRow(
     automation,
     "🚶 Умная ходьба (бета)",
-    "Бот ведёт себя как живой: ищет собеседника, идёт к нему (обходит стены, перепрыгивает, не толпится, ускоряется чтобы догнать), здоровается, общается и остаётся рядом, а когда разговор затих — прощается и уходит. Не бросает активного игрока. Если с ним говорят, смотрят или просят остаться — остаётся. Без игроков гуляет недалеко от старта и иногда бормочет.",
+    "Бот ведёт себя как живой и заводит знакомства: ищет собеседника, подходит (обходит стены, перепрыгивает, не толпится, догоняет), здоровается. Чем больше общается — тем ближе считает игрока: узнаёт при новой встрече (не как впервые) и периодически сам возвращается к знакомым. Если общавшийся игрок замолчал — мягко спрашивает «ты тут? почему молчишь?» и только потом «ладно, я пойду». Не бросает активного игрока. Без игроков гуляет недалеко от старта и иногда бормочет.",
     ClientSettings.SmartWalk == true,
     function(state)
         ClientSettings.SmartWalk = state
