@@ -5935,6 +5935,12 @@ function lobLineOfMemorySummarize(userId)
 
     local model = "openai/gpt-oss-20b"
     pcall(function() if getModel and ClientSettings then model = getModel(ClientSettings) or model end end)
+    -- compound* всегда делает веб-поиск: для фоновой памяти это дорого и медленно.
+    -- Если выбран compound и есть Groq-ключ — берём дешёвый gpt-oss.
+    if tostring(model):find("compound") then
+        local gk = ClientSettings and ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq
+        if type(gk) == "string" and gk:sub(1, 4) == "gsk_" then model = "openai/gpt-oss-20b" end
+    end
     local payload = {
         model = model, temperature = 0.2, max_tokens = 140,
         messages = {
@@ -5964,7 +5970,7 @@ function lobLineOfMemorySummarize(userId)
 
     text = sanitizeUtf8(text)
     text = text:gsub("<think>.-</think>%s*", "")
-    text = text:gsub("%[%s*[Dd][Oo]:[^%]]*%]?", "")
+    text = text:gsub("%[%s*[Dd][Oo]:[^%]\n]*%]?", "")
     text = text:match("^%s*(.-)%s*$") or ""
 
     local facts = {}
@@ -10574,6 +10580,7 @@ makeToggleRow(
         if not state then
             for k in pairs(ChatHistory) do ChatHistory[k] = nil end
             for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
+            if _LOM then _LOM.profiles = {} _LOM.turns = {} end
         end
     end
 )
@@ -11167,6 +11174,7 @@ do
         -- Сбрасываем ТОЛЬКО историю разговоров — настройки не трогаем
         for k in pairs(ChatHistory) do ChatHistory[k] = nil end
         for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
+        if _LOM then _LOM.profiles = {} _LOM.turns = {} end
         -- НЕ трогаем: ClientSettings, ActionsEnabled, TokenEconomy и т.д.
         btnResetAll.Text = "✓ Память очищена"
         task.delay(2, function()
