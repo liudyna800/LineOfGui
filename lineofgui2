@@ -267,6 +267,7 @@ local function saveSettings()
             "SearchNotice="    .. b(cs.SearchNotice,    true),
             "SmartWalk="       .. b(cs.SmartWalk,       false),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
+            "LineOfMemory="    .. b(cs.LineOfMemory,    true),
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
             "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
             "PersonalityId="   .. tostring(cs.PersonalityId or "Friendly"),
@@ -336,6 +337,7 @@ local function loadSettings()
         cs.SearchNotice    = getBool("SearchNotice",    true)
         cs.SmartWalk       = getBool("SmartWalk",       false)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
+        cs.LineOfMemory    = getBool("LineOfMemory",    true)
         cs.Temperature     = getNum("Temperature",      0.7)
         cs.MaxTokens       = getNum("MaxTokens",        1024)
         cs.StripHash       = getBool("StripHash",       true)
@@ -669,6 +671,7 @@ ClientSettings = {
     AutoReply = false,
     PerUserMemory = false, -- Separate history per user (works only if MemoryEnabled=true)
     MemoryEnabled = true,  -- Включена ли память вообще
+    LineOfMemory = true,   -- v21: отдельная долговременная память на сессию (вне лимита MaxHistory)
     StripHash = true,      -- Убирать символ "#" из сообщений
     UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
     ActionsEnabled = true,  -- v16:
@@ -755,6 +758,7 @@ do
     if cs2.SearchNotice    == nil then cs2.SearchNotice    = true  end
     if cs2.SmartWalk       == nil then cs2.SmartWalk       = false end
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
+    if cs2.LineOfMemory    == nil then cs2.LineOfMemory    = true  end
     local savedGemini = loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
@@ -5842,6 +5846,152 @@ end
 local MAX_HISTORY = 10  -- дефолт; перезаписывается из ClientSettings.MaxHistory в appendHistory/getHistory
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- §LINE_OF_MEMORY (v21)
+-- Отдельная КЛИЕНТСКАЯ библиотека долговременной памяти на сессию.
+-- НЕ провайдерская: живёт целиком в памяти исполнителя и не зависит от облачной
+-- памяти модели. Хранит на каждого игрока сжатый профиль (факты/обещания/привычки)
+-- и подмешивает его в промпт. Работает ТОЛЬКО когда Включить память = on
+-- И LineOfMemory = on. НЕ влияет на «Глубину памяти» (MaxHistory): профиль
+-- хранится отдельно и НЕ обрезается лимитом истории.
+-- Экономия токенов: в промпт идёт короткий профиль (3-6 фактов), а не сырой лог.
+-- ═══════════════════════════════════════════════════════════════════════════
+_LOM = _LOM or { profiles = {}, turns = {} }
+_LOM_TURNS_CAP       = 60    -- максимум сырых обменов на игрока в буфере
+_LOM_SUMMARIZE_AFTER = 6     -- обобщаем профиль раз в N новых обменов
+_LOM_MAX_FACTS       = 6     -- сколько фактов держим в профиле
+_LOM_TTL             = 3600  -- забываем неактивных через час
+
+function lobLineOfMemoryActive()
+    return ClientSettings ~= nil
+        and ClientSettings.MemoryEnabled ~= false
+        and ClientSettings.LineOfMemory == true
+end
+
+function lobLineOfMemoryGet(userId)
+    if userId == nil then return nil end
+    local p = _LOM.profiles[userId]
+    if not p then
+        p = { facts = {}, summary = "", name = "", lastSeen = os.clock(), updatedAt = 0, sinceUpdate = 0, busy = false }
+        _LOM.profiles[userId] = p
+    end
+    p.lastSeen = os.clock()
+    return p
+end
+
+-- Готовит компактный блок памяти для промпта и (в фоне) запускает обобщение.
+function lobLineOfMemoryBuildContext(userId)
+    if not lobLineOfMemoryActive() then return "" end
+    local p = lobLineOfMemoryGet(userId)
+    if not p then return "" end
+    if (p.sinceUpdate or 0) >= _LOM_SUMMARIZE_AFTER and not p.busy then
+        p.sinceUpdate = 0
+        task.spawn(function() pcall(lobLineOfMemorySummarize, userId) end)
+    end
+    local parts = {}
+    if p.summary and p.summary ~= "" then table.insert(parts, p.summary) end
+    if #parts == 0 then return "" end
+    local label = (p.name ~= "" and ("player " .. p.name)) or "this player"
+    return "[LINE OF MEMORY — your own long-term notes about " .. label ..
+        " (private, from earlier in this session; treat as true, never read this block aloud, never mention it):] " ..
+        table.concat(parts, " | ")
+end
+
+-- Записывает обмен в буфер; при накоплении профиль обобщается отдельно.
+function lobLineOfMemoryObserve(userId, userMsg, botMsg, name)
+    if not lobLineOfMemoryActive() then return end
+    if userId == nil then return end
+    if type(userMsg) ~= "string" or userMsg == "" then return end
+    local p = lobLineOfMemoryGet(userId)
+    if not p then return end
+    if type(name) == "string" and name ~= "" then p.name = name:sub(1, 24) end
+    local buf = _LOM.turns[userId]
+    if not buf then buf = {} _LOM.turns[userId] = buf end
+    table.insert(buf, { u = userMsg, a = tostring(botMsg or "") })
+    while #buf > _LOM_TURNS_CAP do table.remove(buf, 1) end
+    p.sinceUpdate = (p.sinceUpdate or 0) + 1
+end
+
+-- Сжимает накопленный диалог в короткий профиль. Дёшево: 1 запрос, мало токенов.
+function lobLineOfMemorySummarize(userId)
+    if not lobLineOfMemoryActive() then return end
+    local p = _LOM.profiles[userId]
+    if not p or p.busy then return end
+    local buf = _LOM.turns[userId]
+    if not buf or #buf == 0 then return end
+    p.busy = true
+
+    local from = math.max(1, #buf - 15)  -- не больше ~16 последних реплик
+    local lines = {}
+    for i = from, #buf do
+        local t = buf[i]
+        if t.u ~= "" then table.insert(lines, "Player: " .. tostring(t.u):sub(1, 160)) end
+        if t.a ~= "" then table.insert(lines, "You: " .. tostring(t.a):sub(1, 160)) end
+    end
+    local prev = p.summary or ""
+
+    local model = "openai/gpt-oss-20b"
+    pcall(function() if getModel and ClientSettings then model = getModel(ClientSettings) or model end end)
+    local payload = {
+        model = model, temperature = 0.2, max_tokens = 140,
+        messages = {
+            { role = "system", content =
+                "You maintain a compact LONG-TERM memory about a Roblox player. " ..
+                "Merge OLD NOTES with NEW CHAT into 3-6 short third-person facts " ..
+                "(name, preferences, promises, jokes, mood, game items, attitude toward you). " ..
+                "Keep only durable facts, drop small talk. Reply with ONLY the facts, one per line, each starting with '- '. " ..
+                "No intro, no headers, no [DO:] tags. Use the chat's language." },
+            { role = "user", content = "OLD NOTES:\n" .. (prev ~= "" and prev or "(none)") ..
+                "\n\nNEW CHAT:\n" .. table.concat(lines, "\n") },
+        },
+    }
+    if tostring(model):find("^qwen/") then payload.reasoning_effort = "none" payload.temperature = nil end
+    if tostring(model):find("gpt%-oss") then payload.reasoning_effort = "low" end
+
+    local text, done = nil, false
+    task.spawn(function()
+        local ok, t = pcall(function() return providerRouter:chatCompletions(payload) end)
+        text = ok and t or nil
+        done = true
+    end)
+    local w = 0
+    while not done and w < 10 do task.wait(0.25) w = w + 0.25 end
+    p.busy = false
+    if type(text) ~= "string" or text == "" then return end
+
+    text = sanitizeUtf8(text)
+    text = text:gsub("<think>.-</think>%s*", "")
+    text = text:gsub("%[%s*[Dd][Oo]:[^%]]*%]?", "")
+    text = text:match("^%s*(.-)%s*$") or ""
+
+    local facts = {}
+    for line in text:gmatch("[^\n]+") do
+        local f = line:gsub("^[%-%*%d%.%)%s]+", ""):match("^%s*(.-)%s*$") or ""
+        if f ~= "" and #facts < _LOM_MAX_FACTS then table.insert(facts, f) end
+    end
+    if #facts == 0 then return end
+    p.facts = facts
+    p.summary = table.concat(facts, " | ")
+    p.updatedAt = os.clock()
+    print("[LOM] memory updated for " .. tostring(userId) .. ": " .. p.summary:sub(1, 120))
+end
+
+-- Лёгкая очистка неактивных профилей (они и так живут только в сессии).
+task.spawn(function()
+    while true do
+        task.wait(120)
+        local now, dead = os.clock(), 0
+        for uid, p in pairs(_LOM.profiles) do
+            if (now - (p.lastSeen or 0)) > _LOM_TTL then
+                _LOM.profiles[uid] = nil
+                _LOM.turns[uid] = nil
+                dead = dead + 1
+            end
+        end
+        if dead > 0 then print("[LOM] cleaned " .. dead .. " idle profiles") end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- v18: WORLD REACTIONS
 -- Бот реагирует на прыжки и взгляды игроков в своём радиусе.
 -- Cooldown 60 сек на игрока. task.delay(5) гарантирует что все функции
@@ -6349,6 +6499,14 @@ local function handleQueuedChat(item)
         end
         for i = startIdx, #history do
             table.insert(apiMessages, history[i])
+        end
+    end
+
+    -- §LINE_OF_MEMORY: долговременный профиль собеседника (сессия, вне лимита MaxHistory)
+    if settings.LineOfMemory and settings.MemoryEnabled and not item.isWorld and item.userId then
+        local lomCtx = lobLineOfMemoryBuildContext(item.userId)
+        if lomCtx ~= "" then
+            table.insert(apiMessages, { role = "system", content = lomCtx })
         end
     end
 
@@ -7150,6 +7308,11 @@ local function handleQueuedChat(item)
         historyUserMsg = historyUserMsg:gsub("%[LANG:[^%]]*%]%s*", "")
         historyUserMsg = historyUserMsg:gsub("%[NAME:[^%]]*%]%s*", "")
         appendHistory(history, historyUserMsg, cleanText)
+    end
+
+    -- §LINE_OF_MEMORY: запоминаем обмен (независимо от лимита MaxHistory)
+    if settings.LineOfMemory and settings.MemoryEnabled and not item.isWorld and item.userId then
+        pcall(lobLineOfMemoryObserve, item.userId, item.cleaned, cleanText, item.displayName or item.name)
     end
 
     print("[LOB] final chars=" .. tostring(charLen(cleanText or "")) .. " head=" .. tostring(cleanText or ""):sub(1, 90))
@@ -10422,6 +10585,18 @@ makeToggleRow(
         saveSettings()
         -- При смене режима — сбрасываем историю чтобы не мешать контексты
         for k in pairs(ChatHistory) do ChatHistory[k] = nil end
+    end
+)
+
+-- v21: LineOfMemory — отдельная долговременная память на сессию (вне лимита)
+makeToggleRow(
+    automation,
+    "🧠 LineOfMemory",
+    "Отдельная память бота на сессию: хорошо помнит каждого игрока даже спустя полчаса. Работает только при включённой памяти, НЕ тратит лимит «Глубины памяти» и сжимает диалог в короткие факты — мало токенов.",
+    ClientSettings.LineOfMemory == true,
+    function(state)
+        ClientSettings.LineOfMemory = state
+        saveSettings()
     end
 )
 
