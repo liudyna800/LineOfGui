@@ -280,6 +280,8 @@ local function saveSettings()
             "RangeStuds="               .. tostring(math.floor(tonumber(cs.Range and cs.Range.Studs) or 50)),
             "RangeHeight="              .. tostring(math.floor(tonumber(cs.Range and cs.Range.Height) or 0)),
             "RangeIgnoreWalls="         .. b(cs.Range and cs.Range.IgnoreWalls, false),
+            "RangeShowVisualizer="      .. b(cs.Range and cs.Range.ShowVisualizer, false),
+            "RangeSelectiveMode="       .. b(cs.Range and cs.Range.SelectiveMode, false),
             "UseCustomAnimSearch="      .. b(cs.UseCustomAnimSearch, false),
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
@@ -349,6 +351,8 @@ local function loadSettings()
         cs.Range.Studs              = getNum("RangeStuds", 50)
         cs.Range.Height             = getNum("RangeHeight", 0)
         cs.Range.IgnoreWalls        = getBool("RangeIgnoreWalls", false)
+        cs.Range.ShowVisualizer     = getBool("RangeShowVisualizer", false)
+        cs.Range.SelectiveMode      = getBool("RangeSelectiveMode", false)
         cs.UseCustomAnimSearch      = getBool("UseCustomAnimSearch", false)
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
@@ -12050,22 +12054,26 @@ local percHeader = makeSectionCard(perceptionScroll, "Настройки вос�
 
 makeToggleRow(percHeader, "Радиус близости", "Ограничить бота только ближайшими игроками.", ClientSettings.Range.Enabled, function(state)
     ClientSettings.Range.Enabled = state
+    saveSettings()
     updateRangeVisualizer()
 end)
 
 makeToggleRow(percHeader, "Показать визуализатор", "Рисовать кольцо вокруг персонажа.", ClientSettings.Range.ShowVisualizer, function(state)
     ClientSettings.Range.ShowVisualizer = state
+    saveSettings()
     updateRangeVisualizer()
 end)
 
 makeToggleRow(percHeader, "Игнорировать стены", "Отвечать через стены. Если выключено — нужна прямая видимость (raycast).", ClientSettings.Range.IgnoreWalls or false, function(state)
     ClientSettings.Range.IgnoreWalls = state
+    saveSettings()
 end)
 
 -- Visualizer Card removed as per user request
 -- Slider дистанции
 makeSliderRow(perceptionScroll, "Дистанция (studs)", 1, 150, ClientSettings.Range.Studs or 50, function(val)
     ClientSettings.Range.Studs = val
+    saveSettings()
     updateRangeVisualizer()
 end)
 
@@ -12081,6 +12089,7 @@ do
     makeSliderRow(perceptionScroll, "Высота (studs)", 0, 50, initH, function(val)
         ClientSettings.Range.Height = val
         hDisp.Text = val == 0 and "OFF" or tostring(val)
+        saveSettings()
         updateRangeVisualizer()
     end)
 end
@@ -12090,6 +12099,7 @@ local selectiveSection = makeSectionCard(perceptionScroll, "Режим выбо�
 
 makeToggleRow(selectiveSection, "Включить режим выбора", "Отвечать только выбранным игрокам.", ClientSettings.Range.SelectiveMode, function(state)
     ClientSettings.Range.SelectiveMode = state
+    saveSettings()
 end)
 
 local searchBox = makeTextBox(selectiveSection, "Поиск игроков...")
