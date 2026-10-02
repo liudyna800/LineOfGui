@@ -6189,8 +6189,8 @@ _SW = {
     RESUME_DIST    = 12,   -- снова идти, если игрок отошёл
     FACE_CD        = 5,    -- как часто разворачиваться к собеседнику
     WAVE_CD        = 90,   -- кулдаун приветственной эмоции
-    SILENT_LEAVE   = 16,   -- уйти, если рядом молчат столько секунд
-    TARGET_ROTATE  = 45,   -- сменить собеседника через N секунд
+    ENGAGE_SEC     = 60,   -- оставаться с игроком ещё столько после последней активности
+    DEAD_WAIT      = 20,   -- сколько ждать респавна цели, прежде чем уйти
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
     APPROACH_MAX   = 28,   -- максимум секунд на один подход
     WANDER_MIN     = 18,
@@ -6273,8 +6273,10 @@ function lobSmartPick()
     local now = os.clock()
     local best, bestScore = nil, -1e12
     for _, p in ipairs(Players:GetPlayers()) do
+        -- avoid игнорируем, если игрок только что заговорил — он явно хочет общения
         if p ~= Players.LocalPlayer and lobSmartReachable(p, now)
-            and ((_smartWalk.avoid[p.UserId] or 0) < now) then
+            and (((_smartWalk.avoid[p.UserId] or 0) < now)
+                or ((_lastChatAt[p.UserId] or 0) > now - 15)) then
             local tchar = p.Character
             local pr = tchar and tchar:FindFirstChild("HumanoidRootPart")
             local hu = tchar and tchar:FindFirstChildOfClass("Humanoid")
@@ -6507,7 +6509,7 @@ function lobSmartWalkStart()
                     if gone or dangerous then
                         target = nil
                     elseif dead then
-                        if (now - (gw.targetSince or now)) > 12 then target = nil end
+                        if (now - (gw.targetSince or now)) > _SW.DEAD_WAIT then target = nil end
                     end
                     if not target then gw.target = nil gw.targetSince = 0 end
                 end
@@ -6602,29 +6604,36 @@ function lobSmartWalkStart()
                                 if (now - spokeAt) > 20 and (gw.greeted or 0) == 0 then lobSmartWave() end
                             end
                             if (now - (gw.lastFaceAt or 0)) > 6 then lobSmartFace(tr.Position) end
-                            local spokeRecently = (now - spokeAt) < _SW.SILENT_LEAVE
+                            local spokeRecently = (now - spokeAt) < 12
                             if (gw.greeted or 0) == 0 and not spokeRecently then
                                 gw.greeted = now
                                 lobSmartGreet(target)
                             end
-                            -- молчат долго — тихо уходим к другому
-                            if not spokeRecently and (now - (gw.arrivedAt or now)) > _SW.SILENT_LEAVE then
-                                gw.avoid[target.UserId] = now + 40
+                            -- УДЕРЖАНИЕ: не бросаем активного собеседника.
+                            -- Активность = недавняя реплика ИЛИ взгляд вблизи. Уходим только
+                            -- если активность была давно. Игрок НЕ в бане — заговорит, вернёмся.
+                            local looking = false
+                            local toUs2 = root.Position - tr.Position
+                            if toUs2.Magnitude > 1 then
+                                looking = tr.CFrame.LookVector:Dot(toUs2.Unit) > 0.45
+                            end
+                            local lastInteract = math.max(spokeAt, gw.arrivedAt or 0)
+                            if looking and dist < 14 then lastInteract = now end
+                            if (now - lastInteract) > _SW.ENGAGE_SEC then
+                                gw.avoid[target.UserId] = now + 25
                                 gw.target = nil
+                                gw.leaveAt = now  -- короткая пауза, чтобы не разворачиваться рывком
                             end
                             task.wait(0.4)
                         end
-                        -- периодически меняем собеседника, даже если он говорит
-                        if gw.target and (now - (gw.targetSince or now)) > _SW.TARGET_ROTATE then
-                            gw.avoid[target.UserId] = now + 20
-                            gw.target = nil
-                        end
-                    elseif (now - (gw.targetSince or now)) > 12 then
+                    elseif (now - (gw.targetSince or now)) > _SW.DEAD_WAIT then
                         gw.target = nil
                     end
                 end
 
                 if not gw.target then
+                    -- короткая пауза перед уходом — не разворачиваемся рывком на 180°
+                    if (now - (gw.leaveAt or 0)) < 1.2 then task.wait(0.3) return end
                     -- никого нет: бредём по достижимой точке и изредка бормочем
                     lobSmartWander(function() return (not gw.active) or gw.target ~= nil end)
                     if (now - (gw.lastIdle or 0)) > _SW.IDLE_TALK_CD then
