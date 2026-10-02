@@ -6179,6 +6179,8 @@ _smartWalk = {
     greeted = 0, moving = false, arrivedAt = 0, stuckCount = 0,
     wanderDest = nil, lastFaceAt = 0, lastWaveAt = 0, lastClean = 0,
     stuckZones = {}, home = nil, offsetSide = 1, baseWalkSpeed = nil,
+    state = "wander", socialSince = 0, stayUntil = 0, windUntil = 0,
+    lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6189,8 +6191,18 @@ _SW = {
     RESUME_DIST    = 12,   -- снова идти, если игрок отошёл
     FACE_CD        = 5,    -- как часто разворачиваться к собеседнику
     WAVE_CD        = 90,   -- кулдаун приветственной эмоции
-    ENGAGE_SEC     = 60,   -- оставаться с игроком ещё столько после последней активности
     DEAD_WAIT      = 20,   -- сколько ждать респавна цели, прежде чем уйти
+    MIN_STAY       = 20,   -- минимум секунд у собеседника после подхода
+    MAX_STAY       = 300,  -- максимум визита, если разговор не поддерживают
+    MAX_TARGET_DIST = 250, -- не идти через всю карту к далёкому молчуну
+    FRESH_CHAT     = 20,   -- ...но свежую реплику догоняем даже издалека
+    CHAT_EXTEND    = 45,   -- каждая свежая реплика продлевает визит на столько
+    WIND_DOWN      = 2.5,  -- сколько постоять/попрощаться перед уходом
+    FAREWELL_CD    = 90,   -- не прощаемся чаще, чем раз в N секунд
+    RETURN_CD      = 30,   -- сколько не возвращаться к тому же игроку после ухода
+    WANDER_PAUSE   = 0.35, -- шанс остановиться осмотреться после прогулки
+    WANDER_PAUSE_MIN = 1.5,
+    WANDER_PAUSE_MAX = 4.0,
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
     APPROACH_MAX   = 28,   -- максимум секунд на один подход
     WANDER_MIN     = 18,
@@ -6217,6 +6229,8 @@ function lobSmartWalkLeave(userId)
     if _smartWalk.target and _smartWalk.target.UserId == userId then
         _smartWalk.target = nil
         _smartWalk.targetSince = 0
+        _smartWalk.state = "wander"
+        _smartWalk.leaveAt = os.clock()
     end
     pcall(function() stopFollowing() end)
 end
@@ -6234,6 +6248,9 @@ function lobSmartClean(now)
     end
     for uid in pairs(_lastChatAt) do
         if not Players:GetPlayerByUserId(uid) then _lastChatAt[uid] = nil end
+    end
+    for uid in pairs(_smartWalk.farewellFrom) do
+        if not Players:GetPlayerByUserId(uid) then _smartWalk.farewellFrom[uid] = nil end
     end
     for i = #_smartWalk.stuckZones, 1, -1 do
         if (_smartWalk.stuckZones[i].expireAt or 0) < now then table.remove(_smartWalk.stuckZones, i) end
@@ -6264,6 +6281,31 @@ function lobIsLeaveCommand(msg)
     return false
 end
 
+function lobIsFarewellCommand(msg)
+    local m = tostring(msg or ""):lower()
+    local words = { "пока", "покеда", "до связи", "до встречи", "прощай", "увидимся",
+        "хорошего дня", "спокойной ночи", "bye", "goodbye", "cya", "see ya", "see you", "farewell" }
+    for _, w in ipairs(words) do if m:find(w, 1, true) then return true end end
+    return false
+end
+
+-- Короткое прощание в чат (только при включённом автоответе). Редко.
+function lobSmartFarewell(p)
+    if not ClientSettings.AutoReply then return end
+    if not p or not p.Parent then return end
+    local now = os.clock()
+    if (now - (_smartWalk.lastFarewellAt or 0)) < _SW.FAREWELL_CD then return end
+    _smartWalk.lastFarewellAt = now
+    local qk = "swf:" .. tostring(p.UserId)
+    local nm = tostring(p.DisplayName or p.Name)
+    local okQ = enqueueChatItem(qk, {
+        player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
+        cleaned = "[SYSTEM: You are about to leave " .. nm .. " after a chat. Say ONE very short casual goodbye in your own style and language, then go. Do not ask a question.]",
+        isWorld = true,
+    }, 1)
+    if okQ then runChatQueue(qk) end
+end
+
 -- Выбор лучшего собеседника: свежесть чата, близость, спокойствие, взгляд в нашу сторону
 function lobSmartPick()
     local char = Players.LocalPlayer.Character
@@ -6285,32 +6327,35 @@ function lobSmartPick()
                 if not (okD and dangerous) then
                     local dist = (pr.Position - myPos).Magnitude
                     local spoke = _lastChatAt[p.UserId] or 0
-                    local score = -dist
-                    if (now - spoke) < 75 then score = score + 900 end
-                    if spoke > 0 then score = score + math.max(0, 120 - (now - spoke) * 2) end
-                    local vel = pr.AssemblyLinearVelocity
-                    score = score - Vector3.new(vel.X, 0, vel.Z).Magnitude * 2
-                    local toUs = myPos - pr.Position
-                    if toUs.Magnitude > 1 and pr.CFrame.LookVector:Dot(toUs.Unit) > 0.3 then
-                        score = score + 30
-                    end
-                    -- в транспорте/сидит — с ним сложнее взаимодействовать
-                    if hu.Seated then score = score - 120 end
-                    -- не толпиться: если вокруг цели уже компания — штраф
-                    local crowd = 0
-                    for _, q in ipairs(Players:GetPlayers()) do
-                        if q ~= p and q ~= Players.LocalPlayer then
-                            local qc = q.Character
-                            local qr = qc and qc:FindFirstChild("HumanoidRootPart")
-                            if qr and (qr.Position - pr.Position).Magnitude < _SW.CROWD_RADIUS then
-                                crowd = crowd + 1
-                                if crowd >= 4 then break end
+                    -- далёкого молчуна не догоняем, но свежую реплику — да
+                    if dist <= _SW.MAX_TARGET_DIST or (now - spoke) < _SW.FRESH_CHAT then
+                        local score = -dist
+                        if (now - spoke) < 75 then score = score + 900 end
+                        if spoke > 0 then score = score + math.max(0, 120 - (now - spoke) * 2) end
+                        local vel = pr.AssemblyLinearVelocity
+                        score = score - Vector3.new(vel.X, 0, vel.Z).Magnitude * 2
+                        local toUs = myPos - pr.Position
+                        if toUs.Magnitude > 1 and pr.CFrame.LookVector:Dot(toUs.Unit) > 0.3 then
+                            score = score + 30
+                        end
+                        -- в транспорте/сидит — с ним сложнее взаимодействовать
+                        if hu.Seated then score = score - 120 end
+                        -- не толпиться: если вокруг цели уже компания — штраф
+                        local crowd = 0
+                        for _, q in ipairs(Players:GetPlayers()) do
+                            if q ~= p and q ~= Players.LocalPlayer then
+                                local qc = q.Character
+                                local qr = qc and qc:FindFirstChild("HumanoidRootPart")
+                                if qr and (qr.Position - pr.Position).Magnitude < _SW.CROWD_RADIUS then
+                                    crowd = crowd + 1
+                                    if crowd >= 4 then break end
+                                end
                             end
                         end
+                        if crowd >= 2 then score = score - _SW.CROWD_PENALTY * crowd end
+                        score = score + math.random() * 6
+                        if score > bestScore then best, bestScore = p, score end
                     end
-                    if crowd >= 2 then score = score - _SW.CROWD_PENALTY * crowd end
-                    score = score + math.random() * 6
-                    if score > bestScore then best, bestScore = p, score end
                 end
             end
         end
@@ -6320,6 +6365,7 @@ end
 
 -- Подойти и заговорить. Троттлинг per-user (120с) + глобальный 8с против веера приветствий.
 function lobSmartGreet(p)
+    if not ClientSettings.AutoReply then return end
     if not p or not p.Parent then return end
     local now = os.clock()
     local g = _smartWalk.greetAt
@@ -6327,7 +6373,7 @@ function lobSmartGreet(p)
     if (now - (_smartWalk.lastGreetAt or 0)) < 8 then return end
     g[p.UserId] = now
     _smartWalk.lastGreetAt = now
-    local qk = 61000000 + (p.UserId % 100000)
+    local qk = "sw:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
@@ -6524,6 +6570,10 @@ function lobSmartWalkStart()
                         gw.moving = false
                         gw.stuckCount = 0
                         gw.offsetSide = (math.random() < 0.5) and 1 or -1
+                        gw.state = "travel"
+                        gw.socialSince = 0
+                        gw.stayUntil = 0
+                        gw.lastInteract = 0
                     end
                 end
 
@@ -6535,8 +6585,19 @@ function lobSmartWalkStart()
                         local spokeAt = _lastChatAt[target.UserId] or 0
                         local dist = (tr.Position - root.Position).Magnitude
 
+                        -- СВОРАЧИВАНИЕ: постояли/попрощались — уходим спокойно
+                        if gw.state == "winddown" then
+                            if now < (gw.windUntil or 0) then
+                                if (now - (gw.lastFaceAt or 0)) > 2 then lobSmartFace(tr.Position) end
+                                task.wait(0.25)
+                            else
+                                gw.avoid[target.UserId] = now + _SW.RETURN_CD
+                                gw.target = nil
+                                gw.leaveAt = now
+                                gw.state = "wander"
+                            end
                         -- ГИСТЕРЕЗИС: идём если далеко, стоим если уже близко
-                        if dist > _SW.RESUME_DIST or (gw.moving and dist > _SW.STOP_DIST) then
+                        elseif dist > _SW.RESUME_DIST or (gw.moving and dist > _SW.STOP_DIST) then
                             gw.moving = true
                             gw.arrivedAt = 0
                             -- живая цель: предсказание движения + личный отступ вбок, чтобы не толкаться
@@ -6594,35 +6655,57 @@ function lobSmartWalkStart()
                                 end
                             elseif res == "arrived" then
                                 gw.stuckCount = 0
+                                if gw.state ~= "social" then
+                                    gw.socialSince = os.clock()
+                                    gw.stayUntil = os.clock() + _SW.MIN_STAY
+                                end
+                                gw.state = "social"
                             end
                         else
-                            -- рядом: социальное взаимодействие
+                            -- SOCIAL: реалистичный визит (подход → общение → сворачивание)
                             gw.moving = false
+                            if gw.state ~= "social" then
+                                gw.state = "social"
+                                gw.socialSince = now
+                                gw.stayUntil = now + _SW.MIN_STAY
+                            end
                             if gw.arrivedAt == 0 then
                                 gw.arrivedAt = now
                                 lobSmartFace(tr.Position)
                                 if (now - spokeAt) > 20 and (gw.greeted or 0) == 0 then lobSmartWave() end
                             end
                             if (now - (gw.lastFaceAt or 0)) > 6 then lobSmartFace(tr.Position) end
+
                             local spokeRecently = (now - spokeAt) < 12
+                            if spokeRecently then
+                                gw.stayUntil = math.max(gw.stayUntil or 0, now + _SW.CHAT_EXTEND)
+                                gw.lastInteract = now
+                            end
                             if (gw.greeted or 0) == 0 and not spokeRecently then
                                 gw.greeted = now
                                 lobSmartGreet(target)
                             end
-                            -- УДЕРЖАНИЕ: не бросаем активного собеседника.
-                            -- Активность = недавняя реплика ИЛИ взгляд вблизи. Уходим только
-                            -- если активность была давно. Игрок НЕ в бане — заговорит, вернёмся.
+
+                            -- взгляд вблизи удерживает визит
                             local looking = false
                             local toUs2 = root.Position - tr.Position
                             if toUs2.Magnitude > 1 then
                                 looking = tr.CFrame.LookVector:Dot(toUs2.Unit) > 0.45
                             end
-                            local lastInteract = math.max(spokeAt, gw.arrivedAt or 0)
-                            if looking and dist < 14 then lastInteract = now end
-                            if (now - lastInteract) > _SW.ENGAGE_SEC then
-                                gw.avoid[target.UserId] = now + 25
-                                gw.target = nil
-                                gw.leaveAt = now  -- короткая пауза, чтобы не разворачиваться рывком
+                            if looking and dist < 14 then gw.lastInteract = now end
+
+                            -- игрок попрощался → сразу сворачиваемся
+                            local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
+                            local lastAct = gw.lastInteract
+                            if not lastAct or lastAct <= 0 then lastAct = gw.arrivedAt or now end
+                            local quietFor = now - lastAct
+                            local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
+                            local visitOver = minMet and (now > (gw.stayUntil or 0)) and quietFor > 10
+                            local tooLong = (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30
+                            if saidBye or visitOver or tooLong then
+                                gw.state = "winddown"
+                                gw.windUntil = now + _SW.WIND_DOWN
+                                if (now - spokeAt) < 120 then lobSmartFarewell(target) end
                             end
                             task.wait(0.4)
                         end
@@ -6632,11 +6715,22 @@ function lobSmartWalkStart()
                 end
 
                 if not gw.target then
+                    gw.state = "wander"
                     -- короткая пауза перед уходом — не разворачиваемся рывком на 180°
-                    if (now - (gw.leaveAt or 0)) < 1.2 then task.wait(0.3) return end
-                    -- никого нет: бредём по достижимой точке и изредка бормочем
-                    lobSmartWander(function() return (not gw.active) or gw.target ~= nil end)
-                    if (now - (gw.lastIdle or 0)) > _SW.IDLE_TALK_CD then
+                    if (now - (gw.leaveAt or 0)) < 1.5 then task.wait(0.3) return end
+                    -- никого нет: бредём по достижимой точке
+                    local wres = lobSmartWander(function() return (not gw.active) or gw.target ~= nil end)
+                    -- иногда останавливаемся осмотреться (как живой игрок)
+                    if wres == "arrived" and math.random() < _SW.WANDER_PAUSE then
+                        local c2 = Players.LocalPlayer.Character
+                        local r2 = c2 and c2:FindFirstChild("HumanoidRootPart")
+                        if r2 then
+                            local ang2 = math.random() * math.pi * 2
+                            lobSmartFace(r2.Position + Vector3.new(math.cos(ang2) * 12, 0, math.sin(ang2) * 12))
+                        end
+                        task.wait(math.random() * (_SW.WANDER_PAUSE_MAX - _SW.WANDER_PAUSE_MIN) + _SW.WANDER_PAUSE_MIN)
+                    end
+                    if ClientSettings.AutoReply and (now - (gw.lastIdle or 0)) > _SW.IDLE_TALK_CD then
                         gw.lastIdle = now
                         local lines
                         if _lastGlobalLang == "RU" then
@@ -7913,6 +8007,10 @@ local function processChatMessage(player, rawMessage)
     if ClientSettings.SmartWalk then
         lobSmartWalkNoteChat(player.UserId)
         if lobIsLeaveCommand(rawMessage) then lobSmartWalkLeave(player.UserId) end
+        if lobIsFarewellCommand(rawMessage) then
+            _smartWalk.farewellFrom = _smartWalk.farewellFrom or {}
+            _smartWalk.farewellFrom[player.UserId] = os.clock()
+        end
     end
 
     -- v17.5: Антиспам — игнорируем если то же самое сообщение подряд
@@ -11005,7 +11103,7 @@ makeToggleRow(
 makeToggleRow(
     automation,
     "🚶 Умная ходьба (бета)",
-    "Бот ходит как живой: сам выбирает лучшего собеседника, пересчитывает путь на ходу (предсказывает движение, обходит стены, перепрыгивает, не застревает), не толпится в компаниях, подходит на комфортную дистанцию сбоку и разворачивается, ускоряется чтобы догнать бегущего, здоровается, ждёт если с ним говорят, уходит если попросили или молчат, а без игроков — гуляет недалеко от старта и бормочет.",
+    "Бот ведёт себя как живой: ищет собеседника, идёт к нему (обходит стены, перепрыгивает, не толпится, ускоряется чтобы догнать), здоровается, общается и остаётся рядом, а когда разговор затих — прощается и уходит. Не бросает активного игрока. Если с ним говорят, смотрят или просят остаться — остаётся. Без игроков гуляет недалеко от старта и иногда бормочет.",
     ClientSettings.SmartWalk == true,
     function(state)
         ClientSettings.SmartWalk = state
