@@ -6178,6 +6178,7 @@ _smartWalk = {
     avoid = {}, reachFail = {}, greetAt = {}, lastIdle = 0, lastGreetAt = 0,
     greeted = 0, moving = false, arrivedAt = 0, stuckCount = 0,
     wanderDest = nil, lastFaceAt = 0, lastWaveAt = 0, lastClean = 0,
+    stuckZones = {}, home = nil, offsetSide = 1, baseWalkSpeed = nil,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6195,6 +6196,16 @@ _SW = {
     WANDER_MIN     = 18,
     WANDER_MAX     = 70,
     CLEAN_CD       = 60,
+    OFFSET         = 2.5,  -- отступ вбок, чтобы не вставать в лицо/в путь
+    REPATH_MOVE    = 8,    -- если цель ушла на столько от точки пути — пересчёт сразу
+    CATCHUP        = true, -- спринт при погоне за бегущим
+    CATCHUP_SPEED  = 20,
+    CATCHUP_MAX    = 2.5,  -- секунд на один спринт
+    CROWD_RADIUS   = 7,    -- радиус «компании» вокруг цели
+    CROWD_PENALTY  = 140,  -- штраф за переполненную компанию
+    LEASH          = 130,  -- не уходить дальше от дома при блуждании
+    STUCK_ZONE_SEC = 90,   -- как долго помнить место застревания
+    STUCK_ZONE_R   = 10,
 }
 
 function lobSmartWalkNoteChat(userId)
@@ -6224,11 +6235,24 @@ function lobSmartClean(now)
     for uid in pairs(_lastChatAt) do
         if not Players:GetPlayerByUserId(uid) then _lastChatAt[uid] = nil end
     end
+    for i = #_smartWalk.stuckZones, 1, -1 do
+        if (_smartWalk.stuckZones[i].expireAt or 0) < now then table.remove(_smartWalk.stuckZones, i) end
+    end
 end
 
 function lobSmartReachable(p, now)
     local t = _smartWalk.reachFail[p.UserId]
     return not (t and t > (now or os.clock()))
+end
+
+-- Не пытаться идти в место, где недавно застряли
+function lobSmartInStuckZone(pos)
+    if not pos then return false end
+    local now = os.clock()
+    for _, z in ipairs(_smartWalk.stuckZones) do
+        if (z.expireAt or 0) > now and (pos - z.pos).Magnitude < _SW.STUCK_ZONE_R then return true end
+    end
+    return false
 end
 
 function lobIsLeaveCommand(msg)
@@ -6254,7 +6278,7 @@ function lobSmartPick()
             local tchar = p.Character
             local pr = tchar and tchar:FindFirstChild("HumanoidRootPart")
             local hu = tchar and tchar:FindFirstChildOfClass("Humanoid")
-            if pr and hu and hu.Health > 0 then
+            if pr and hu and hu.Health > 0 and not lobSmartInStuckZone(pr.Position) then
                 local okD, dangerous = pcall(lobIsDangerTarget, p)
                 if not (okD and dangerous) then
                     local dist = (pr.Position - myPos).Magnitude
@@ -6268,6 +6292,21 @@ function lobSmartPick()
                     if toUs.Magnitude > 1 and pr.CFrame.LookVector:Dot(toUs.Unit) > 0.3 then
                         score = score + 30
                     end
+                    -- в транспорте/сидит — с ним сложнее взаимодействовать
+                    if hu.Seated then score = score - 120 end
+                    -- не толпиться: если вокруг цели уже компания — штраф
+                    local crowd = 0
+                    for _, q in ipairs(Players:GetPlayers()) do
+                        if q ~= p and q ~= Players.LocalPlayer then
+                            local qc = q.Character
+                            local qr = qc and qc:FindFirstChild("HumanoidRootPart")
+                            if qr and (qr.Position - pr.Position).Magnitude < _SW.CROWD_RADIUS then
+                                crowd = crowd + 1
+                                if crowd >= 4 then break end
+                            end
+                        end
+                    end
+                    if crowd >= 2 then score = score - _SW.CROWD_PENALTY * crowd end
                     score = score + math.random() * 6
                     if score > bestScore then best, bestScore = p, score end
                 end
@@ -6340,9 +6379,15 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
 
         local wps = path:GetWaypoints()
         local iterStart = os.clock()
+        local goal0 = targetPos
         for i = 2, #wps do
             if cancelFn and cancelFn() then return "cancelled" end
-            if (os.clock() - iterStart) > 1.2 then break end
+            -- если цель ушла далеко от исходной точки пути — пересчитываем сразу
+            local moved = 0
+            local gp = getPos()
+            if gp then moved = (gp - goal0).Magnitude end
+            local cap = (moved > _SW.REPATH_MOVE) and 0.5 or 2.5
+            if (os.clock() - iterStart) > cap then break end
             local wp = wps[i]
             local c1 = Players.LocalPlayer.Character
             local r1 = c1 and c1:FindFirstChild("HumanoidRootPart")
@@ -6388,16 +6433,22 @@ function lobSmartWander(cancelFn)
     local ch = Players.LocalPlayer.Character
     local root = ch and ch:FindFirstChild("HumanoidRootPart")
     if not root then return "fail" end
+    local home = _smartWalk.home or root.Position
     local dest = nil
-    for _ = 1, 3 do
+    for _ = 1, 4 do
         local ang = math.random() * math.pi * 2
         local rad = math.random(_SW.WANDER_MIN, _SW.WANDER_MAX)
         local p = root.Position + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
-        local rp = RaycastParams.new()
-        rp.FilterType = Enum.RaycastFilterType.Exclude
-        rp.FilterDescendantsInstances = { ch }
-        local hit = workspace:Raycast(p + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
-        if hit and hit.Position then dest = hit.Position break end
+        -- держимся в пределах лужа от дома
+        local off = p - home
+        if off.Magnitude > _SW.LEASH then p = home + off.Unit * _SW.LEASH end
+        if not lobSmartInStuckZone(p) then
+            local rp = RaycastParams.new()
+            rp.FilterType = Enum.RaycastFilterType.Exclude
+            rp.FilterDescendantsInstances = { ch }
+            local hit = workspace:Raycast(p + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
+            if hit and hit.Position then dest = hit.Position break end
+        end
     end
     if not dest then
         local ang = math.random() * math.pi * 2
@@ -6412,6 +6463,11 @@ end
 function lobSmartWalkStart()
     if _smartWalk.active then return end
     _smartWalk.active = true
+    if not _smartWalk.home then
+        local hc = Players.LocalPlayer.Character
+        local hr = hc and hc:FindFirstChild("HumanoidRootPart")
+        if hr then _smartWalk.home = hr.Position end
+    end
     _smartWalk.thread = task.spawn(function()
         while _smartWalk.active do
             -- pcall на каждый тик: одна ошибка не убивает цикл ходьбы
@@ -6465,6 +6521,7 @@ function lobSmartWalkStart()
                         gw.greeted = 0
                         gw.moving = false
                         gw.stuckCount = 0
+                        gw.offsetSide = (math.random() < 0.5) and 1 or -1
                     end
                 end
 
@@ -6480,18 +6537,39 @@ function lobSmartWalkStart()
                         if dist > _SW.RESUME_DIST or (gw.moving and dist > _SW.STOP_DIST) then
                             gw.moving = true
                             gw.arrivedAt = 0
-                            -- живая цель + лёгкое предсказание, чтобы срезать бегущего
+                            -- живая цель: предсказание движения + личный отступ вбок, чтобы не толкаться
                             local function livePos()
                                 local c = target.Character
                                 local r = c and c:FindFirstChild("HumanoidRootPart")
                                 if not r then return nil end
                                 local v = r.AssemblyLinearVelocity
-                                return r.Position + Vector3.new(v.X, 0, v.Z) * 0.35
+                                local off = r.CFrame.RightVector * (_SW.OFFSET * (gw.offsetSide or 1))
+                                return r.Position + Vector3.new(v.X, 0, v.Z) * 0.35 + off
                             end
-                            local res = lobSmartApproach(livePos, function()
+                            local function cancelApproach()
                                 return (not gw.active) or gw.target ~= target
                                     or (gw.avoid[target.UserId] or 0) > os.clock()
-                            end, _SW.STOP_DIST)
+                            end
+                            -- догоняем бегущего: короткий спринт с честным откатом скорости
+                            local tvel = tr.AssemblyLinearVelocity
+                            local tspeed = Vector3.new(tvel.X, 0, tvel.Z).Magnitude
+                            local boost = _SW.CATCHUP and tspeed > 8 and dist > 25
+                            local baseWS = hum.WalkSpeed
+                            if boost then
+                                gw.baseWalkSpeed = baseWS
+                                pcall(function() hum.WalkSpeed = _SW.CATCHUP_SPEED end)
+                            end
+                            local res
+                            if boost then
+                                local okB = pcall(function()
+                                    res = lobSmartApproach(livePos, cancelApproach, _SW.STOP_DIST, _SW.CATCHUP_MAX)
+                                end)
+                                if not okB then res = "fail" end
+                                pcall(function() hum.WalkSpeed = baseWS end)
+                                gw.baseWalkSpeed = nil
+                            else
+                                res = lobSmartApproach(livePos, cancelApproach, _SW.STOP_DIST)
+                            end
                             gw.moving = false
                             if res == "nopath" then
                                 gw.reachFail[target.UserId] = os.clock() + _SW.REACH_FAIL_SEC
@@ -6499,7 +6577,15 @@ function lobSmartWalkStart()
                                 gw.target = nil
                             elseif res == "stuck" then
                                 gw.stuckCount = (gw.stuckCount or 0) + 1
-                                pcall(function() if hum then hum.Jump = true end end)
+                                local c0 = Players.LocalPlayer.Character
+                                local r0 = c0 and c0:FindFirstChild("HumanoidRootPart")
+                                if r0 then
+                                    table.insert(gw.stuckZones, { pos = r0.Position, expireAt = os.clock() + _SW.STUCK_ZONE_SEC })
+                                    -- короткий шаг вбок, чтобы разъехаться с препятствием
+                                    pcall(function() hum:MoveTo(r0.Position + r0.CFrame.RightVector * (gw.offsetSide or 1) * 8) end)
+                                    task.wait(0.5)
+                                end
+                                pcall(function() hum.Jump = true end)
                                 if gw.stuckCount >= 2 then
                                     gw.avoid[target.UserId] = os.clock() + _SW.AVOID_SEC
                                     gw.target = nil
@@ -6569,6 +6655,8 @@ function lobSmartWalkStop()
         local char = Players.LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         local root = char and char:FindFirstChild("HumanoidRootPart")
+        if hum and _smartWalk.baseWalkSpeed then hum.WalkSpeed = _smartWalk.baseWalkSpeed end
+        _smartWalk.baseWalkSpeed = nil
         if hum and root then hum:MoveTo(root.Position) end
     end)
 end
@@ -10908,7 +10996,7 @@ makeToggleRow(
 makeToggleRow(
     automation,
     "🚶 Умная ходьба (бета)",
-    "Бот ходит как живой: сам выбирает лучшего собеседника, пересчитывает путь на ходу (обходит стены, перепрыгивает, не застревает), подходит на комфортную дистанцию, разворачивается и здоровается, ждёт если с ним говорят, уходит если попросили или молчат, а без игроков — гуляет по достижимым точкам и бормочет.",
+    "Бот ходит как живой: сам выбирает лучшего собеседника, пересчитывает путь на ходу (предсказывает движение, обходит стены, перепрыгивает, не застревает), не толпится в компаниях, подходит на комфортную дистанцию сбоку и разворачивается, ускоряется чтобы догнать бегущего, здоровается, ждёт если с ним говорят, уходит если попросили или молчат, а без игроков — гуляет недалеко от старта и бормочет.",
     ClientSettings.SmartWalk == true,
     function(state)
         ClientSettings.SmartWalk = state
