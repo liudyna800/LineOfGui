@@ -6199,7 +6199,7 @@ _smartWalk = {
     lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
     nudgeStage = 0, lastNudgeAt = 0, sessionChats = 0, lastCountedChatAt = 0,
     saidGoodbyeNudge = false, travelSince = 0, stayLockUid = nil, stayLockUntil = 0,
-    botReplyAt = {}, swEventAt = {},
+    botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6252,7 +6252,11 @@ _SW = {
 
 function lobSmartWalkNoteChat(userId, name)
     if userId then
-        _lastChatAt[userId] = os.clock()
+        local now = os.clock()
+        _lastChatAt[userId] = now
+        -- кто ГОВОРИТ прямо сейчас (чтобы бот шёл к реальному собеседнику, а не дёргал молчуна)
+        _smartWalk.lastSpeakerUid = userId
+        _smartWalk.lastSpeakerAt = now
         pcall(lobRelNoteChat, userId, name)
     end
 end
@@ -6284,6 +6288,9 @@ function lobSmartClean(now)
     end
     for uid in pairs(_smartWalk.farewellFrom) do
         if not Players:GetPlayerByUserId(uid) then _smartWalk.farewellFrom[uid] = nil end
+    end
+    for uid in pairs(_smartWalk.botReplyAt) do
+        if not Players:GetPlayerByUserId(uid) then _smartWalk.botReplyAt[uid] = nil end
     end
     for i = #_smartWalk.stuckZones, 1, -1 do
         if (_smartWalk.stuckZones[i].expireAt or 0) < now then table.remove(_smartWalk.stuckZones, i) end
@@ -6419,6 +6426,7 @@ function lobSmartNudge(p, stage)
         isWorld = true,
     }, 1)
     if okQ then runChatQueue(qk) end
+    return (okQ and true) or false
 end
 
 -- Выбор лучшего собеседника: свежесть чата, близость, спокойствие, взгляд в нашу сторону
@@ -6606,6 +6614,30 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
     end
 end
 
+-- Назначить новую цель (единая точка сброса всех таймеров визита)
+function lobSmartSetTarget(p, now)
+    local gw = _smartWalk
+    gw.target = p
+    gw.targetSince = now or os.clock()
+    gw.arrivedAt = 0
+    gw.greeted = 0
+    gw.moving = false
+    gw.stuckCount = 0
+    gw.offsetSide = (math.random() < 0.5) and 1 or -1
+    gw.state = "travel"
+    gw.socialSince = 0
+    gw.stayUntil = 0
+    gw.lastInteract = 0
+    gw.nudgeStage = 0
+    gw.lastNudgeAt = 0
+    gw.sessionChats = 0
+    gw.lastCountedChatAt = 0
+    gw.saidGoodbyeNudge = false
+    gw.travelSince = 0
+    local rr = p and _rel[p.UserId]
+    if rr then rr.revisitAt = 0 end
+end
+
 -- Бродить по достижимой случайной точке (с проверкой земли под точкой).
 -- Бюджет 8с, чтобы бот быстро переключался, если рядом появился игрок.
 function lobSmartWander(cancelFn)
@@ -6670,6 +6702,9 @@ function lobSmartWalkStart()
                 local now = os.clock()
                 local gw = _smartWalk
                 lobSmartClean(now)
+                -- кто заговорил с ботом прямо сейчас
+                local spkUid, spkAt = gw.lastSpeakerUid, gw.lastSpeakerAt or 0
+                local speakerFresh = (spkUid ~= nil) and ((now - spkAt) < 15)
 
                 local target = gw.target
                 if target then
@@ -6691,28 +6726,41 @@ function lobSmartWalkStart()
                     if not target then gw.target = nil gw.targetSince = 0 end
                 end
 
+                -- СМЕНА ФОКУСА: если заговорил ДРУГОЙ игрок, а текущий молчит — идём к говорящему
+                -- (лечит «бот стоит с молчуном и впирает "почему молчишь", пока рядом идёт диалог»)
+                if speakerFresh and target and target.UserId ~= spkUid then
+                    local curSpoke = _lastChatAt[target.UserId] or 0
+                    if (now - curSpoke) > 15 then
+                        local sp = Players:GetPlayerByUserId(spkUid)
+                        local spOk = false
+                        if sp and sp.Parent and sp.Character then
+                            local chSP = sp.Character
+                            local hSP = chSP:FindFirstChildOfClass("Humanoid")
+                            spOk = hSP and hSP.Health > 0
+                            if spOk then
+                                local okD, dng = pcall(lobIsDangerTarget, sp)
+                                spOk = not (okD and dng)
+                            end
+                        end
+                        if spOk then
+                            -- не бежим через всю карту к случайному болтуну:
+                            -- переключаемся только если он близко или это знакомый
+                            local spRoot = sp.Character and sp.Character:FindFirstChild("HumanoidRootPart")
+                            local dSp = spRoot and (spRoot.Position - root.Position).Magnitude or 999
+                            local spRel = _rel[sp.UserId]
+                            local spKnown = spRel and (spRel.affinity or 0) > 0
+                            if dSp <= 80 or spKnown then
+                                gw.avoid[target.UserId] = now + 12  -- мягко, не бан
+                                target = sp
+                                lobSmartSetTarget(sp, now)
+                            end
+                        end
+                    end
+                end
+
                 if not target then
                     target = lobSmartPick()
-                    if target then
-                        gw.target = target
-                        gw.targetSince = now
-                        gw.arrivedAt = 0
-                        gw.greeted = 0
-                        gw.moving = false
-                        gw.stuckCount = 0
-                        gw.offsetSide = (math.random() < 0.5) and 1 or -1
-                        gw.state = "travel"
-                        gw.socialSince = 0
-                        gw.stayUntil = 0
-                        gw.lastInteract = 0
-                        gw.nudgeStage = 0
-                        gw.lastNudgeAt = 0
-                        gw.sessionChats = 0
-                        gw.lastCountedChatAt = 0
-                        gw.saidGoodbyeNudge = false
-                        local rr0 = _rel[target.UserId]
-                        if rr0 then rr0.revisitAt = 0 end
-                    end
+                    if target then lobSmartSetTarget(target, now) end
                 end
 
                 if target then
@@ -6886,15 +6934,25 @@ function lobSmartWalkStart()
                             elseif (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30 then
                                 doLeave, withFarewell = true, true
                             elseif wasTalking then
-                                -- знакомый/общавшийся замолчал: эскалация реплик, а не резкий уход
-                                if quietChat > _SW.NUDGE_T3 and (gw.nudgeStage or 0) < 3 then
-                                    gw.nudgeStage = 3; gw.lastNudgeAt = now; gw.saidGoodbyeNudge = true; lobSmartNudge(target, 3)
-                                elseif quietChat > _SW.NUDGE_T2 and (gw.nudgeStage or 0) < 2 then
-                                    gw.nudgeStage = 2; gw.lastNudgeAt = now; lobSmartNudge(target, 2)
-                                elseif quietChat > _SW.NUDGE_T1 and (gw.nudgeStage or 0) < 1 then
-                                    gw.nudgeStage = 1; gw.lastNudgeAt = now; lobSmartNudge(target, 1)
+                                -- не подначиваем, если прямо сейчас заговорил ДРУГОЙ игрок
+                                local otherSpeaker = speakerFresh and (spkUid ~= target.UserId)
+                                if not otherSpeaker then
+                                    -- знакомый/общавшийся замолчал: эскалация реплик, а не резкий уход
+                                    if quietChat > _SW.NUDGE_T3 and (gw.nudgeStage or 0) < 3 then
+                                        if lobSmartNudge(target, 3) then
+                                            gw.nudgeStage = 3; gw.lastNudgeAt = now; gw.saidGoodbyeNudge = true
+                                        end
+                                    elseif quietChat > _SW.NUDGE_T2 and (gw.nudgeStage or 0) < 2 then
+                                        if lobSmartNudge(target, 2) then
+                                            gw.nudgeStage = 2; gw.lastNudgeAt = now
+                                        end
+                                    elseif quietChat > _SW.NUDGE_T1 and (gw.nudgeStage or 0) < 1 then
+                                        if lobSmartNudge(target, 1) then
+                                            gw.nudgeStage = 1; gw.lastNudgeAt = now
+                                        end
+                                    end
+                                    if (gw.nudgeStage or 0) >= 3 and quietChat > _SW.NUDGE_LEAVE then doLeave = true end
                                 end
-                                if (gw.nudgeStage or 0) >= 3 and quietChat > _SW.NUDGE_LEAVE then doLeave = true end
                             else
                                 if minMet and (now > (gw.stayUntil or 0)) and quietFor > 10 then
                                     doLeave, withFarewell = true, true
@@ -6957,6 +7015,9 @@ function lobSmartWalkStop()
     _smartWalk.active = false
     if _smartWalk.thread then pcall(task.cancel, _smartWalk.thread) _smartWalk.thread = nil end
     _smartWalk.target = nil
+    _smartWalk.state = "wander"
+    _smartWalk.stayLockUid = nil
+    _smartWalk.stayLockUntil = 0
     pcall(function()
         local char = Players.LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
