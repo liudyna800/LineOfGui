@@ -7132,6 +7132,7 @@ function lobSmartWalkStart()
                     if tr and th and th.Health > 0 then
                         local spokeAt = _lastChatAt[target.UserId] or 0
                         local dist = (tr.Position - root.Position).Magnitude
+                        local botSpoke = ((_smartWalk.botReplyAt or {})[target.UserId] or 0)
 
                         -- СВОРАЧИВАНИЕ: постояли/попрощались — уходим спокойно
                         if gw.state == "winddown" then
@@ -7161,6 +7162,11 @@ function lobSmartWalkStart()
                             local giveUp = false
                             if tspeed > _SW.GIVEUP_SPEED and dist > _SW.GIVEUP_DIST then giveUp = true end
                             if (now - (gw.travelSince or now)) > _SW.TRAVEL_MAX and dist > _SW.STOP_DIST then giveUp = true end
+                            -- поздоровались, а он молчит и уходит — за ним не бегаем
+                            local greetedSilent = (botSpoke >= (gw.socialSince or 0))
+                                and (gw.sessionChats or 0) == 0
+                                and (((_rel[target.UserId] or {}).chats or 0) == 0)
+                            if greetedSilent and dist > 20 then giveUp = true end
 
                             if giveUp then
                                 gw.moving = false
@@ -7277,11 +7283,11 @@ function lobSmartWalkStart()
 
                             local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
                             -- собственная реплика бота тоже сбрасывает «молчание»
-                            local botSpoke = ((_smartWalk.botReplyAt or {})[target.UserId] or 0)
                             if (now - botSpoke) < 5 then gw.nudgeStage = 0 end
                             -- «активность в чате» отдельно от взгляда: молчащего НЕЗНАКОМЦА
                             -- взгляд не удерживает (иначе бот стоит рядом вечно)
                             local lastActChat = gw.arrivedAt or now
+                            if botSpoke >= (gw.socialSince or 0) then lastActChat = math.max(lastActChat, botSpoke) end
                             if spokeAt > lastActChat then lastActChat = spokeAt end
                             if botSpoke > lastActChat then lastActChat = botSpoke end
                             local lastAct = lastActChat
@@ -7297,7 +7303,9 @@ function lobSmartWalkStart()
                             end
                             local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
                             local rr = _rel[target.UserId]
-                            local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
+                            -- «общались» = игрок писал ИЛИ мы сами к нему обратились в этом визите
+                            local botSpokeVisit = botSpoke >= (gw.socialSince or 0)
+                            local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0 or botSpokeVisit
 
                             -- [DO:stay] от ИИ: держимся с этим игроком, не уходим и не подначиваем
                             local stayLocked = (gw.stayLockUid == target.UserId) and (now < (gw.stayLockUntil or 0))
