@@ -2321,6 +2321,7 @@ local function makeSystemPrompt(settings)
 
     -- ── 5. ИГРОКИ РЯДОМ ──────────────────────────────────────────────────
     table.insert(parts, "You are never truly alone: at minimum you are talking to a real player right now. NEVER say that nobody is around / there is no one here.")
+    table.insert(parts, "APPROACH FACTS: YOU are the one who walks up to players (the bot approaches them). If you get a [SYSTEM: you walked up to X] block, YOU approached THEM. Never claim or ask why the player approached you.")
     if settings.PlayerAwareness then
         if settings.TokenEconomy then
             table.insert(parts, "[NEARBY] = players near you. Only mention positions when directly relevant.")
@@ -6445,8 +6446,8 @@ function lobSmartNudge(p, stage)
     local relHint = lobRelHint(p.UserId)
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
-        cleaned = "[SYSTEM: You are hanging out with " .. nm .. (relHint ~= "" and (". " .. relHint) or "")
-            .. " " .. stageText .. "]",
+        cleaned = "[SYSTEM: You walked up to " .. nm .. " earlier and are hanging out with them (YOU approached, not they)."
+            .. (relHint ~= "" and (" " .. relHint) or "") .. " " .. stageText .. "]",
         isWorld = true, langUid = p.UserId,
     }, 1)
     if okQ then runChatQueue(qk) end
@@ -6793,10 +6794,10 @@ function lobSmartGreet(p, knownBefore)
     local relHint = knownBefore and lobRelHint(p.UserId) or ""
     local body
     if relHint ~= "" then
-        body = "[SYSTEM: You are walking up to " .. nm .. " again. " .. relHint ..
-            " Greet them like an old acquaintance (NOT a first meeting) and continue where you left off. ONE short casual line, in character. If they earlier told you to go away, do not greet.]"
+        body = "[SYSTEM: You are walking up to " .. nm .. " again. YOU approached THEM (they did NOT come to you). " .. relHint ..
+            " Greet them like an old acquaintance (NOT a first meeting) and continue where you left off. ONE short casual line, in character. NEVER ask why they came to you. If they earlier told you to go away, do not greet.]"
     else
-        body = "[SYSTEM: You just walked up to " .. nm .. " for the VERY FIRST time - you have never met them before. Greet them in ONE short casual line and try to start a light chat, in character. NEVER say 'again', 'снова', or imply you already know them. If they earlier told you to go away, do not greet.]"
+        body = "[SYSTEM: You just walked up to " .. nm .. " for the VERY FIRST time - you have never met them before. YOU approached THEM (they did NOT come to you). Greet them in ONE short casual line and try to start a light chat, in character. NEVER say 'again', 'снова', imply you know them, or ask why they came to you. If they earlier told you to go away, do not greet.]"
     end
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
@@ -7689,7 +7690,8 @@ local function handleQueuedChat(item)
                 table.insert(apiMessages, { role = "system", content =
                     "COMPANY (live): you are standing next to " .. nm .. " (" .. d .. " studs away" ..
                     (same and ", the very player you are talking to" or "") ..
-                    "). Other players may be around too. NEVER say nobody is around. If asked who is here, answer with " .. nm .. "." })
+                    "). YOU walked up to THEM (not the other way around) - never ask why they approached you. " ..
+                    "Other players may be around too. NEVER say nobody is around. If asked who is here, answer with " .. nm .. "." })
             end
         end
     end
