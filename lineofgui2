@@ -6231,10 +6231,10 @@ _SW = {
     WANDER_PAUSE   = 0.35, -- шанс остановиться осмотреться после прогулки
     WANDER_PAUSE_MIN = 1.5,
     WANDER_PAUSE_MAX = 4.0,
-    NUDGE_T1       = 15,   -- «ты тут?» если замолчал известный/общавшийся игрок
-    NUDGE_T2       = 35,   -- «почему молчишь?»
-    NUDGE_T3       = 60,   -- «будешь отвечать? скажи что-то… ладно, я пойду»
-    NUDGE_LEAVE    = 90,   -- после финальной реплики столько ждём и уходим
+    NUDGE_T1       = 40,   -- «ты тут?» — только если реально долго молчит и не смотрит
+    NUDGE_T2       = 80,   -- «почему молчишь?»
+    NUDGE_T3       = 120,  -- «ладно, я пойду»
+    NUDGE_LEAVE    = 150,  -- после финальной реплики столько ждём и уходим
     REVISIT_MIN    = 60,   -- через сколько минимум вернуться к знакомому
     REVISIT_MAX    = 150,
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
@@ -7157,14 +7157,17 @@ function lobSmartWalkStart()
                             if toUs2.Magnitude > 1 then
                                 looking = tr.CFrame.LookVector:Dot(toUs2.Unit) > 0.45
                             end
-                            if looking and dist < 14 then gw.lastInteract = now end
+                            if looking and dist < 14 then
+                                gw.lastInteract = now
+                                gw.nudgeStage = 0  -- смотрит на бота = engaged, не подначиваем
+                            end
 
                             local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
                             local lastAct = gw.lastInteract
                             if not lastAct or lastAct <= 0 then lastAct = gw.arrivedAt or now end
                             local quietFor = now - lastAct
-                            -- для «ну ты молчишь» важна тишина именно в ЧАТЕ, а не взгляд
-                            local quietChat = now - math.max(spokeAt, gw.arrivedAt or 0)
+                            -- «молчание» = нет ни реплики, ни взгляда вблизи (иначе не подначиваем)
+                            local quietChat = now - math.max(spokeAt, gw.lastInteract or 0, gw.arrivedAt or 0)
                             local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
                             local rr = _rel[target.UserId]
                             local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
