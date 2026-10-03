@@ -7175,7 +7175,7 @@ function lobSmartWalkStart()
                             local greetedSilent = (botSpoke >= (gw.socialSince or 0))
                                 and (gw.sessionChats or 0) == 0
                                 and (((_rel[target.UserId] or {}).chats or 0) == 0)
-                            if greetedSilent and dist > 20 then giveUp = true end
+                            if greetedSilent and dist > _SW.RESUME_DIST then giveUp = true end
 
                             if giveUp then
                                 gw.moving = false
@@ -7279,7 +7279,13 @@ function lobSmartWalkStart()
                                 if lobSmartGreet(target) then gw.greeted = now end
                             end
 
-                            -- взгляд вблизи удерживает визит
+                            local rr = _rel[target.UserId]
+                            -- отвечал ли игрок хоть раз (в этом визите или раньше за сессию)
+                            local replied = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
+                            local botSpokeVisit = botSpoke >= (gw.socialSince or 0)
+
+                            -- взгляд вблизи удерживает визит ТОЛЬКО у тех, кто уже отвечал:
+                            -- молчащего молчуна взгляд не удерживает (иначе стоим вечно)
                             local looking = false
                             local toUs2 = root.Position - tr.Position
                             if toUs2.Magnitude > 1 then
@@ -7287,34 +7293,29 @@ function lobSmartWalkStart()
                             end
                             if looking and dist < 14 then
                                 gw.lastInteract = now
-                                gw.nudgeStage = 0  -- смотрит на бота = engaged, не подначиваем
+                                if replied then gw.nudgeStage = 0 end
                             end
 
                             local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
                             -- собственная реплика бота тоже сбрасывает «молчание»
                             if (now - botSpoke) < 5 then gw.nudgeStage = 0 end
-                            -- «активность в чате» отдельно от взгляда: молчащего НЕЗНАКОМЦА
-                            -- взгляд не удерживает (иначе бот стоит рядом вечно)
-                            local lastActChat = gw.arrivedAt or now
-                            if botSpoke >= (gw.socialSince or 0) then lastActChat = math.max(lastActChat, botSpoke) end
-                            if spokeAt > lastActChat then lastActChat = spokeAt end
-                            if botSpoke > lastActChat then lastActChat = botSpoke end
-                            local lastAct = lastActChat
-                            if (gw.lastInteract or 0) > lastAct then lastAct = gw.lastInteract end
-                            local quietFor = now - lastAct
-                            local quietStranger = now - lastActChat
-                            -- «молчание» = нет ни реплики, ни взгляда, ни нашего ответа
-                            local quietChat = now - math.max(spokeAt, gw.lastInteract or 0, gw.arrivedAt or 0, botSpoke)
-                            -- пока бот ЕЩЁ отвечает этому игроку — вообще не подначиваем
+
+                            -- «молчание»: для не ответивших считаем от приветствия/входа (без взгляда),
+                            -- для общавшихся взгляд = активность
+                            local quietChat
+                            if replied then
+                                quietChat = now - math.max(spokeAt, gw.lastInteract or 0, gw.arrivedAt or 0, botSpoke)
+                            else
+                                quietChat = now - math.max(spokeAt, gw.arrivedAt or 0, botSpoke)
+                            end
                             if ((_botBusyByUser or {})[target.UserId] or 0) > 0 then
                                 quietChat = 0
                                 gw.nudgeStage = 0
                             end
+                            local quietStranger = now - math.max(spokeAt, gw.arrivedAt or 0, botSpoke)
                             local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
-                            local rr = _rel[target.UserId]
                             -- «общались» = игрок писал ИЛИ мы сами к нему обратились в этом визите
-                            local botSpokeVisit = botSpoke >= (gw.socialSince or 0)
-                            local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0 or botSpokeVisit
+                            local wasTalking = replied or botSpokeVisit
 
                             -- [DO:stay] от ИИ: держимся с этим игроком, не уходим и не подначиваем
                             local stayLocked = (gw.stayLockUid == target.UserId) and (now < (gw.stayLockUntil or 0))
