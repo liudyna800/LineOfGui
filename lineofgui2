@@ -2716,6 +2716,7 @@ Players.LocalPlayer.CharacterAdded:Connect(function(char)
     _isSpinning = false
     _isFollowing = false
     _isGoing = false
+    if _smartWalk then _smartWalk.home = nil end  -- заново привязать луж к точке респавна
     if _jumpTimeoutThread then pcall(task.cancel, _jumpTimeoutThread) _jumpTimeoutThread = nil end
     if _spinThread then pcall(task.cancel, _spinThread) _spinThread = nil end
     if _followThread then pcall(task.cancel, _followThread) _followThread = nil end
@@ -6312,6 +6313,9 @@ function lobSmartClean(now)
     for uid in pairs(_smartWalk.botReplyAt) do
         if not Players:GetPlayerByUserId(uid) then _smartWalk.botReplyAt[uid] = nil end
     end
+    for uid in pairs(_smartWalk.greetAt) do
+        if not Players:GetPlayerByUserId(uid) then _smartWalk.greetAt[uid] = nil end
+    end
     for i = #_smartWalk.stuckZones, 1, -1 do
         if (_smartWalk.stuckZones[i].expireAt or 0) < now then table.remove(_smartWalk.stuckZones, i) end
     end
@@ -6917,6 +6921,10 @@ function lobSmartFocusUid()
     if sw.state ~= "social" then return nil end
     local p = sw.target
     if not p or not p.Parent then return nil end
+    -- фокус держим только пока с собеседником РЕАЛЬНО идёт чат (писал он или мы);
+    -- иначе не игнорируем остальных, пока стоим с молчуном
+    local last = math.max(_lastChatAt[p.UserId] or 0, ((_smartWalk.botReplyAt or {})[p.UserId] or 0))
+    if (os.clock() - last) > 25 then return nil end
     return p.UserId
 end
 
@@ -7014,6 +7022,7 @@ function lobSmartWalkStart()
                 local now = os.clock()
                 local gw = _smartWalk
                 lobSmartClean(now)
+                if not gw.home then gw.home = root.Position end  -- дом = текущая точка
 
                 -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
                 do
