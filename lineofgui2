@@ -6199,7 +6199,7 @@ _smartWalk = {
     lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
     nudgeStage = 0, lastNudgeAt = 0, sessionChats = 0, lastCountedChatAt = 0,
     saidGoodbyeNudge = false, travelSince = 0, stayLockUid = nil, stayLockUntil = 0,
-    botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0,
+    botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0, lastForceFaceAt = 0,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6530,6 +6530,22 @@ function lobSmartFace(pos)
     pcall(function() smoothLookAt(pos) end)
 end
 
+-- Надёжный разворот к собеседнику (без анти-спин проверки толпы): во время
+-- разговора важно смотреть на партнёра, даже если сзади стоят другие.
+function lobSmartForceFace(pos)
+    if not pos then return end
+    -- во время движения не вмешиваемся: Humanoid сам разворачивает по курсу
+    if _smartWalk.moving or _isGoing or _isFollowing then return end
+    local now = os.clock()
+    if (now - (_smartWalk.lastForceFaceAt or 0)) < 1.0 then return end
+    _smartWalk.lastForceFaceAt = now
+    local root = getLocalRootPart()
+    if not root then return end
+    local flat = Vector3.new(pos.X, root.Position.Y, pos.Z)
+    if (flat - root.Position).Magnitude < 0.4 then return end
+    pcall(function() root.CFrame = CFrame.new(root.Position, flat) end)
+end
+
 -- Дружелюбная эмоция при встрече (редко)
 function lobSmartWave()
     if not ClientSettings.ActionsEnabled then return end
@@ -6730,7 +6746,7 @@ function lobSmartWalkStart()
                 -- (лечит «бот стоит с молчуном и впирает "почему молчишь", пока рядом идёт диалог»)
                 if speakerFresh and target and target.UserId ~= spkUid then
                     local curSpoke = _lastChatAt[target.UserId] or 0
-                    if (now - curSpoke) > 15 then
+                    if (now - curSpoke) > 30 then
                         local sp = Players:GetPlayerByUserId(spkUid)
                         local spOk = false
                         if sp and sp.Parent and sp.Character then
@@ -6774,7 +6790,7 @@ function lobSmartWalkStart()
                         -- СВОРАЧИВАНИЕ: постояли/попрощались — уходим спокойно
                         if gw.state == "winddown" then
                             if now < (gw.windUntil or 0) then
-                                if (now - (gw.lastFaceAt or 0)) > 2 then lobSmartFace(tr.Position) end
+                                lobSmartForceFace(tr.Position)
                                 task.wait(0.25)
                             else
                                 gw.avoid[target.UserId] = now + _SW.RETURN_CD
@@ -6879,10 +6895,10 @@ function lobSmartWalkStart()
                             end
                             if gw.arrivedAt == 0 then
                                 gw.arrivedAt = now
-                                lobSmartFace(tr.Position)
+                                lobSmartForceFace(tr.Position)
                                 if (now - spokeAt) > 20 and (gw.greeted or 0) == 0 then lobSmartWave() end
                             end
-                            if (now - (gw.lastFaceAt or 0)) > 6 then lobSmartFace(tr.Position) end
+                            lobSmartForceFace(tr.Position)  -- всегда смотрим на собеседника
 
                             -- считаем каждое НОВОЕ сообщение один раз
                             if spokeAt > (gw.lastCountedChatAt or 0) then
@@ -7069,7 +7085,20 @@ function lobReplyCacheServe(settings, cleanMsg, player, userId)
     print("[LOB] cache hit: " .. tostring(cleanMsg):sub(1, 40))
     if settings.CameraLook and player and player.Character then
         local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
-        if pRoot then pcall(smoothLookAt, pRoot.Position) end
+        if pRoot then
+            local sw = _smartWalk
+            local partner = sw and sw.target
+            local partnerActive = partner and partner.Parent and partner.Character
+                and ((os.clock() - (_lastChatAt[partner.UserId] or 0)) < 30 or sw.state == "social")
+            if partnerActive and player.UserId ~= partner.UserId then
+                pcall(function()
+                    local pr = partner.Character:FindFirstChild("HumanoidRootPart")
+                    if pr then lobSmartForceFace(pr.Position) end
+                end)
+            else
+                pcall(smoothLookAt, pRoot.Position)
+            end
+        end
     end
     local hist = getHistory(settings, userId)
     if hist then appendHistory(hist, cleanMsg, hit.text) end
@@ -7631,10 +7660,24 @@ local function handleQueuedChat(item)
     text = sanitizeUtf8(text) -- битые байты из ответа модели (иначе JSONEncodeFailed на след. запросе)
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
+    -- v22: если бот сейчас общается с кем-то у SmartWalk — НЕ разворачиваемся к чужим,
+    -- чтобы не выглядело, будто он отвечает и компании сзади одновременно.
     if settings.CameraLook and item.player and item.player.Character then
         local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
         if pRoot then
-            smoothLookAt(pRoot.Position)
+            local sw = _smartWalk
+            local partner = sw and sw.target
+            local partnerActive = partner and partner.Parent and partner.Character
+                and ((os.clock() - (_lastChatAt[partner.UserId] or 0)) < 30 or sw.state == "social")
+            if partnerActive and item.player.UserId ~= partner.UserId then
+                -- писал кто-то другой: остаёмся лицом к собеседнику
+                pcall(function()
+                    local pr = partner.Character:FindFirstChild("HumanoidRootPart")
+                    if pr then lobSmartForceFace(pr.Position) end
+                end)
+            else
+                smoothLookAt(pRoot.Position)
+            end
         end
     end
 
