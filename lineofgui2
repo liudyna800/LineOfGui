@@ -6722,15 +6722,16 @@ function lobSmartPick()
 end
 
 -- Подойти и заговорить. Троттлинг per-user (120с) + глобальный 8с против веера приветствий.
+-- true = приветствие отправлено/уже было (повторять не нужно), false = отложено троттлом (повторить)
 function lobSmartGreet(p)
-    if not ClientSettings.AutoReply then return end
-    if not p or not p.Parent then return end
+    if not ClientSettings.AutoReply then return true end
+    if not p or not p.Parent then return false end
     local now = os.clock()
-    -- не здороваемся, если бот уже отвечал этому игроку только что (анти-дубль)
-    if (now - ((_smartWalk.botReplyAt or {})[p.UserId] or 0)) < 15 then return end
+    -- не здороваемся, если бот уже отвечал этому игроку только что (анти-дубль) — повторим позже
+    if (now - ((_smartWalk.botReplyAt or {})[p.UserId] or 0)) < 15 then return false end
     local g = _smartWalk.greetAt
-    if (now - (g[p.UserId] or 0)) < 120 then return end
-    if (now - (_smartWalk.lastGreetAt or 0)) < 8 then return end
+    if (now - (g[p.UserId] or 0)) < 120 then return true end  -- уже здоровались в этой сессии
+    if (now - (_smartWalk.lastGreetAt or 0)) < 8 then return false end
     g[p.UserId] = now
     _smartWalk.lastGreetAt = now
     local qk = "sw:" .. tostring(p.UserId)
@@ -6748,6 +6749,7 @@ function lobSmartGreet(p)
         cleaned = body, isWorld = true, langUid = p.UserId,
     }, 1)
     if okQ then runChatQueue(qk) end
+    return (okQ and true) or false
 end
 
 -- Мягко повернуться к точке (smoothLookAt сам ограничивает частоту и толпу)
@@ -7202,8 +7204,9 @@ function lobSmartWalkStart()
                                 gw.lastInteract = now
                             end
                             if (gw.greeted or 0) == 0 and not spokeRecently then
-                                gw.greeted = now
-                                lobSmartGreet(target)
+                                -- помечаем «поздоровался» ТОЛЬКО если реально отправили
+                                -- (иначе бот молча смотрел из-за троттла приветствия)
+                                if lobSmartGreet(target) then gw.greeted = now end
                             end
 
                             -- взгляд вблизи удерживает визит
