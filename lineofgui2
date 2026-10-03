@@ -6531,15 +6531,16 @@ function lobSmartDangerLine(p)
 end
 
 -- Отойти от врага (точка в сторону от него, с проверкой земли)
--- Отход от врага с ОБХОДОМ СТЕН: перебираем направления (от врага, вбок, назад),
--- рейкастом ищем свободное и ведём туда. Если застряли — прыжок и меняем сторону.
+-- Отход от врага: PATHFINDING (сам обходит стены) с переоценкой маршрута
+-- каждые ~0.7с; выбираем свободное направление рейкастами, если пути нет —
+-- аварийное прямое движение вбок/прыжок.
 function lobSmartFlee(threat)
     local hum = getLocalHumanoid()
     local char = Players.LocalPlayer.Character
     if not hum or not char then return end
-    local t0 = os.clock()
     local side = (math.random() < 0.5) and 1 or -1
-    while os.clock() - t0 < 2 and (_smartWalk.fleeUntil or 0) > os.clock() do
+    local t0 = os.clock()
+    while os.clock() - t0 < 2.5 and (_smartWalk.fleeUntil or 0) > os.clock() do
         local root = getLocalRootPart()
         local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
         if not root or not tr then break end
@@ -6553,29 +6554,42 @@ function lobSmartFlee(threat)
         rp.FilterType = Enum.RaycastFilterType.Exclude
         rp.FilterDescendantsInstances = { char }
         local eye = root.Position + Vector3.new(0, 1.5, 0)
+        -- ищем свободное направление: прямо от врага, затем вбок/назад
         local best, bestScore = nil, -1e9
-        for _, ang in ipairs({ 0, 45, -45, 90, -90, 135, -135 }) do
+        for _, ang in ipairs({ 0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180 }) do
             local dir = CFrame.Angles(0, math.rad(ang * side), 0) * base
-            local hit = workspace:Raycast(eye, dir * 10, rp)
+            local hit = workspace:Raycast(eye, dir * 14, rp)
             local clear = (hit == nil) and 1 or 0
-            local gHit = workspace:Raycast(root.Position + dir * 8 + Vector3.new(0, 40, 0), Vector3.new(0, -80, 0), rp)
+            local gHit = workspace:Raycast(root.Position + dir * 10 + Vector3.new(0, 40, 0), Vector3.new(0, -80, 0), rp)
             local gOk = gHit and 1 or 0
-            local score = clear * 3 + gOk * 2 - math.abs(ang) / 180
+            local score = clear * 3 + gOk * 2 - math.abs(ang) / 200
             if score > bestScore then bestScore, best = score, dir end
         end
-        if best then
-            local p0 = root.Position
-            pcall(function() hum:MoveTo(p0 + best * _SW.FLEE_DIST) end)
-            task.wait(0.15)
-            local r2 = getLocalRootPart()
-            if r2 and (r2.Position - p0).Magnitude < 0.15 then
-                pcall(function() hum.Jump = true end)
-                side = -side  -- упёрлись — меняем сторону обхода
-            end
-        else
+        local dest = root.Position + (best or base) * _SW.FLEE_DIST
+        local g = workspace:Raycast(dest + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
+        if g and g.Position then dest = g.Position end
+        _smartWalk.fleeDest = dest
+
+        local p0 = root.Position
+        local res = lobSmartApproach(function() return _smartWalk.fleeDest end, function()
+            if not _smartWalk.active then return true end
+            if (_smartWalk.fleeUntil or 0) <= os.clock() then return true end
+            local r = getLocalRootPart()
+            local t2 = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+            if r and t2 and (r.Position - t2.Position).Magnitude > _SW.FLEE_RADIUS + 5 then return true end
+            return false
+        end, 4, 0.7)
+
+        if res == "nopath" or res == "stuck" or res == "fail" then
+            pcall(function() hum:MoveTo(dest) end)
+            task.wait(0.2)
             pcall(function() hum.Jump = true end)
             side = -side
-            task.wait(0.15)
+        end
+        local r2 = getLocalRootPart()
+        if r2 and (r2.Position - p0).Magnitude < 0.15 then
+            pcall(function() hum.Jump = true end)
+            side = -side
         end
     end
 end
@@ -6900,7 +6914,7 @@ function lobSmartWalkStart()
                             gw.target = nil
                             gw.targetSince = 0
                             gw.leaveAt = 0
-                            gw.fleeUntil = now + 1.6
+                            gw.fleeUntil = now + 2.2
                             gw.fleeFrom = threat.UserId
                             lobSmartFlee(threat)
                             task.wait(0.2)
