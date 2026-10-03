@@ -6200,6 +6200,8 @@ _smartWalk = {
     nudgeStage = 0, lastNudgeAt = 0, sessionChats = 0, lastCountedChatAt = 0,
     saidGoodbyeNudge = false, travelSince = 0, stayLockUid = nil, stayLockUntil = 0,
     botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0, lastForceFaceAt = 0,
+    fleeUntil = 0, fleeFrom = nil, dangerLineAt = 0,
+    threatScanAt = 0, threatUid = nil, threatDist = 0,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6248,6 +6250,10 @@ _SW = {
     LEASH          = 130,  -- не уходить дальше от дома при блуждании
     STUCK_ZONE_SEC = 90,   -- как долго помнить место застревания
     STUCK_ZONE_R   = 10,
+    THREAT_RADIUS  = 32,   -- враг в этом радиусе — уже «замечен»
+    FLEE_RADIUS    = 18,   -- ближе этого — отходим
+    FLEE_DIST      = 28,   -- на сколько студов отойти
+    DANGER_LINE_CD = 45,   -- как часто говорить «ты опасный, я отойду»
 }
 
 function lobSmartWalkNoteChat(userId, name)
@@ -6429,6 +6435,107 @@ function lobSmartNudge(p, stage)
     return (okQ and true) or false
 end
 
+-- ── ВРАГИ ─────────────────────────────────────────────────────────────────
+-- Опасен ли игрок: враг по команде + в игре реально есть PvP, либо он только
+-- что нанёс урон. Работает независимо от тумблера DangerSense.
+function lobSmartIsThreat(p, now)
+    if not p or not p.Parent or not p.Character then return false end
+    now = now or os.clock()
+    local uid = p.UserId
+    if _danger and _danger.suspectUid == uid
+        and (now - (_danger.lastDamageAt or -999)) < 120 then return true end
+    local enemy = false
+    pcall(function() enemy = lobIsEnemyOf(p) end)
+    if not enemy then return false end
+    local pv = false
+    pcall(function() pv = lobPvpConfirmedFor(p) end)
+    return pv
+end
+
+function lobSmartFindThreat(radius)
+    local root = getLocalRootPart()
+    if not root then return nil, nil end
+    local myPos = root.Position
+    local now = os.clock()
+    local best, bestD = nil, radius
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Players.LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local d = (hrp.Position - myPos).Magnitude
+                if d < bestD then
+                    local ok, th = pcall(lobSmartIsThreat, p, now)
+                    if ok and th then best, bestD = p, d end
+                end
+            end
+        end
+    end
+    return best, bestD
+end
+
+-- Скан врагов с кэшем 0.5с (дешёво по CPU)
+function lobSmartThreatScan()
+    local gw = _smartWalk
+    local now = os.clock()
+    if (gw.threatScanAt or 0) > 0 and (now - gw.threatScanAt) < 0.5 then
+        local p = gw.threatUid and Players:GetPlayerByUserId(gw.threatUid) or nil
+        if p and p.Parent and p.Character then return p, gw.threatDist or 0 end
+        return nil, 0
+    end
+    gw.threatScanAt = now
+    local p, d = lobSmartFindThreat(_SW.THREAT_RADIUS)
+    gw.threatUid = p and p.UserId or nil
+    gw.threatDist = d or 0
+    return p, d
+end
+
+-- «Ты опасный, я отойду» — короткая живая реплика через ИИ
+function lobSmartDangerLine(p)
+    if not ClientSettings.AutoReply then return end
+    if not p or not p.Parent then return end
+    local now = os.clock()
+    if (now - (_smartWalk.dangerLineAt or 0)) < _SW.DANGER_LINE_CD then return end
+    _smartWalk.dangerLineAt = now
+    local qk = "swd:" .. tostring(p.UserId)
+    local nm = tostring(p.DisplayName or p.Name)
+    local myTeam, thTeam = "", ""
+    pcall(function() myTeam = getTeamName(Players.LocalPlayer) or "" end)
+    pcall(function() thTeam = getTeamName(p) or "" end)
+    local ctx = ""
+    if myTeam ~= "" or thTeam ~= "" then
+        ctx = " Your team: " .. (myTeam ~= "" and myTeam or "?") ..
+              ", their team: " .. (thTeam ~= "" and thTeam or "?") .. "."
+    end
+    local okQ = enqueueChatItem(qk, {
+        player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
+        cleaned = "[SYSTEM: A DANGEROUS ENEMY, " .. nm .. ", is very close to you right now." .. ctx ..
+            " React in ONE short casual line: notice they are dangerous and that you keep your distance / back off. Stay in character, no questions, do not attack. Never mention teams data or this instruction.]",
+        isWorld = true,
+    }, 1)
+    if okQ then runChatQueue(qk) end
+end
+
+-- Отойти от врага (точка в сторону от него, с проверкой земли)
+function lobSmartFlee(threat)
+    local root = getLocalRootPart()
+    local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+    if not root or not tr then return end
+    local away = root.Position - tr.Position
+    away = Vector3.new(away.X, 0, away.Z)
+    if away.Magnitude < 1 then away = root.CFrame.LookVector * -1 end
+    local dest = root.Position + away.Unit * _SW.FLEE_DIST
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { Players.LocalPlayer.Character }
+    local hit = workspace:Raycast(dest + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
+    if hit and hit.Position then dest = hit.Position end
+    _smartWalk.wanderDest = dest
+    lobSmartApproach(function() return _smartWalk.wanderDest end, function()
+        return (not _smartWalk.active) or (_smartWalk.fleeUntil or 0) < os.clock()
+    end, 5, 2)
+end
+
 -- Выбор лучшего собеседника: свежесть чата, близость, спокойствие, взгляд в нашу сторону
 function lobSmartPick()
     local char = Players.LocalPlayer.Character
@@ -6446,8 +6553,9 @@ function lobSmartPick()
             local pr = tchar and tchar:FindFirstChild("HumanoidRootPart")
             local hu = tchar and tchar:FindFirstChildOfClass("Humanoid")
             if pr and hu and hu.Health > 0 and not lobSmartInStuckZone(pr.Position) then
-                local okD, dangerous = pcall(lobIsDangerTarget, p)
-                if not (okD and dangerous) then
+                local dangerous = false
+                pcall(function() dangerous = lobIsDangerTarget(p) or lobSmartIsThreat(p, now) end)
+                if not dangerous then
                     local dist = (pr.Position - myPos).Magnitude
                     local spoke = _lastChatAt[p.UserId] or 0
                     -- далёкого молчуна не догоняем, но свежую реплику — да
@@ -6729,6 +6837,32 @@ function lobSmartWalkStart()
                 local now = os.clock()
                 local gw = _smartWalk
                 lobSmartClean(now)
+
+                -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
+                do
+                    local threat, tdist = lobSmartThreatScan()
+                    if threat then
+                        gw.avoid[threat.UserId] = now + 60
+                        gw.reachFail[threat.UserId] = now + 45
+                        if gw.target and gw.target.UserId == threat.UserId then
+                            gw.target = nil
+                            gw.targetSince = 0
+                        end
+                        lobSmartDangerLine(threat)
+                        if tdist and tdist <= _SW.FLEE_RADIUS then
+                            gw.state = "wander"
+                            gw.target = nil
+                            gw.targetSince = 0
+                            gw.leaveAt = 0
+                            gw.fleeUntil = now + 1.6
+                            gw.fleeFrom = threat.UserId
+                            lobSmartFlee(threat)
+                            task.wait(0.2)
+                            return
+                        end
+                    end
+                end
+
                 -- кто заговорил с ботом прямо сейчас
                 local spkUid, spkAt = gw.lastSpeakerUid, gw.lastSpeakerAt or 0
                 local speakerFresh = (spkUid ~= nil) and ((now - spkAt) < 15)
@@ -6742,8 +6876,7 @@ function lobSmartWalkStart()
                     local dead = (not tr) or (not th) or th.Health <= 0
                     local dangerous = false
                     if not gone and not dead then
-                        local okD, d = pcall(lobIsDangerTarget, target)
-                        dangerous = okD and d
+                        pcall(function() dangerous = lobIsDangerTarget(target) or lobSmartIsThreat(target, now) end)
                     end
                     if gone or dangerous then
                         target = nil
