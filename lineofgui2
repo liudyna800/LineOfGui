@@ -6309,12 +6309,15 @@ function lobVisionGrabPNG()
     if not okCap or not CaptureService then return nil, "no CaptureService" end
     local contentId, done = nil, false
     local okCall = pcall(function()
-        CaptureService:CaptureScreenshot(function(id) contentId = id done = true end)
+        local r = CaptureService:CaptureScreenshot(function(id) contentId = id done = true end)
+        -- некоторые версии возвращают id сразу
+        if type(r) == "string" and r ~= "" then contentId = r done = true end
     end)
     if not okCall then return nil, "capture failed" end
     local t = 0
     while not done and t < 6 do task.wait(0.1) t = t + 0.1 end
     if not contentId then return nil, "capture timeout" end
+    if type(contentId) ~= "string" then contentId = tostring(contentId) end
 
     local okAS, AssetService = pcall(function() return game:GetService("AssetService") end)
     if not okAS or not AssetService then return nil, "no AssetService" end
@@ -6338,6 +6341,18 @@ function lobVisionGrabPNG()
         src = ei:ReadPixelsBuffer(Vector2.new(rx, ry), Vector2.new(rw, rh))
         sw, sh = rw, rh
     end)
+    -- Попытка B: растеризовать контент скриншота в EditableImage через DrawImage
+    -- (нужна, если CreateEditableImageAsync не принимает временный id камеры)
+    if not src then
+        pcall(function()
+            local tw0 = _VISION_MAX_SIDE
+            local th0 = math.max(1, math.floor(_VISION_MAX_SIDE * 9 / 16))
+            local ei2 = AssetService:CreateEditableImage({ Size = Vector2.new(tw0, th0) })
+            ei2:DrawImage(contentId, Vector2.zero, Vector2.new(tw0, th0))
+            src = ei2:ReadPixelsBuffer(Vector2.zero, Vector2.new(tw0, th0))
+            sw, sh = tw0, th0
+        end)
+    end
     if not src or sw <= 0 or sh <= 0 then return nil, "cannot read pixels" end
     -- буфер должен быть ровно RGBA нужного размера, иначе readu8 уйдёт за границы
     local okLen, blen = pcall(buffer.len, src)
@@ -7502,6 +7517,9 @@ local function handleQueuedChat(item)
         elseif verr ~= "cooldown" and verr ~= "off" then
             table.insert(apiMessages, { role = "system",
                 content = "[VISION: you tried to look around but could not get a camera image. Say honestly and briefly that you cannot look right now.]" })
+            if pushNotification then
+                pcall(pushNotification, "Зрение: не удалось", tostring(verr), THEME and THEME.Accent)
+            end
         end
     end
 
