@@ -6437,8 +6437,9 @@ end
 
 -- ── ВРАГИ ─────────────────────────────────────────────────────────────────
 -- Опасен ли игрок: враг по команде + в игре реально есть PvP, либо он только
--- что нанёс урон. Работает независимо от тумблера DangerSense.
+-- что нанёс урон. Спит, пока выключен тумблер «Чувство опасности».
 function lobSmartIsThreat(p, now)
+    if not lobDangerActive() then return false end
     if not p or not p.Parent or not p.Character then return false end
     now = now or os.clock()
     local uid = p.UserId
