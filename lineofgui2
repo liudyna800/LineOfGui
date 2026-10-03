@@ -265,6 +265,7 @@ local function saveSettings()
             "ReplyCache="      .. b(cs.ReplyCache,      false),
             "SearchNotice="    .. b(cs.SearchNotice,    true),
             "SmartWalk="       .. b(cs.SmartWalk,       false),
+            "VisionOnDemand="  .. b(cs.VisionOnDemand,  true),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
             "LineOfMemory="    .. b(cs.LineOfMemory,    true),
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
@@ -336,6 +337,7 @@ local function loadSettings()
         cs.ReplyCache      = getBool("ReplyCache",      false)
         cs.SearchNotice    = getBool("SearchNotice",    true)
         cs.SmartWalk       = getBool("SmartWalk",       false)
+        cs.VisionOnDemand  = getBool("VisionOnDemand",  true)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
         cs.LineOfMemory    = getBool("LineOfMemory",    true)
         cs.Temperature     = getNum("Temperature",      0.7)
@@ -682,6 +684,7 @@ ClientSettings = {
     ReplyCache = false,     -- v20 Beta 3: кэш ответов ИИ (повторный вопрос — мгновенно, без запроса)
     SearchNotice = true,    -- v20 Beta 3: заготовленные сообщения "ищу в интернете/вики…" во время поиска
     SmartWalk = false,      -- v20 Beta 3: умная ходьба (бот сам ходит, ищет собеседников, бродит)
+    VisionOnDemand = true,  -- v22: зрение по запросу (скриншот → Gemini/DeepSeek), только когда просят
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     GameUnderstanding = false, -- v20 Beta 2: game understanding
     DangerSense = false, -- v20 Beta 2: чувство опасности (только с GameUnderstanding)
@@ -759,6 +762,7 @@ do
     if cs2.ReplyCache      == nil then cs2.ReplyCache      = false end
     if cs2.SearchNotice    == nil then cs2.SearchNotice    = true  end
     if cs2.SmartWalk       == nil then cs2.SmartWalk       = false end
+    if cs2.VisionOnDemand  == nil then cs2.VisionOnDemand  = true  end
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     if cs2.LineOfMemory    == nil then cs2.LineOfMemory    = true  end
     local savedGemini = loadGeminiKey()
@@ -2272,6 +2276,9 @@ local function makeSystemPrompt(settings)
     -- v20 Beta 2: honesty about abilities (static, fast)
     table.insert(parts,
         "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop/stay/leave), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
+    if settings.VisionOnDemand and lobVisionProviderAvailable() then
+        table.insert(parts, "VISION: when the player asks you to look / see / describe what is around (посмотри, что видишь, look), a live camera image will be described in a [WHAT YOU SEE] system block. Use it as ground truth and answer in 1-2 short sentences. Never claim you cannot see.")
+    end
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
@@ -6185,6 +6192,273 @@ local function getHistory(settings, userId)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- §VISION (v22) — зрение ПО ЗАПРОСУ: скриншот → PNG → Gemini/DeepSeek.
+-- Ничего не анализируется фоном: кадр делается только когда игрок просит
+-- («посмотри», «что видишь»). Кулдаун на игрока. В промпт кладётся только
+-- короткое описание, поэтому токенов тратится мало.
+-- Все функции — глобалы (лимит локалок чанка).
+-- ═══════════════════════════════════════════════════════════════════════════
+_visionCD = {}
+_VISION_CD = 15          -- сек между «взглядами» одного игрока
+_VISION_MAX_SIDE = 384   -- даунскейл, чтобы не жечь токены
+_visionCapOk = nil
+
+function lobVisionProvider()
+    local model = ""
+    pcall(function() model = tostring(getModel(ClientSettings) or "") end)
+    if model:find("^gemini") then return "gemini", model end
+    if model:find("^deepseek") then return "deepseek", model end
+    -- выбран Groq (не умеет): берём ключи Gemini/DeepSeek, если есть
+    local gk = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini or ""
+    if type(gk) == "string" and gk ~= "" then return "gemini", "gemini-3.5-flash-lite" end
+    local dk = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek or ""
+    if type(dk) == "string" and dk ~= "" then return "deepseek", "deepseek-chat" end
+    return nil, nil
+end
+
+function lobVisionProviderAvailable()
+    local p = lobVisionProvider()
+    return p ~= nil
+end
+
+function lobVisionWantsLook(msg)
+    local m = tostring(msg or ""):lower()
+    if m == "" then return false end
+    local keys = {
+        "посмотри", "глянь", "взгляни", "осмотрись", "что видишь", "что ты видишь",
+        "что вокруг тебя", "опиши что видишь",
+        "look around", "what do you see", "can you see", "describe the scene",
+    }
+    for _, k in ipairs(keys) do if m:find(k, 1, true) then return true end end
+    return false
+end
+
+-- «Готов ли» (без списания кулдауна) — для решения, помечать ли сообщение как vision
+function lobVisionReady(player)
+    if not ClientSettings.VisionOnDemand then return false end
+    if not player or not player.UserId then return false end
+    if not lobVisionProvider() then return false end
+    if (os.clock() - (_visionCD[player.UserId] or 0)) < _VISION_CD then return false end
+    return true
+end
+
+function lobVisionCRC32(s)
+    if not _visionCRCTable then
+        _visionCRCTable = {}
+        for i = 0, 255 do
+            local c = i
+            for _ = 1, 8 do
+                if bit32.band(c, 1) == 1 then c = bit32.bxor(0xEDB88320, bit32.rshift(c, 1))
+                else c = bit32.rshift(c, 1) end
+            end
+            _visionCRCTable[i] = c
+        end
+    end
+    local crc = 0xFFFFFFFF
+    for i = 1, #s do
+        local b = s:byte(i)
+        crc = bit32.bxor(_visionCRCTable[bit32.band(bit32.bxor(crc, b), 0xFF)], bit32.rshift(crc, 8))
+    end
+    return bit32.bxor(crc, 0xFFFFFFFF)
+end
+
+function lobVisionAdler32(s)
+    local a, b = 1, 0
+    for i = 1, #s do
+        a = (a + s:byte(i)) % 65521
+        b = (b + a) % 65521
+    end
+    return b * 65536 + a
+end
+
+function lobVisionPNG(buf, w, h)
+    local rowBytes = w * 4
+    local raw = buffer.create(h * (1 + rowBytes))
+    for y = 0, h - 1 do
+        buffer.writeu8(raw, y * (1 + rowBytes), 0)
+        buffer.copy(raw, y * (1 + rowBytes) + 1, buf, y * rowBytes, rowBytes)
+    end
+    local rawStr = buffer.tostring(raw)
+    -- zlib: заголовок + stored-блоки (без сжатия) + adler
+    local z = { string.char(0x78, 0x01) }
+    local i, n = 1, #rawStr
+    while i <= n do
+        local len = math.min(65535, n - i + 1)
+        local final = (i + len - 1 >= n) and 1 or 0
+        table.insert(z, string.char(final))
+        table.insert(z, string.pack("<I2", len))
+        table.insert(z, string.pack("<I2", bit32.band(bit32.bnot(len), 0xFFFF)))
+        table.insert(z, rawStr:sub(i, i + len - 1))
+        i = i + len
+    end
+    table.insert(z, string.pack(">I4", lobVisionAdler32(rawStr)))
+    local idat = table.concat(z)
+    local function chunk(typ, data)
+        return string.pack(">I4", #data) .. typ .. data .. string.pack(">I4", lobVisionCRC32(typ .. data))
+    end
+    local ihdr = string.pack(">I4", w) .. string.pack(">I4", h) .. string.char(8, 6, 0, 0, 0)
+    return "\137PNG\r\n\26\n" .. chunk("IHDR", ihdr) .. chunk("IDAT", idat) .. chunk("IEND", "")
+end
+
+-- Скриншот → RGBA → даунскейл → PNG (строка). Возвращает png|nil, err
+function lobVisionGrabPNG()
+    local okCap, CaptureService = pcall(function() return game:GetService("CaptureService") end)
+    if not okCap or not CaptureService then return nil, "no CaptureService" end
+    local contentId, done = nil, false
+    local okCall = pcall(function()
+        CaptureService:CaptureScreenshot(function(id) contentId = id done = true end)
+    end)
+    if not okCall then return nil, "capture failed" end
+    local t = 0
+    while not done and t < 6 do task.wait(0.1) t = t + 0.1 end
+    if not contentId then return nil, "capture timeout" end
+
+    local okAS, AssetService = pcall(function() return game:GetService("AssetService") end)
+    if not okAS or not AssetService then return nil, "no AssetService" end
+
+    local src, sw, sh = nil, 0, 0
+    pcall(function()
+        local ei = AssetService:CreateEditableImageAsync(contentId)
+        local sz = ei.Size
+        local fullW, fullH = math.floor(sz.X), math.floor(sz.Y)
+        if fullW <= 0 or fullH <= 0 then return end
+        -- кап на чтение пикселей (центр-кроп), чтобы не есть память на 4K
+        local MAXPIX = 1280 * 720
+        local rx, ry, rw, rh = 0, 0, fullW, fullH
+        if fullW * fullH > MAXPIX then
+            local k = math.sqrt(MAXPIX / (fullW * fullH))
+            rw = math.max(1, math.floor(fullW * k))
+            rh = math.max(1, math.floor(fullH * k))
+            rx = math.floor((fullW - rw) / 2)
+            ry = math.floor((fullH - rh) / 2)
+        end
+        src = ei:ReadPixelsBuffer(Vector2.new(rx, ry), Vector2.new(rw, rh))
+        sw, sh = rw, rh
+    end)
+    if not src or sw <= 0 or sh <= 0 then return nil, "cannot read pixels" end
+
+    local scale = math.min(1, _VISION_MAX_SIDE / math.max(sw, sh))
+    local tw = math.max(1, math.floor(sw * scale))
+    local th = math.max(1, math.floor(sh * scale))
+    local out = buffer.create(tw * th * 4)
+    for y = 0, th - 1 do
+        local sy = math.min(sh - 1, math.floor(y / scale))
+        for x = 0, tw - 1 do
+            local sx = math.min(sw - 1, math.floor(x / scale))
+            local si = (sy * sw + sx) * 4
+            local di = (y * tw + x) * 4
+            for k = 0, 3 do buffer.writeu8(out, di + k, buffer.readu8(src, si + k)) end
+        end
+    end
+    return lobVisionPNG(out, tw, th), nil
+end
+
+-- Отправка кадра в vision-модель. Возвращает text|nil, err
+function lobVisionRequest(provider, model, pngStr, prompt)
+    local b64 = HttpService:Base64Encode(pngStr)
+    if provider == "gemini" then
+        local apiKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
+        if type(apiKey) ~= "string" or apiKey == "" then return nil, "no gemini key" end
+        -- миграция старых id, как в GeminiProvider
+        if model == "gemini-2.5-flash" or model == "gemini-2.5-flash-lite" then model = "gemini-3.5-flash-lite" end
+        local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. tostring(model) .. ":generateContent"
+        local body = {
+            contents = { { role = "user", parts = {
+                { text = prompt },
+                { inlineData = { mimeType = "image/png", data = b64 } },
+            } } },
+            generationConfig = { maxOutputTokens = 120, temperature = 0.3 },
+            safetySettings = {
+                { category = "HARM_CATEGORY_HARASSMENT",        threshold = "BLOCK_NONE" },
+                { category = "HARM_CATEGORY_HATE_SPEECH",       threshold = "BLOCK_NONE" },
+                { category = "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold = "BLOCK_NONE" },
+                { category = "HARM_CATEGORY_DANGEROUS_CONTENT", threshold = "BLOCK_NONE" },
+            },
+        }
+        local res = postJson(url, { ["Content-Type"] = "application/json", ["x-goog-api-key"] = apiKey }, body)
+        if not res then return nil, "gemini error" end
+        local cand = res.candidates and res.candidates[1]
+        local parts = cand and cand.content and cand.content.parts
+        if type(parts) ~= "table" then return nil, "gemini no parts" end
+        local out = {}
+        for _, p in ipairs(parts) do
+            if type(p.text) == "string" and p.text ~= "" and not p.thought then table.insert(out, p.text) end
+        end
+        local txt = table.concat(out, " ")
+        if txt == "" then return nil, "gemini empty" end
+        return txt, nil
+    elseif provider == "deepseek" then
+        local apiKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
+        if type(apiKey) ~= "string" or apiKey == "" then return nil, "no deepseek key" end
+        local apiModel = tostring(model)
+        if apiModel:find("4%.1%-flash") or apiModel:find("^deepseek%-4") then apiModel = "deepseek-chat" end
+        local body = {
+            model = apiModel,
+            max_tokens = 120,
+            temperature = 0.3,
+            messages = { { role = "user", content = {
+                { type = "text", text = prompt },
+                { type = "image_url", image_url = { url = "data:image/png;base64," .. b64 } },
+            } } },
+        }
+        local res = postJson("https://api.deepseek.com/chat/completions", {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = "Bearer " .. apiKey,
+        }, body)
+        if not res then return nil, "deepseek error" end
+        local ch = res.choices and res.choices[1]
+        local c = ch and ch.message and ch.message.content
+        if type(c) == "table" then
+            local out = {}
+            for _, blk in ipairs(c) do
+                if type(blk) == "table" and type(blk.text) == "string" then table.insert(out, blk.text) end
+            end
+            c = table.concat(out, " ")
+        end
+        if type(c) ~= "string" or c == "" then return nil, "deepseek empty" end
+        return c, nil
+    end
+    return nil, "unsupported provider"
+end
+
+function lobVisionLook(name)
+    if _visionCapOk == false then return nil, "vision unsupported" end
+    local provider, model = lobVisionProvider()
+    if not provider then return nil, "unsupported" end
+    local png, gerr = lobVisionGrabPNG()
+    if not png then
+        -- «нет сервисов» — фича недоступна совсем; таймауты/сбои кадра — пробуем позже
+        if gerr == "no CaptureService" or gerr == "no AssetService" then _visionCapOk = false end
+        return nil, gerr
+    end
+    _visionCapOk = true
+    local nm = tostring(name or "the player")
+    local prompt = "This is your live Roblox camera view right now. Describe in 1-2 SHORT casual sentences WHAT YOU SEE: the player " ..
+        nm .. " (if visible), other players and surroundings. Do not invent, do not mention screenshots, cameras or being an AI."
+    local txt, rerr = lobVisionRequest(provider, model, png, prompt)
+    if not txt then return nil, rerr end
+    return txt, nil
+end
+
+-- Пробуем «посмотреть»: списывает кулдаун. Возвращает text|nil, reason
+function lobVisionTry(player, name)
+    if not ClientSettings.VisionOnDemand then return nil, "off" end
+    if not player or not player.UserId then return nil, "noplayer" end
+    local provider = lobVisionProvider()
+    if not provider then return nil, "unsupported" end
+    local now = os.clock()
+    if (now - (_visionCD[player.UserId] or 0)) < _VISION_CD then return nil, "cooldown" end
+    _visionCD[player.UserId] = now
+    local txt, err = lobVisionLook(name)
+    if txt then
+        print("[VISION] ok via " .. tostring(provider) .. ": " .. txt:sub(1, 120))
+    else
+        print("[VISION] fail: " .. tostring(err))
+    end
+    return txt, err
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- v20 Beta 3: УМНАЯ ХОДЬБА — бот сам ходит как игрок: обходит препятствия
 -- (Pathfinding), идёт к тем, кто общается, уходит если попросили, а если
 -- никого — бродит и бормочет. Всё в глобалах (лимит локалок).
@@ -7199,6 +7473,18 @@ local function handleQueuedChat(item)
         local rh = lobRelHint(item.userId)
         if rh ~= "" then
             table.insert(apiMessages, { role = "system", content = "RELATIONSHIP (session memory): " .. rh })
+        end
+    end
+
+    -- §VISION: по запросу игрока делаем кадр и описываем, что видно
+    if item.vision and settings.VisionOnDemand and not item.isWorld and item.player then
+        local vdesc, verr = lobVisionTry(item.player, item.displayName or item.name)
+        if vdesc and vdesc ~= "" then
+            table.insert(apiMessages, { role = "system",
+                content = "[WHAT YOU SEE (live camera right now): " .. vdesc .. "] Answer using this; 1-2 short sentences in the player's language. Never mention a screenshot." })
+        elseif verr ~= "cooldown" and verr ~= "off" then
+            table.insert(apiMessages, { role = "system",
+                content = "[VISION: you tried to look around but could not get a camera image. Say honestly and briefly that you cannot look right now.]" })
         end
     end
 
@@ -8293,6 +8579,10 @@ task.delay(120, function()
                 _worldReactCooldowns[key] = nil
             end
         end
+        -- Чистим кулдауны зрения для вышедших игроков
+        for uid in pairs(_visionCD) do
+            if not Players:GetPlayerByUserId(uid) then _visionCD[uid] = nil end
+        end
     end
 end)
 
@@ -8502,12 +8792,18 @@ local function processChatMessage(player, rawMessage)
     local queueKey = player.UserId
     local maxQueue = tonumber(settings.MaxQueuePerUser) or 3
     if maxQueue < 1 then maxQueue = 1 end
+    -- v22: игрок просит «посмотреть»? тогда сделаем кадр (только Gemini/DeepSeek)
+    local wantsLook = false
+    if settings.VisionOnDemand and lobVisionWantsLook(rawMessage) and lobVisionReady(player) then
+        wantsLook = true
+    end
     local queued = enqueueChatItem(queueKey, {
         userId      = player.UserId,
         displayName = player.DisplayName,
         name        = player.Name,
         cleaned     = cleaned,
         player      = player,  -- v16: нужен для команды [DO:follow]
+        vision      = wantsLook,
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
@@ -11420,6 +11716,18 @@ makeToggleRow(
     ClientSettings.WebSearch == true,
     function(state)
         ClientSettings.WebSearch = state
+        saveSettings()
+    end
+)
+
+-- v22: зрение по запросу (скриншот → Gemini/DeepSeek)
+makeToggleRow(
+    automation,
+    "👁 Зрение по запросу",
+    "Когда игрок просит «посмотри / что видишь», бот делает скриншот и описывает его через Gemini или DeepSeek. Только по запросу, с кулдауном 15с — фоном токены не тратит.",
+    ClientSettings.VisionOnDemand == true,
+    function(state)
+        ClientSettings.VisionOnDemand = state
         saveSettings()
     end
 )
