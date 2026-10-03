@@ -6630,6 +6630,17 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
     end
 end
 
+-- Кто сейчас фокус внимания бота: с кем он реально общается. nil = свободен.
+-- Пока фокус активен, чужие сообщения не обрабатываются (кроме @бота по имени).
+function lobSmartFocusUid()
+    local sw = _smartWalk
+    if not (sw and sw.active) then return nil end
+    if sw.state ~= "social" then return nil end
+    local p = sw.target
+    if not p or not p.Parent then return nil end
+    return p.UserId
+end
+
 -- Назначить новую цель (единая точка сброса всех таймеров визита)
 function lobSmartSetTarget(p, now)
     local gw = _smartWalk
@@ -8330,6 +8341,19 @@ local function processChatMessage(player, rawMessage)
     
     -- Blacklist check
     if isBlacklisted(settings, player.UserId) then return end
+
+    -- v22: ФОКУС НА СОБЕСЕДНИКЕ. Пока бот общается с одним игроком — чужих не слушаем
+    -- (толпа сзади не должна «перехватывать» разговор). Исключение — прямое обращение
+    -- к боту по имени: тогда отвечаем.
+    local focusUid = lobSmartFocusUid and lobSmartFocusUid() or nil
+    if focusUid and player.UserId ~= focusUid then
+        local rawLow = rawMessage:lower()
+        local directCall = rawLow:find(_cachedMyNameLow, 1, true) or rawLow:find(_cachedMyDispLow, 1, true)
+        if not directCall then
+            print("[LOB] focus: ignore " .. player.Name)
+            return
+        end
+    end
 
     -- v20 Beta 3: умная ходьба — кто общается; и «уйди» → отойти к другим
     if ClientSettings.SmartWalk then
