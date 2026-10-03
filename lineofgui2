@@ -6231,6 +6231,8 @@ _SW = {
     WANDER_PAUSE   = 0.35, -- шанс остановиться осмотреться после прогулки
     WANDER_PAUSE_MIN = 1.5,
     WANDER_PAUSE_MAX = 4.0,
+    WANDER_ENEMY_R = 25,   -- не выбирать точки блуждания рядом с врагами
+    OTHER_ENEMY_R  = 18,   -- штраф за отход в сторону других врагов
     NUDGE_T1       = 40,   -- «ты тут?» — только если реально долго молчит и не смотрит
     NUDGE_T2       = 80,   -- «почему молчишь?»
     NUDGE_T3       = 120,  -- «ладно, я пойду»
@@ -6281,6 +6283,11 @@ function lobSmartWalkLeave(userId)
         _smartWalk.targetSince = 0
         _smartWalk.state = "wander"
         _smartWalk.leaveAt = os.clock()
+    end
+    -- «уйди» снимает и stay-lock, иначе бот может залипнуть рядом позже
+    if _smartWalk.stayLockUid == userId then
+        _smartWalk.stayLockUid = nil
+        _smartWalk.stayLockUntil = 0
     end
     pcall(function() stopFollowing() end)
 end
@@ -6523,6 +6530,22 @@ function lobSmartFindThreat(radius)
     return best, bestD
 end
 
+-- Список врагов (без LOS) — для избегания зон и штрафов при отходе
+function lobSmartEnemyList()
+    local out = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Players.LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local ok, th = pcall(lobSmartIsThreat, p)
+                if ok and th then table.insert(out, { p = p, pos = hrp.Position }) end
+            end
+        end
+    end
+    return out
+end
+
 -- Скан врагов с кэшем 0.5с (дешёво по CPU)
 function lobSmartThreatScan()
     local gw = _smartWalk
@@ -6609,6 +6632,26 @@ function lobSmartFlee(threat)
                 table.insert(cands, { pos = gp, score = score })
             end
         end
+        -- штраф кандидатам, ведущим в сторону ДРУГИХ врагов
+        do
+            local others = {}
+            for _, q in ipairs(Players:GetPlayers()) do
+                if q ~= Players.LocalPlayer and q ~= threat and q.Character then
+                    local qr = q.Character:FindFirstChild("HumanoidRootPart")
+                    if qr then
+                        local ok, th = pcall(lobSmartIsThreat, q)
+                        if ok and th then table.insert(others, qr.Position) end
+                    end
+                end
+            end
+            if #others > 0 then
+                for _, c in ipairs(cands) do
+                    for _, op in ipairs(others) do
+                        if (c.pos - op).Magnitude < _SW.OTHER_ENEMY_R then c.score = c.score - 40 end
+                    end
+                end
+            end
+        end
         table.sort(cands, function(a, b) return a.score > b.score end)
 
         local chosen = nil
@@ -6685,7 +6728,9 @@ function lobSmartPick()
                         if (now - spoke) < 75 then score = score + 900 end
                         if spoke > 0 then score = score + math.max(0, 120 - (now - spoke) * 2) end
                         local vel = pr.AssemblyLinearVelocity
-                        score = score - Vector3.new(vel.X, 0, vel.Z).Magnitude * 2
+                        local spd = Vector3.new(vel.X, 0, vel.Z).Magnitude
+                        score = score - spd * 2
+                        if spd < 1 then score = score + 20 end  -- стоячего догнать/застать легче
                         local toUs = myPos - pr.Position
                         if toUs.Magnitude > 1 and pr.CFrame.LookVector:Dot(toUs.Unit) > 0.3 then
                             score = score + 30
@@ -6902,15 +6947,21 @@ function lobSmartWander(cancelFn)
     local root = ch and ch:FindFirstChild("HumanoidRootPart")
     if not root then return "fail" end
     local home = _smartWalk.home or root.Position
+    local enemies = lobSmartEnemyList()
     local dest = nil
-    for _ = 1, 4 do
+    for _ = 1, 5 do
         local ang = math.random() * math.pi * 2
         local rad = math.random(_SW.WANDER_MIN, _SW.WANDER_MAX)
         local p = root.Position + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
         -- держимся в пределах лужа от дома
         local off = p - home
         if off.Magnitude > _SW.LEASH then p = home + off.Unit * _SW.LEASH end
-        if not lobSmartInStuckZone(p) then
+        -- не гуляем в сторону врагов
+        local nearEnemy = false
+        for _, e in ipairs(enemies) do
+            if e.pos and (p - e.pos).Magnitude < _SW.WANDER_ENEMY_R then nearEnemy = true break end
+        end
+        if not nearEnemy and not lobSmartInStuckZone(p) then
             local rp = RaycastParams.new()
             rp.FilterType = Enum.RaycastFilterType.Exclude
             rp.FilterDescendantsInstances = { ch }
@@ -7037,7 +7088,7 @@ function lobSmartWalkStart()
                 -- (лечит «бот стоит с молчуном и впирает "почему молчишь", пока рядом идёт диалог»)
                 if speakerFresh and target and target.UserId ~= spkUid then
                     local curSpoke = _lastChatAt[target.UserId] or 0
-                    if (now - curSpoke) > 30 then
+                    if (now - curSpoke) > 20 then
                         local sp = Players:GetPlayerByUserId(spkUid)
                         local spOk = false
                         if sp and sp.Parent and sp.Character then
