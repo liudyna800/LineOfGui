@@ -6257,8 +6257,8 @@ _SW = {
     LEASH          = 130,  -- не уходить дальше от дома при блуждании
     STUCK_ZONE_SEC = 90,   -- как долго помнить место застревания
     STUCK_ZONE_R   = 10,
-    THREAT_RADIUS  = 32,   -- враг в этом радиусе — уже «замечен»
-    FLEE_RADIUS    = 32,   -- отходим, пока враг ближе этого (не стоим рядом)
+    THREAT_RADIUS  = 26,   -- враг в этом радиусе И ВИДЕН — «замечен»
+    FLEE_RADIUS    = 24,   -- отходим, пока враг ближе этого
     FLEE_DIST      = 34,   -- на сколько студов отойти
     DANGER_LINE_CD = 45,   -- как часто говорить «ты опасный, я отойду»
 }
@@ -6467,6 +6467,39 @@ function lobSmartIsThreat(p, now)
     return pv
 end
 
+-- Видно ли игрока (сквозь щель — да, через стену — нет). Несколько лучей:
+-- корень/голова/торс и перекрёстные, чтобы маленькая щель тоже засчитывалась.
+function lobSmartCanSee(p)
+    local myChar = Players.LocalPlayer.Character
+    if not myChar or not p or not p.Character then return false end
+    local root = myChar:FindFirstChild("HumanoidRootPart")
+    local tr = p.Character:FindFirstChild("HumanoidRootPart")
+    if not root or not tr then return false end
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { myChar, p.Character }
+    local function partPos(ch, name, fallback)
+        local d = ch:FindFirstChild(name)
+        if d and d:IsA("BasePart") then return d.Position end
+        return fallback
+    end
+    local myHead = partPos(myChar, "Head", root.Position + Vector3.new(0, 2, 0))
+    local myTorso = partPos(myChar, "UpperTorso", partPos(myChar, "Torso", root.Position))
+    local thHead = partPos(p.Character, "Head", tr.Position + Vector3.new(0, 2, 0))
+    local thTorso = partPos(p.Character, "UpperTorso", partPos(p.Character, "Torso", tr.Position))
+    local rays = {
+        { root.Position, tr.Position },
+        { myHead, thHead },
+        { myTorso, thTorso },
+        { myHead, thTorso },
+        { myTorso, thHead },
+    }
+    for _, r in ipairs(rays) do
+        if not workspace:Raycast(r[1], r[2] - r[1], rp) then return true end
+    end
+    return false
+end
+
 function lobSmartFindThreat(radius)
     local root = getLocalRootPart()
     if not root then return nil, nil end
@@ -6481,7 +6514,8 @@ function lobSmartFindThreat(radius)
                 local d = (hrp.Position - myPos).Magnitude
                 if d < bestD then
                     local ok, th = pcall(lobSmartIsThreat, p, now)
-                    if ok and th then best, bestD = p, d end
+                    -- засчитываем только ВИДИМОГО врага (стена = не замечен)
+                    if ok and th and lobSmartCanSee(p) then best, bestD = p, d end
                 end
             end
         end
@@ -6912,6 +6946,12 @@ function lobSmartWalkStart()
                 -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
                 do
                     local threat, tdist = lobSmartThreatScan()
+                    -- из кэша враг мог оказаться за стеной — тогда не паникуем
+                    if threat then
+                        local see = false
+                        pcall(function() see = lobSmartCanSee(threat) end)
+                        if not see then threat = nil end
+                    end
                     if threat then
                         gw.lastThreatAt = now
                         gw.avoid[threat.UserId] = now + 60
