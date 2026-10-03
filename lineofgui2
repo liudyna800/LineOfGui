@@ -6575,6 +6575,7 @@ function lobSmartFlee(threat)
     local char = Players.LocalPlayer.Character
     if not hum or not char then return end
     local t0 = os.clock()
+    local stepAngle = math.random() * 360  -- меняется при неудаче, чтобы обходить угол
     while os.clock() - t0 < 2.5 and (_smartWalk.fleeUntil or 0) > os.clock() do
         local root = getLocalRootPart()
         local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
@@ -6611,33 +6612,47 @@ function lobSmartFlee(threat)
         table.sort(cands, function(a, b) return a.score > b.score end)
 
         local chosen = nil
+        local reachable = false
         for k = 1, math.min(3, #cands) do
             local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
             local ok = pcall(function() path:ComputeAsync(root.Position, cands[k].pos) end)
-            if ok and path.Status == Enum.PathStatus.Success then chosen = cands[k].pos break end
+            if ok and path.Status == Enum.PathStatus.Success then chosen = cands[k].pos reachable = true break end
         end
-        if not chosen and #cands > 0 then chosen = cands[1].pos end
-        if not chosen then chosen = root.Position + base * _SW.FLEE_DIST end
-        _smartWalk.fleeDest = chosen
 
         local p0 = root.Position
-        local res = lobSmartApproach(function() return _smartWalk.fleeDest end, function()
-            if not _smartWalk.active then return true end
-            if (_smartWalk.fleeUntil or 0) <= os.clock() then return true end
-            local r = getLocalRootPart()
-            local t2 = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
-            if r and t2 and (r.Position - t2.Position).Magnitude > _SW.FLEE_RADIUS + 5 then return true end
-            return false
-        end, 4, 0.7)
-
-        if res == "nopath" or res == "stuck" or res == "fail" then
-            pcall(function() hum:MoveTo(chosen) end)
-            task.wait(0.2)
-            pcall(function() hum.Jump = true end)
+        local res = "nopath"
+        if reachable and chosen then
+            _smartWalk.fleeDest = chosen
+            res = lobSmartApproach(function() return _smartWalk.fleeDest end, function()
+                if not _smartWalk.active then return true end
+                if (_smartWalk.fleeUntil or 0) <= os.clock() then return true end
+                local r = getLocalRootPart()
+                local t2 = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+                if r and t2 and (r.Position - t2.Position).Magnitude > _SW.FLEE_RADIUS + 5 then return true end
+                return false
+            end, 4, 0.7)
         end
+
         local r2 = getLocalRootPart()
-        if r2 and (r2.Position - p0).Magnitude < 0.15 then
-            pcall(function() hum.Jump = true end)
+        local moved = r2 and (r2.Position - p0).Magnitude or 0
+        if (not reachable) or res == "nopath" or res == "stuck" or res == "fail" or moved < 0.25 then
+            -- путь не найден/не двигаемся: КОРОТКИЙ шаг в самую свободную сторону,
+            -- угол обхода поворачивается с каждой неудачей
+            local bestDir, bestScore = nil, -1e9
+            for k = 0, 11 do
+                local d = CFrame.Angles(0, math.rad(k * 30 + stepAngle), 0) * base
+                local hit = workspace:Raycast(root.Position + Vector3.new(0, 2, 0), d * 8, rp)
+                local clear = hit and 0 or 1
+                local score = clear * 10 + d:Dot(base) * 2
+                if score > bestScore then bestScore, bestDir = score, d end
+            end
+            stepAngle = stepAngle + 47
+            if bestDir then
+                pcall(function() hum:MoveTo(root.Position + bestDir * 10) end)
+            else
+                pcall(function() hum.Jump = true end)
+            end
+            task.wait(0.2)
         end
     end
 end
