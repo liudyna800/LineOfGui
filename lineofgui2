@@ -5510,6 +5510,11 @@ end
 function lobIsDangerTarget(targetPlayer)
     if not lobDangerActive() then return false end
     if not targetPlayer then return false end
+    -- команды сменились: если сейчас мы в одной команде — свой, даже если раньше бил
+    local myT, thT = "", ""
+    pcall(function() myT = getTeamName(Players.LocalPlayer) or "" end)
+    pcall(function() thT = getTeamName(targetPlayer) or "" end)
+    if myT ~= "" and thT ~= "" and myT == thT then return false end
     -- живой урон от него = доказательство, wiki не нужна
     if _danger.suspectUid and targetPlayer.UserId == _danger.suspectUid
         and (os.clock() - (_danger.lastDamageAt or -999)) < 120 then
@@ -6202,6 +6207,7 @@ _smartWalk = {
     botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0, lastForceFaceAt = 0,
     fleeUntil = 0, fleeFrom = nil, dangerLineAt = 0,
     threatScanAt = 0, threatUid = nil, threatDist = 0,
+    threatSet = {}, threatAvoid = {}, threatFail = {},
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6251,8 +6257,8 @@ _SW = {
     STUCK_ZONE_SEC = 90,   -- как долго помнить место застревания
     STUCK_ZONE_R   = 10,
     THREAT_RADIUS  = 32,   -- враг в этом радиусе — уже «замечен»
-    FLEE_RADIUS    = 18,   -- ближе этого — отходим
-    FLEE_DIST      = 28,   -- на сколько студов отойти
+    FLEE_RADIUS    = 32,   -- отходим, пока враг ближе этого (не стоим рядом)
+    FLEE_DIST      = 34,   -- на сколько студов отойти
     DANGER_LINE_CD = 45,   -- как часто говорить «ты опасный, я отойду»
 }
 
@@ -6443,7 +6449,14 @@ function lobSmartIsThreat(p, now)
     if not p or not p.Parent or not p.Character then return false end
     now = now or os.clock()
     local uid = p.UserId
-    if _danger and _danger.suspectUid == uid
+    -- если СЕЙЧАС мы в одной команде — свой (даже если раньше бил и команды менялись)
+    local myT, thT = "", ""
+    pcall(function() myT = getTeamName(Players.LocalPlayer) or "" end)
+    pcall(function() thT = getTeamName(p) or "" end)
+    local teamsKnown = (myT ~= "" and thT ~= "")
+    if teamsKnown and myT == thT then return false end
+    -- урон учитываем только без команд: иначе решают команды + PvP
+    if (not teamsKnown) and _danger and _danger.suspectUid == uid
         and (now - (_danger.lastDamageAt or -999)) < 120 then return true end
     local enemy = false
     pcall(function() enemy = lobIsEnemyOf(p) end)
@@ -6518,23 +6531,23 @@ function lobSmartDangerLine(p)
 end
 
 -- Отойти от врага (точка в сторону от него, с проверкой земли)
+-- Отход без pathfinding: прямое движение в сторону от врага с переприцелом
+-- каждые 0.15с, пока он ближе FLEE_RADIUS (+4) — гарантированно не стоим рядом.
 function lobSmartFlee(threat)
-    local root = getLocalRootPart()
-    local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
-    if not root or not tr then return end
-    local away = root.Position - tr.Position
-    away = Vector3.new(away.X, 0, away.Z)
-    if away.Magnitude < 1 then away = root.CFrame.LookVector * -1 end
-    local dest = root.Position + away.Unit * _SW.FLEE_DIST
-    local rp = RaycastParams.new()
-    rp.FilterType = Enum.RaycastFilterType.Exclude
-    rp.FilterDescendantsInstances = { Players.LocalPlayer.Character }
-    local hit = workspace:Raycast(dest + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
-    if hit and hit.Position then dest = hit.Position end
-    _smartWalk.wanderDest = dest
-    lobSmartApproach(function() return _smartWalk.wanderDest end, function()
-        return (not _smartWalk.active) or (_smartWalk.fleeUntil or 0) < os.clock()
-    end, 5, 2)
+    local hum = getLocalHumanoid()
+    if not hum then return end
+    local t0 = os.clock()
+    while os.clock() - t0 < 2 and (_smartWalk.fleeUntil or 0) > os.clock() do
+        local root = getLocalRootPart()
+        local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+        if not root or not tr then break end
+        local away = root.Position - tr.Position
+        away = Vector3.new(away.X, 0, away.Z)
+        if away.Magnitude > _SW.FLEE_RADIUS + 4 then break end
+        if away.Magnitude < 1 then away = root.CFrame.LookVector * -1 end
+        pcall(function() hum:MoveTo(root.Position + away.Unit * _SW.FLEE_DIST) end)
+        task.wait(0.15)
+    end
 end
 
 -- Выбор лучшего собеседника: свежесть чата, близость, спокойствие, взгляд в нашу сторону
@@ -6845,6 +6858,9 @@ function lobSmartWalkStart()
                     if threat then
                         gw.avoid[threat.UserId] = now + 60
                         gw.reachFail[threat.UserId] = now + 45
+                        gw.threatSet[threat.UserId] = true
+                        gw.threatAvoid[threat.UserId] = now + 60
+                        gw.threatFail[threat.UserId] = now + 45
                         if gw.target and gw.target.UserId == threat.UserId then
                             gw.target = nil
                             gw.targetSince = 0
@@ -6860,6 +6876,21 @@ function lobSmartWalkStart()
                             lobSmartFlee(threat)
                             task.wait(0.2)
                             return
+                        end
+                    end
+                    -- снимаем метку/игнор с тех, кто больше не враг (сменил команду, PvP кончился)
+                    for uid in pairs(gw.threatSet) do
+                        local pp = Players:GetPlayerByUserId(uid)
+                        local stillThreat = false
+                        if pp and pp.Parent then
+                            pcall(function() stillThreat = lobSmartIsThreat(pp, now) end)
+                        end
+                        if not stillThreat then
+                            gw.threatSet[uid] = nil
+                            if gw.threatAvoid[uid] and gw.avoid[uid] == gw.threatAvoid[uid] then gw.avoid[uid] = nil end
+                            if gw.threatFail[uid] and gw.reachFail[uid] == gw.threatFail[uid] then gw.reachFail[uid] = nil end
+                            gw.threatAvoid[uid] = nil
+                            gw.threatFail[uid] = nil
                         end
                     end
                 end
