@@ -7279,10 +7279,15 @@ function lobSmartWalkStart()
                             -- собственная реплика бота тоже сбрасывает «молчание»
                             local botSpoke = ((_smartWalk.botReplyAt or {})[target.UserId] or 0)
                             if (now - botSpoke) < 5 then gw.nudgeStage = 0 end
-                            local lastAct = gw.lastInteract
-                            if not lastAct or lastAct <= 0 then lastAct = gw.arrivedAt or now end
-                            if botSpoke > lastAct then lastAct = botSpoke end
+                            -- «активность в чате» отдельно от взгляда: молчащего НЕЗНАКОМЦА
+                            -- взгляд не удерживает (иначе бот стоит рядом вечно)
+                            local lastActChat = gw.arrivedAt or now
+                            if spokeAt > lastActChat then lastActChat = spokeAt end
+                            if botSpoke > lastActChat then lastActChat = botSpoke end
+                            local lastAct = lastActChat
+                            if (gw.lastInteract or 0) > lastAct then lastAct = gw.lastInteract end
                             local quietFor = now - lastAct
+                            local quietStranger = now - lastActChat
                             -- «молчание» = нет ни реплики, ни взгляда, ни нашего ответа
                             local quietChat = now - math.max(spokeAt, gw.lastInteract or 0, gw.arrivedAt or 0, botSpoke)
                             -- пока бот ЕЩЁ отвечает этому игроку — вообще не подначиваем
@@ -7329,7 +7334,8 @@ function lobSmartWalkStart()
                                     if (gw.nudgeStage or 0) >= 3 and quietChat > _SW.NUDGE_LEAVE then doLeave = true end
                                 end
                             else
-                                if minMet and (now > (gw.stayUntil or 0)) and quietFor > 10 then
+                                -- незнакомец молчит (даже если смотрит) — уходим после минимального визита
+                                if minMet and (now > (gw.stayUntil or 0)) and quietStranger > 10 then
                                     doLeave, withFarewell = true, true
                                 end
                             end
