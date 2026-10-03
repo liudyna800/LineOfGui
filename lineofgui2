@@ -6206,7 +6206,7 @@ _smartWalk = {
     saidGoodbyeNudge = false, travelSince = 0, stayLockUid = nil, stayLockUntil = 0,
     botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0, lastForceFaceAt = 0,
     fleeUntil = 0, fleeFrom = nil, dangerLineAt = 0,
-    threatScanAt = 0, threatUid = nil, threatDist = 0,
+    threatScanAt = 0, threatUid = nil, threatDist = 0, lastThreatAt = 0,
     threatSet = {}, threatAvoid = {}, threatFail = {},
 }
 _lastChatAt = _lastChatAt or {}
@@ -6535,10 +6535,10 @@ end
 -- каждые ~0.7с; выбираем свободное направление рейкастами, если пути нет —
 -- аварийное прямое движение вбок/прыжок.
 function lobSmartFlee(threat)
+    local PathfindingService = game:GetService("PathfindingService")
     local hum = getLocalHumanoid()
     local char = Players.LocalPlayer.Character
     if not hum or not char then return end
-    local side = (math.random() < 0.5) and 1 or -1
     local t0 = os.clock()
     while os.clock() - t0 < 2.5 and (_smartWalk.fleeUntil or 0) > os.clock() do
         local root = getLocalRootPart()
@@ -6553,22 +6553,37 @@ function lobSmartFlee(threat)
         local rp = RaycastParams.new()
         rp.FilterType = Enum.RaycastFilterType.Exclude
         rp.FilterDescendantsInstances = { char }
-        local eye = root.Position + Vector3.new(0, 1.5, 0)
-        -- ищем свободное направление: прямо от врага, затем вбок/назад
-        local best, bestScore = nil, -1e9
-        for _, ang in ipairs({ 0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180 }) do
-            local dir = CFrame.Angles(0, math.rad(ang * side), 0) * base
-            local hit = workspace:Raycast(eye, dir * 14, rp)
-            local clear = (hit == nil) and 1 or 0
-            local gHit = workspace:Raycast(root.Position + dir * 10 + Vector3.new(0, 40, 0), Vector3.new(0, -80, 0), rp)
-            local gOk = gHit and 1 or 0
-            local score = clear * 3 + gOk * 2 - math.abs(ang) / 200
-            if score > bestScore then bestScore, best = score, dir end
+
+        -- КАНДИДАТЫ «куда отойти»: 8 сторон, приземляем, оцениваем открытость,
+        -- прямую видимость и даль от врага. Затем идём к ДОСТИЖИМОМУ кандидату.
+        local cands = {}
+        for i = 0, 7 do
+            local dir = CFrame.Angles(0, math.rad(i * 45), 0) * base
+            local g = workspace:Raycast(root.Position + dir * _SW.FLEE_DIST + Vector3.new(0, 60, 0),
+                Vector3.new(0, -120, 0), rp)
+            if g and g.Position then
+                local gp = g.Position
+                local open = 0
+                for _, a2 in ipairs({ 0, 90, 180, 270 }) do
+                    local d2 = CFrame.Angles(0, math.rad(a2), 0) * Vector3.new(1, 0, 0)
+                    if not workspace:Raycast(gp + Vector3.new(0, 3, 0), d2 * 8, rp) then open = open + 1 end
+                end
+                local losClear = not workspace:Raycast(root.Position + Vector3.new(0, 3, 0), gp - root.Position, rp)
+                local score = (gp - tr.Position).Magnitude + open * 6 + (losClear and 10 or 0)
+                table.insert(cands, { pos = gp, score = score })
+            end
         end
-        local dest = root.Position + (best or base) * _SW.FLEE_DIST
-        local g = workspace:Raycast(dest + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
-        if g and g.Position then dest = g.Position end
-        _smartWalk.fleeDest = dest
+        table.sort(cands, function(a, b) return a.score > b.score end)
+
+        local chosen = nil
+        for k = 1, math.min(3, #cands) do
+            local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+            local ok = pcall(function() path:ComputeAsync(root.Position, cands[k].pos) end)
+            if ok and path.Status == Enum.PathStatus.Success then chosen = cands[k].pos break end
+        end
+        if not chosen and #cands > 0 then chosen = cands[1].pos end
+        if not chosen then chosen = root.Position + base * _SW.FLEE_DIST end
+        _smartWalk.fleeDest = chosen
 
         local p0 = root.Position
         local res = lobSmartApproach(function() return _smartWalk.fleeDest end, function()
@@ -6581,15 +6596,13 @@ function lobSmartFlee(threat)
         end, 4, 0.7)
 
         if res == "nopath" or res == "stuck" or res == "fail" then
-            pcall(function() hum:MoveTo(dest) end)
+            pcall(function() hum:MoveTo(chosen) end)
             task.wait(0.2)
             pcall(function() hum.Jump = true end)
-            side = -side
         end
         local r2 = getLocalRootPart()
         if r2 and (r2.Position - p0).Magnitude < 0.15 then
             pcall(function() hum.Jump = true end)
-            side = -side
         end
     end
 end
@@ -6899,6 +6912,7 @@ function lobSmartWalkStart()
                 do
                     local threat, tdist = lobSmartThreatScan()
                     if threat then
+                        gw.lastThreatAt = now
                         gw.avoid[threat.UserId] = now + 60
                         gw.reachFail[threat.UserId] = now + 45
                         gw.threatSet[threat.UserId] = true
@@ -7226,15 +7240,29 @@ function lobSmartWalkStart()
                         end
                         task.wait(math.random() * (_SW.WANDER_PAUSE_MAX - _SW.WANDER_PAUSE_MIN) + _SW.WANDER_PAUSE_MIN)
                     end
-                    if ClientSettings.AutoReply and (now - (gw.lastIdle or 0)) > _SW.IDLE_TALK_CD then
-                        gw.lastIdle = now
-                        local lines
-                        if _lastGlobalLang == "RU" then
-                            lines = { "хм, тут пусто…", "кто-нибудь тут?", "скучно…", "просто гуляю", "ау, где все?" }
-                        else
-                            lines = { "hmm, quiet here…", "anyone wanna chat?", "kinda bored…", "just walking around", "where is everyone?" }
+                    if ClientSettings.AutoReply and (now - (gw.lastIdle or 0)) > _SW.IDLE_TALK_CD
+                        and (now - (gw.lastThreatAt or 0)) > 30 then
+                        -- если рядом есть люди — не говорим «тут пусто / скучно»
+                        local near = 0
+                        local rr0 = getLocalRootPart()
+                        if rr0 then
+                            for _, pp in ipairs(Players:GetPlayers()) do
+                                if pp ~= Players.LocalPlayer and pp.Character then
+                                    local pr0 = pp.Character:FindFirstChild("HumanoidRootPart")
+                                    if pr0 and (pr0.Position - rr0.Position).Magnitude < 40 then near = near + 1 end
+                                end
+                            end
                         end
-                        pcall(sendBotMessage, lines[math.random(#lines)])
+                        if near == 0 then
+                            gw.lastIdle = now
+                            local lines
+                            if _lastGlobalLang == "RU" then
+                                lines = { "хм, тут пусто…", "кто-нибудь тут?", "скучно…", "просто гуляю", "ау, где все?" }
+                            else
+                                lines = { "hmm, quiet here…", "anyone wanna chat?", "kinda bored…", "just walking around", "where is everyone?" }
+                            end
+                            pcall(sendBotMessage, lines[math.random(#lines)])
+                        end
                     end
                 end
             end)
