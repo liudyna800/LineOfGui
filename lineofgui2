@@ -7163,11 +7163,20 @@ function lobSmartWalkStart()
                             end
 
                             local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
+                            -- собственная реплика бота тоже сбрасывает «молчание»
+                            local botSpoke = ((_smartWalk.botReplyAt or {})[target.UserId] or 0)
+                            if (now - botSpoke) < 5 then gw.nudgeStage = 0 end
                             local lastAct = gw.lastInteract
                             if not lastAct or lastAct <= 0 then lastAct = gw.arrivedAt or now end
+                            if botSpoke > lastAct then lastAct = botSpoke end
                             local quietFor = now - lastAct
-                            -- «молчание» = нет ни реплики, ни взгляда вблизи (иначе не подначиваем)
-                            local quietChat = now - math.max(spokeAt, gw.lastInteract or 0, gw.arrivedAt or 0)
+                            -- «молчание» = нет ни реплики, ни взгляда, ни нашего ответа
+                            local quietChat = now - math.max(spokeAt, gw.lastInteract or 0, gw.arrivedAt or 0, botSpoke)
+                            -- пока бот ЕЩЁ отвечает этому игроку — вообще не подначиваем
+                            if ((_botBusyByUser or {})[target.UserId] or 0) > 0 then
+                                quietChat = 0
+                                gw.nudgeStage = 0
+                            end
                             local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
                             local rr = _rel[target.UserId]
                             local wasTalking = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
