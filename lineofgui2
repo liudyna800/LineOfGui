@@ -6336,25 +6336,33 @@ function lobVisionGrabPNG()
         sw, sh = rw, rh
     end)
     if not src or sw <= 0 or sh <= 0 then return nil, "cannot read pixels" end
+    -- буфер должен быть ровно RGBA нужного размера, иначе readu8 уйдёт за границы
+    local okLen, blen = pcall(buffer.len, src)
+    if not okLen or type(blen) ~= "number" or blen < sw * sh * 4 then return nil, "bad buffer" end
 
-    local scale = math.min(1, _VISION_MAX_SIDE / math.max(sw, sh))
-    local tw = math.max(1, math.floor(sw * scale))
-    local th = math.max(1, math.floor(sh * scale))
-    local out = buffer.create(tw * th * 4)
-    for y = 0, th - 1 do
-        local sy = math.min(sh - 1, math.floor(y / scale))
-        for x = 0, tw - 1 do
-            local sx = math.min(sw - 1, math.floor(x / scale))
-            local si = (sy * sw + sx) * 4
-            local di = (y * tw + x) * 4
-            for k = 0, 3 do buffer.writeu8(out, di + k, buffer.readu8(src, si + k)) end
+    local okEnc, png = pcall(function()
+        local scale = math.min(1, _VISION_MAX_SIDE / math.max(sw, sh))
+        local tw = math.max(1, math.floor(sw * scale))
+        local th = math.max(1, math.floor(sh * scale))
+        local out = buffer.create(tw * th * 4)
+        for y = 0, th - 1 do
+            local sy = math.min(sh - 1, math.floor(y / scale))
+            for x = 0, tw - 1 do
+                local sx = math.min(sw - 1, math.floor(x / scale))
+                local si = (sy * sw + sx) * 4
+                local di = (y * tw + x) * 4
+                for k = 0, 3 do buffer.writeu8(out, di + k, buffer.readu8(src, si + k)) end
+            end
         end
-    end
-    return lobVisionPNG(out, tw, th), nil
+        return lobVisionPNG(out, tw, th)
+    end)
+    if not okEnc or type(png) ~= "string" or png == "" then return nil, "encode failed" end
+    return png, nil
 end
 
 -- Отправка кадра в vision-модель. Возвращает text|nil, err
 function lobVisionRequest(provider, model, pngStr, prompt)
+    if type(HttpService.Base64Encode) ~= "function" then return nil, "no base64 api" end
     local b64 = HttpService:Base64Encode(pngStr)
     if provider == "gemini" then
         local apiKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
@@ -6435,7 +6443,8 @@ function lobVisionLook(name)
     local nm = tostring(name or "the player")
     local prompt = "This is your live Roblox camera view right now. Describe in 1-2 SHORT casual sentences WHAT YOU SEE: the player " ..
         nm .. " (if visible), other players and surroundings. Do not invent, do not mention screenshots, cameras or being an AI."
-    local txt, rerr = lobVisionRequest(provider, model, png, prompt)
+    local okR, txt, rerr = pcall(lobVisionRequest, provider, model, png, prompt)
+    if not okR then return nil, "request error" end
     if not txt then return nil, rerr end
     return txt, nil
 end
@@ -6449,7 +6458,8 @@ function lobVisionTry(player, name)
     local now = os.clock()
     if (now - (_visionCD[player.UserId] or 0)) < _VISION_CD then return nil, "cooldown" end
     _visionCD[player.UserId] = now
-    local txt, err = lobVisionLook(name)
+    local okL, txt, err = pcall(lobVisionLook, name)
+    if not okL then txt, err = nil, "vision error" end
     if txt then
         print("[VISION] ok via " .. tostring(provider) .. ": " .. txt:sub(1, 120))
     else
