@@ -6325,7 +6325,27 @@ function lobVisionGrabPNG()
             if type(r) == "string" and r ~= "" then contentId = r done = true end
         end)
         if not ok2 then
-            return nil, "capture failed: " .. tostring(errCall):sub(1, 100)
+            -- третья форма: новая API TakeScreenshotCaptureAsync (ScreenshotCapture)
+            local sc = nil
+            pcall(function()
+                CaptureService:TakeScreenshotCaptureAsync(function(_, capture) sc = capture done = true end, {})
+            end)
+            local t3 = 0
+            while not done and t3 < 6 do task.wait(0.1) t3 = t3 + 0.1 end
+            if sc then
+                pcall(function()
+                    local src = nil
+                    if type(Content) == "table" and Content.fromObject then
+                        local c = Content.fromObject(sc)
+                        if c then src = c.Source end
+                    end
+                    if not src and type(sc) == "string" then src = sc end
+                    if src then contentId = tostring(src) end
+                end)
+            end
+            if not contentId then
+                return nil, "capture failed: " .. tostring(errCall):sub(1, 100)
+            end
         end
     end
     local t = 0
