@@ -6209,7 +6209,7 @@ _smartWalk = {
     botReplyAt = {}, lastSpeakerUid = nil, lastSpeakerAt = 0, lastForceFaceAt = 0,
     fleeUntil = 0, fleeFrom = nil, dangerLineAt = 0,
     threatScanAt = 0, threatUid = nil, threatDist = 0, lastThreatAt = 0,
-    threatSet = {}, threatAvoid = {}, threatFail = {},
+    threatSet = {}, threatAvoid = {}, threatFail = {}, metBefore = false,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6776,7 +6776,8 @@ end
 
 -- Подойти и заговорить. Троттлинг per-user (120с) + глобальный 8с против веера приветствий.
 -- true = приветствие отправлено/уже было (повторять не нужно), false = отложено троттлом (повторить)
-function lobSmartGreet(p)
+-- knownBefore = игрок был знаком ДО этого визита (иначе не говорим «снова»)
+function lobSmartGreet(p, knownBefore)
     if not ClientSettings.AutoReply then return true end
     if not p or not p.Parent then return false end
     local now = os.clock()
@@ -6789,13 +6790,13 @@ function lobSmartGreet(p)
     _smartWalk.lastGreetAt = now
     local qk = "sw:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
-    local relHint = lobRelHint(p.UserId)
+    local relHint = knownBefore and lobRelHint(p.UserId) or ""
     local body
     if relHint ~= "" then
         body = "[SYSTEM: You are walking up to " .. nm .. " again. " .. relHint ..
             " Greet them like an old acquaintance (NOT a first meeting) and continue where you left off. ONE short casual line, in character. If they earlier told you to go away, do not greet.]"
     else
-        body = "[SYSTEM: You just walked up to " .. nm .. " for the first time. Greet them in ONE short casual line and try to start a light chat, in character. If they earlier told you to go away, do not greet.]"
+        body = "[SYSTEM: You just walked up to " .. nm .. " for the VERY FIRST time - you have never met them before. Greet them in ONE short casual line and try to start a light chat, in character. NEVER say 'again', 'снова', or imply you already know them. If they earlier told you to go away, do not greet.]"
     end
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
@@ -7252,6 +7253,10 @@ function lobSmartWalkStart()
                                 gw.nudgeStage = 0
                                 gw.saidGoodbyeNudge = false
                                 gw.travelSince = 0
+                                -- ВАЖНО: запоминаем «знал ли раньше» ДО записи знакомства,
+                                -- иначе первая встреча выглядит как «снова привет»
+                                local r0 = _rel[target.UserId]
+                                gw.metBefore = (r0 and (((r0.meetings or 0) > 0) or ((r0.chats or 0) > 0))) and true or false
                                 lobRelNoteMet(target.UserId, target.DisplayName or target.Name)
                             end
                             if gw.arrivedAt == 0 then
@@ -7276,7 +7281,7 @@ function lobSmartWalkStart()
                             if (gw.greeted or 0) == 0 and not spokeRecently then
                                 -- помечаем «поздоровался» ТОЛЬКО если реально отправили
                                 -- (иначе бот молча смотрел из-за троттла приветствия)
-                                if lobSmartGreet(target) then gw.greeted = now end
+                                if lobSmartGreet(target, gw.metBefore) then gw.greeted = now end
                             end
 
                             local rr = _rel[target.UserId]
@@ -7561,8 +7566,19 @@ local function handleQueuedChat(item)
     -- v20 Beta 3: кэш ответов — повторный вопрос отвечаем мгновенно (без запроса к модели)
     if not item.isWorld and lobReplyCacheServe(settings, item.cleaned, item.player, item.userId) then return end
 
-    -- history = nil если память выключена
-    local history = getHistory(settings, item.userId)
+    -- history = nil если память выключена.
+    -- Мировые события (SmartWalk и т.п.): НЕ подмешиваем общую историю чужих игроков —
+    -- иначе бот путает людей и говорит «снова» тому, кого видит впервые.
+    local history
+    if item.isWorld then
+        if settings.PerUserMemory and item.langUid then
+            history = getHistory(settings, item.langUid)
+        else
+            history = nil
+        end
+    else
+        history = getHistory(settings, item.userId)
+    end
 
     -- Собираем сообщения для API
     local apiMessages = {}
