@@ -2277,7 +2277,7 @@ local function makeSystemPrompt(settings)
     table.insert(parts,
         "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop/stay/leave), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
     if settings.VisionOnDemand and lobVisionProviderAvailable() then
-        table.insert(parts, "VISION: when the player asks you to look / see / describe what is around (посмотри, что видишь, look), a live camera image will be described in a [WHAT YOU SEE] system block. Use it as ground truth and answer in 1-2 short sentences. Never claim you cannot see.")
+        table.insert(parts, "VISION: when the player asks you to look / see / take a screenshot or photo / how they look (посмотри, что видишь, скрин, как я выгляжу), a live camera image will be described in a [WHAT YOU SEE] system block. Use it as ground truth and answer in 1-2 short sentences. Never claim you cannot look, see or make screenshots.")
     end
     do
         local stA = settings.ActionsEnabled and "on" or "off"
@@ -6227,7 +6227,10 @@ function lobVisionWantsLook(msg)
     local keys = {
         "посмотри", "глянь", "взгляни", "осмотрись", "что видишь", "что ты видишь",
         "что вокруг тебя", "опиши что видишь",
+        "скрин", "сделай скрин", "сделай скриншот", "сфоткай", "сфотографируй",
+        "сделай фото", "покажи фото", "как я выгляжу", "как выгляжу",
         "look around", "what do you see", "can you see", "describe the scene",
+        "screenshot", "take a screenshot", "take a photo", "how do i look",
     }
     for _, k in ipairs(keys) do if m:find(k, 1, true) then return true end end
     return false
@@ -6442,7 +6445,9 @@ function lobVisionLook(name)
     _visionCapOk = true
     local nm = tostring(name or "the player")
     local prompt = "This is your live Roblox camera view right now. Describe in 1-2 SHORT casual sentences WHAT YOU SEE: the player " ..
-        nm .. " (if visible), other players and surroundings. Do not invent, do not mention screenshots, cameras or being an AI."
+        nm .. " (if visible), other players and surroundings. " ..
+        "If the player asked how they look, describe their visible avatar (clothes, hair, accessories) and never their face. " ..
+        "Do not invent, do not mention screenshots, cameras or being an AI."
     local okR, txt, rerr = pcall(lobVisionRequest, provider, model, png, prompt)
     if not okR then return nil, "request error" end
     if not txt then return nil, rerr end
@@ -7413,6 +7418,7 @@ _botBusyByUser = {}
 _SEARCH_NOTICE = {
     search = { "Searching the internet…", "Looking up info online…", "Searching for information…" },
     busy = { "Still searching, please wait…", "Hold on, I'm looking it up…", "One moment, still searching online…" },
+    look = { "Looking around…", "Let me take a look…", "One sec, looking around…" },
 }
 function lobSendSearchNotice(kind, lang)
     if not ClientSettings.SearchNotice then return end
@@ -7488,6 +7494,7 @@ local function handleQueuedChat(item)
 
     -- §VISION: по запросу игрока делаем кадр и описываем, что видно
     if item.vision and settings.VisionOnDemand and not item.isWorld and item.player then
+        pcall(lobSendSearchNotice, "look", getLangForUser(item.cleaned, item.userId))
         local vdesc, verr = lobVisionTry(item.player, item.displayName or item.name)
         if vdesc and vdesc ~= "" then
             table.insert(apiMessages, { role = "system",
@@ -8804,8 +8811,21 @@ local function processChatMessage(player, rawMessage)
     if maxQueue < 1 then maxQueue = 1 end
     -- v22: игрок просит «посмотреть»? тогда сделаем кадр (только Gemini/DeepSeek)
     local wantsLook = false
-    if settings.VisionOnDemand and lobVisionWantsLook(rawMessage) and lobVisionReady(player) then
-        wantsLook = true
+    if lobVisionWantsLook(rawMessage) then
+        wantsLook = lobVisionReady(player)
+        if not wantsLook then
+            local why
+            if not settings.VisionOnDemand then why = "выключено в настройках"
+            elseif not lobVisionProviderAvailable() then why = "нет ключа Gemini/DeepSeek"
+            else why = "кулдаун" end
+            print("[VISION] skip: " .. why)
+            -- уведомляем только когда проблема решаемая (нет ключа)
+            if why == "нет ключа Gemini/DeepSeek" and pushNotification then
+                pcall(pushNotification, "Зрение недоступно", why, THEME and THEME.Accent)
+            end
+        else
+            print("[VISION] look requested by " .. tostring(player.Name))
+        end
     end
     local queued = enqueueChatItem(queueKey, {
         userId      = player.UserId,
