@@ -6307,13 +6307,27 @@ end
 function lobVisionGrabPNG()
     local okCap, CaptureService = pcall(function() return game:GetService("CaptureService") end)
     if not okCap or not CaptureService then return nil, "no CaptureService" end
+    if not _visionDiagPrinted then
+        _visionDiagPrinted = true
+        print("[VISION] CaptureService=" .. type(CaptureService) .. " CaptureScreenshot=" .. type(CaptureService.CaptureScreenshot))
+    end
+    if type(CaptureService.CaptureScreenshot) ~= "function" then return nil, "no CaptureScreenshot method" end
     local contentId, done = nil, false
-    local okCall = pcall(function()
+    local okCall, errCall = pcall(function()
         local r = CaptureService:CaptureScreenshot(function(id) contentId = id done = true end)
         -- некоторые версии возвращают id сразу
         if type(r) == "string" and r ~= "" then contentId = r done = true end
     end)
-    if not okCall then return nil, "capture failed" end
+    if not okCall then
+        -- вторая форма: без колбэка (часть версий отдаёт id возвратом)
+        local ok2 = pcall(function()
+            local r = CaptureService:CaptureScreenshot()
+            if type(r) == "string" and r ~= "" then contentId = r done = true end
+        end)
+        if not ok2 then
+            return nil, "capture failed: " .. tostring(errCall):sub(1, 100)
+        end
+    end
     local t = 0
     while not done and t < 6 do task.wait(0.1) t = t + 0.1 end
     if not contentId then return nil, "capture timeout" end
