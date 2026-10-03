@@ -2320,6 +2320,7 @@ local function makeSystemPrompt(settings)
     end
 
     -- ── 5. ИГРОКИ РЯДОМ ──────────────────────────────────────────────────
+    table.insert(parts, "You are never truly alone: at minimum you are talking to a real player right now. NEVER say that nobody is around / there is no one here.")
     if settings.PlayerAwareness then
         if settings.TokenEconomy then
             table.insert(parts, "[NEARBY] = players near you. Only mention positions when directly relevant.")
@@ -5340,7 +5341,7 @@ local function buildPlayerAwarenessContext(settings)
     local myRoot = getLocalRootPart()
     if not myRoot then return "" end
 
-    local maxDist = (settings.Range.Enabled and settings.Range.Studs) or 20
+    local maxDist = (settings.Range.Enabled and settings.Range.Studs) or 30
     local lines = {}
 
     for _, p in ipairs(Players:GetPlayers()) do
@@ -7253,7 +7254,12 @@ function lobSmartWalkStart()
                                 end
                             end
                         end
-                        if near == 0 then
+                        -- если кто-то недавно писал в чат — не бормочем «никого нет»
+                        local recentChat = false
+                        for _, t in pairs(_lastChatAt) do
+                            if (now - t) < 45 then recentChat = true break end
+                        end
+                        if near == 0 and not recentChat then
                             gw.lastIdle = now
                             local lines
                             if _lastGlobalLang == "RU" then
@@ -7493,6 +7499,24 @@ local function handleQueuedChat(item)
                 content = "⚠ TOXIC BEHAVIOR DETECTED: player(s) [" .. table.concat(toxicNames, ", ") 
                     .. "] were repeatedly moving back-and-forth behind you. React naturally — call them out, say you noticed, or warn them."
             })
+        end
+    end
+
+    -- КОМПАНИЯ: с кем бот реально стоит — анти-«никого нет» во время диалога
+    do
+        local partner = _smartWalk and _smartWalk.target
+        if partner and partner.Parent and partner.Character then
+            local pr = partner.Character:FindFirstChild("HumanoidRootPart")
+            local myRoot = getLocalRootPart()
+            if pr and myRoot then
+                local nm = tostring(partner.DisplayName or partner.Name)
+                local d = math.floor((pr.Position - myRoot.Position).Magnitude)
+                local same = item.player and (item.player.UserId == partner.UserId)
+                table.insert(apiMessages, { role = "system", content =
+                    "COMPANY (live): you are standing next to " .. nm .. " (" .. d .. " studs away" ..
+                    (same and ", the very player you are talking to" or "") ..
+                    "). Other players may be around too. NEVER say nobody is around. If asked who is here, answer with " .. nm .. "." })
+            end
         end
     end
 
