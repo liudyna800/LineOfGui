@@ -6552,7 +6552,11 @@ function lobSmartThreatScan()
     local now = os.clock()
     if (gw.threatScanAt or 0) > 0 and (now - gw.threatScanAt) < 0.5 then
         local p = gw.threatUid and Players:GetPlayerByUserId(gw.threatUid) or nil
-        if p and p.Parent and p.Character then return p, gw.threatDist or 0 end
+        if p and p.Parent and p.Character then
+            -- перепроверяем, что он ВСЁ ЕЩЁ враг (мог сменить команду за эти 0.5с)
+            local ok, th = pcall(lobSmartIsThreat, p, now)
+            if ok and th then return p, gw.threatDist or 0 end
+        end
         return nil, 0
     end
     gw.threatScanAt = now
@@ -7343,6 +7347,7 @@ function lobSmartWalkStart()
                         end
                     elseif (now - (gw.targetSince or now)) > _SW.DEAD_WAIT then
                         gw.target = nil
+                        gw.travelSince = 0
                     end
                 end
 
@@ -7408,6 +7413,14 @@ function lobSmartWalkStop()
     _smartWalk.state = "wander"
     _smartWalk.stayLockUid = nil
     _smartWalk.stayLockUntil = 0
+    -- чистим состояние врагов/побега, чтобы после рестарта не было «фантомных» реакций
+    _smartWalk.threatUid = nil
+    _smartWalk.threatScanAt = 0
+    _smartWalk.fleeFrom = nil
+    _smartWalk.fleeUntil = 0
+    _smartWalk.threatSet = {}
+    _smartWalk.threatAvoid = {}
+    _smartWalk.threatFail = {}
     pcall(function()
         local char = Players.LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
