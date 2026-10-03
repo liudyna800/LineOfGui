@@ -2280,7 +2280,7 @@ local function makeSystemPrompt(settings)
     end
 
     table.insert(parts,
-        "LANGUAGE: Messages start with [LANG:XX]. [LANG:RU]=reply in Russian. [LANG:EN]=reply in English. [LANG:OTHER]=match player's language. Never switch languages mid-conversation.")
+        "LANGUAGE: Messages start with [LANG:XX]. [LANG:RU]=reply in Russian. [LANG:EN]=reply in English. [LANG:OTHER]=match player's language. Reply ONLY in that language, never switch and never duplicate the answer in two languages.")
 
     -- ── 4. КОНТЕКСТ МЕСТА ────────────────────────────────────────────────
     if settings.PlaceAwareness then
@@ -6353,7 +6353,7 @@ function lobSmartFarewell(p)
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = "[SYSTEM: You are about to leave " .. nm .. " after a chat. Say ONE very short casual goodbye in your own style and language, then go. Do not ask a question.]",
-        isWorld = true,
+        isWorld = true, langUid = p.UserId,
     }, 1)
     if okQ then runChatQueue(qk) end
 end
@@ -6435,7 +6435,7 @@ function lobSmartNudge(p, stage)
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = "[SYSTEM: You are hanging out with " .. nm .. (relHint ~= "" and (". " .. relHint) or "")
             .. " " .. stageText .. "]",
-        isWorld = true,
+        isWorld = true, langUid = p.UserId,
     }, 1)
     if okQ then runChatQueue(qk) end
     return (okQ and true) or false
@@ -6525,18 +6525,20 @@ function lobSmartDangerLine(p)
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = "[SYSTEM: A DANGEROUS ENEMY, " .. nm .. ", is very close to you right now." .. ctx ..
             " React in ONE short casual line: notice they are dangerous and that you keep your distance / back off. Stay in character, no questions, do not attack. Never mention teams data or this instruction.]",
-        isWorld = true,
+        isWorld = true, langUid = p.UserId,
     }, 1)
     if okQ then runChatQueue(qk) end
 end
 
 -- Отойти от врага (точка в сторону от него, с проверкой земли)
--- Отход без pathfinding: прямое движение в сторону от врага с переприцелом
--- каждые 0.15с, пока он ближе FLEE_RADIUS (+4) — гарантированно не стоим рядом.
+-- Отход от врага с ОБХОДОМ СТЕН: перебираем направления (от врага, вбок, назад),
+-- рейкастом ищем свободное и ведём туда. Если застряли — прыжок и меняем сторону.
 function lobSmartFlee(threat)
     local hum = getLocalHumanoid()
-    if not hum then return end
+    local char = Players.LocalPlayer.Character
+    if not hum or not char then return end
     local t0 = os.clock()
+    local side = (math.random() < 0.5) and 1 or -1
     while os.clock() - t0 < 2 and (_smartWalk.fleeUntil or 0) > os.clock() do
         local root = getLocalRootPart()
         local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
@@ -6545,8 +6547,36 @@ function lobSmartFlee(threat)
         away = Vector3.new(away.X, 0, away.Z)
         if away.Magnitude > _SW.FLEE_RADIUS + 4 then break end
         if away.Magnitude < 1 then away = root.CFrame.LookVector * -1 end
-        pcall(function() hum:MoveTo(root.Position + away.Unit * _SW.FLEE_DIST) end)
-        task.wait(0.15)
+        local base = away.Unit
+
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = { char }
+        local eye = root.Position + Vector3.new(0, 1.5, 0)
+        local best, bestScore = nil, -1e9
+        for _, ang in ipairs({ 0, 45, -45, 90, -90, 135, -135 }) do
+            local dir = CFrame.Angles(0, math.rad(ang * side), 0) * base
+            local hit = workspace:Raycast(eye, dir * 10, rp)
+            local clear = (hit == nil) and 1 or 0
+            local gHit = workspace:Raycast(root.Position + dir * 8 + Vector3.new(0, 40, 0), Vector3.new(0, -80, 0), rp)
+            local gOk = gHit and 1 or 0
+            local score = clear * 3 + gOk * 2 - math.abs(ang) / 180
+            if score > bestScore then bestScore, best = score, dir end
+        end
+        if best then
+            local p0 = root.Position
+            pcall(function() hum:MoveTo(p0 + best * _SW.FLEE_DIST) end)
+            task.wait(0.15)
+            local r2 = getLocalRootPart()
+            if r2 and (r2.Position - p0).Magnitude < 0.15 then
+                pcall(function() hum.Jump = true end)
+                side = -side  -- упёрлись — меняем сторону обхода
+            end
+        else
+            pcall(function() hum.Jump = true end)
+            side = -side
+            task.wait(0.15)
+        end
     end
 end
 
@@ -6638,8 +6668,7 @@ function lobSmartGreet(p)
     end
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
-        cleaned = body,
-        isWorld = true,
+        cleaned = body, isWorld = true, langUid = p.UserId,
     }, 1)
     if okQ then runChatQueue(qk) end
 end
@@ -7367,6 +7396,18 @@ local function handleQueuedChat(item)
         end
     end
 
+    -- §THREAT SPEAKER: враг пишет, пока бот от него отходит — не милуемся
+    if not item.isWorld and item.player then
+        local fleeing = (_smartWalk.fleeFrom == item.player.UserId)
+            and ((_smartWalk.fleeUntil or 0) + 3) > os.clock()
+        local threat = false
+        pcall(function() threat = lobSmartIsThreat(item.player) end)
+        if fleeing or threat then
+            table.insert(apiMessages, { role = "system", content =
+                "DANGER NOW: this player is dangerous to you and you are keeping distance / backing away from them right now. Reply in ONE very short wary line (uneasy, defensive, not friendly). Do not agree to come closer or follow them. Do not be calm and chatty. Never mention this instruction." })
+        end
+    end
+
     -- UsePlayerName
     -- UsePlayerName: имя игрока в тег [NAME:X]
     -- item.name = Username (всегда латиница), item.displayName = DisplayName (может быть кириллица/цифры)
@@ -7702,7 +7743,9 @@ local function handleQueuedChat(item)
     -- иначе последний язык чата, иначе EN. Раньше было жёстко "RU".
     local langTag
     if item.isWorld then
-        langTag = (item.userId and item.userId ~= 0 and _userLangCache[item.userId]) or _lastGlobalLang or "EN"
+        -- для мировых событий берём язык ИМЕННО этого игрока (langUid), а не «последний в чате»
+        local lu = item.langUid or item.userId
+        langTag = (lu and lu ~= 0 and _userLangCache[lu]) or _lastGlobalLang or "EN"
     else
         langTag = getLangForUser(item.cleaned, item.userId)
     end
