@@ -6215,6 +6215,7 @@ _smartWalk = {
     sight = {}, sightAt = 0, dangerUid = nil, dangerAt = 0, caughtAt = 0, dangerNear = 0,
     dangerZones = {},
     fear = {},
+    lastPos = nil, lastMoveAt = 0,
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6273,7 +6274,7 @@ _SW = {
     SWD_CLOSE      = 15,   -- «вплотную»: настороженность резко растёт
     SWD_MEM        = 90,   -- сколько секунд помним опасного игрока
     SWD_DECAY      = 1.4,  -- спад score за секунду без подкрепления
-    SWD_WARY       = 55,   -- score «держимся настороже, не встаём вплотную»
+    SWD_WARY       = 75,   -- score «настороже» (высокий: прохожие не считаются угрозой)
     SWD_ALERT      = 120,  -- score «опасен»: уходим/не подходим
     SWD_CLOSE_SPD  = 6,    -- студ/с сближения = «идёт на нас»
     SWD_MULTI_R    = 13,   -- радиус «кучи» угроз
@@ -6617,7 +6618,7 @@ function lobSmartDangerTick(now)
                         pcall(function() pvp = lobPvpConfirmedFor(p) end)
                         if pvp then gain = gain + 100 end
                     end
-                    if thFresh and thUid == p.UserId then gain = gain + 55 end
+                    if thFresh and thUid == p.UserId then gain = gain + 80 end
                     local agg = 0
                     pcall(function() agg = lobSightAggression(p, root, now) end)
                     if agg > 0 then
@@ -6846,7 +6847,9 @@ function lobSmartEvadeDanger(now)
     now = now or os.clock()
     local gw = _smartWalk
     if (gw.fleeUntil or 0) > now then return false end
-    local threat = lobSmartDangerScan(_SW.SWD_CLOSE)
+    -- только РЕАЛЬНАЯ угроза (ALERT): от «лёгкой» настороженности бот бы только дёргался
+    local cand, _, cscore = lobSmartDangerScan(_SW.SWD_CLOSE)
+    local threat = (cand and (cscore or 0) >= _SW.SWD_ALERT) and cand or nil
     if not threat then return false end
     local root = getLocalRootPart()
     local hum = getLocalHumanoid()
@@ -7445,6 +7448,16 @@ end
 
 -- Бродить по достижимой случайной точке (с проверкой земли под точкой).
 -- Бюджет 8с, чтобы бот быстро переключался, если рядом появился игрок.
+-- Гарантированный короткий шаг в случайную сторону (анти-«стояние» / когда pathfinding не дал пути)
+function lobSmartForceStep()
+    local root = getLocalRootPart()
+    local hum = getLocalHumanoid()
+    if not root or not hum then return end
+    local ang = math.random() * math.pi * 2
+    pcall(function() hum:MoveTo(root.Position + Vector3.new(math.cos(ang) * 12, 0, math.sin(ang) * 12)) end)
+    pcall(function() hum.Jump = true end)
+end
+
 function lobSmartWander(cancelFn)
     local ch = Players.LocalPlayer.Character
     local root = ch and ch:FindFirstChild("HumanoidRootPart")
@@ -7466,6 +7479,7 @@ function lobSmartWander(cancelFn)
             if rp then
                 table.insert(gw.stuckZones, { pos = rp.Position, expireAt = now + _SW.STUCK_ZONE_SEC })
             end
+            lobSmartForceStep()
         end
         return r
     end
@@ -7551,6 +7565,7 @@ function lobSmartWander(cancelFn)
         gw.wanderDest = nil
         local rp = getLocalRootPart() or root
         table.insert(gw.stuckZones, { pos = rp.Position, expireAt = now + _SW.STUCK_ZONE_SEC })
+        lobSmartForceStep()
     end
     return r
 end
@@ -7604,6 +7619,21 @@ function lobSmartWalkStart()
                 local gw = _smartWalk
                 lobSmartClean(now)
                 lobSmartDangerTick(now)   -- v21: собственная карта угроз умной ходьбы
+
+                -- v21: АНТИ-«СТОЯНИЕ». Если бот блуждает и давно не сдвигался с места —
+                -- принудительный шаг (лечит залипание из-за неудачного pathfinding/логики).
+                do
+                    local tnow = os.clock()
+                    if gw.lastPos and (root.Position - gw.lastPos).Magnitude > 2 then
+                        gw.lastMoveAt = tnow
+                    end
+                    gw.lastPos = root.Position
+                    if (not gw.target) and (tnow - (gw.lastMoveAt or tnow)) > 3.5 then
+                        gw.lastMoveAt = tnow
+                        gw.wanderDest = nil
+                        lobSmartForceStep()
+                    end
+                end
                 if not gw.home then gw.home = root.Position end  -- дом = текущая точка
 
                 -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
@@ -8024,6 +8054,8 @@ function lobSmartWalkStop()
     _smartWalk.dangerNear = 0
     _smartWalk.dangerZones = {}
     _smartWalk.fear = {}
+    _smartWalk.lastPos = nil
+    _smartWalk.lastMoveAt = 0
     pcall(function()
         local char = Players.LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
