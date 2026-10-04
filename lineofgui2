@@ -6227,7 +6227,7 @@ _SW = {
     WAVE_CD        = 90,   -- кулдаун приветственной эмоции
     DEAD_WAIT      = 20,   -- сколько ждать респавна цели, прежде чем уйти
     MIN_STAY       = 20,   -- минимум секунд у собеседника после подхода
-    MAX_STAY       = 300,  -- максимум визита, если разговор не поддерживают
+    MAX_STAY       = 150,  -- максимум визита, если разговор не поддерживают
     MAX_TARGET_DIST = 250, -- не идти через всю карту к далёкому молчуну
     FRESH_CHAT     = 20,   -- ...но свежую реплику догоняем даже издалека
     CHAT_EXTEND    = 45,   -- каждая свежая реплика продлевает визит на столько
@@ -6242,7 +6242,7 @@ _SW = {
     NUDGE_T1       = 40,   -- «ты тут?» — только если реально долго молчит и не смотрит
     NUDGE_T2       = 80,   -- «почему молчишь?»
     NUDGE_T3       = 120,  -- «ладно, я пойду»
-    NUDGE_LEAVE    = 150,  -- после финальной реплики столько ждём и уходим
+    NUDGE_LEAVE    = 90,   -- после финальной реплики столько ждём и уходим
     REVISIT_MIN    = 60,   -- через сколько минимум вернуться к знакомому
     REVISIT_MAX    = 150,
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
@@ -7634,6 +7634,19 @@ function lobSmartWalkStart()
                         lobSmartForceStep()
                     end
                 end
+
+                -- v21: диагностика под флагом Debug — видно, почему бот стоит
+                if ClientSettings.Debug then
+                    gw._dbgN = (gw._dbgN or 0) + 1
+                    if gw._dbgN % 20 == 0 then
+                        print(string.format("[SMARTWALK] state=%s target=%s danger=%s wander=%s still=%.1fs",
+                            tostring(gw.state),
+                            tostring(gw.target and (gw.target.DisplayName or gw.target.Name) or "-"),
+                            tostring(gw.dangerNear or 0),
+                            tostring(gw.wanderDest ~= nil),
+                            os.clock() - (gw.lastMoveAt or os.clock())))
+                    end
+                end
                 if not gw.home then gw.home = root.Position end  -- дом = текущая точка
 
                 -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
@@ -7944,7 +7957,7 @@ function lobSmartWalkStart()
                             local quietStranger = now - math.max(spokeAt, gw.arrivedAt or 0, botSpoke)
                             local minMet = (now - (gw.socialSince or now)) >= _SW.MIN_STAY
                             -- «общались» = игрок писал ИЛИ мы сами к нему обратились в этом визите
-                            local wasTalking = replied or botSpokeVisit
+                            local wasTalking = replied  -- v21 FIX: «мы поздоровались» ≠ «идёт разговор»; иначе бот залипал с молчуном
 
                             -- [DO:stay] от ИИ: держимся с этим игроком, не уходим и не подначиваем
                             local stayLocked = (gw.stayLockUid == target.UserId) and (now < (gw.stayLockUntil or 0))
