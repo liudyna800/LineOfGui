@@ -6211,6 +6211,10 @@ _smartWalk = {
     fleeUntil = 0, fleeFrom = nil, dangerLineAt = 0,
     threatScanAt = 0, threatUid = nil, threatDist = 0, lastThreatAt = 0,
     threatSet = {}, threatAvoid = {}, threatFail = {}, metBefore = false,
+    -- v21: собственное чувство опасности умной ходьбы (локальная «карта угроз»)
+    sight = {}, sightAt = 0, dangerUid = nil, dangerAt = 0, caughtAt = 0, dangerNear = 0,
+    dangerZones = {},
+    fear = {},
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
@@ -6264,6 +6268,29 @@ _SW = {
     FLEE_RADIUS    = 24,   -- отходим, пока враг ближе этого
     FLEE_DIST      = 34,   -- на сколько студов отойти
     DANGER_LINE_CD = 45,   -- как часто говорить «ты опасный, я отойду»
+    -- ── v21: СОБСТВЕННОЕ ЧУВСТВО ОПАСНОСТИ УМНОЙ ХОДЬБЫ (не зависит от тумблера DangerSense) ──
+    SWD_RADIUS     = 36,   -- радиус оценки игроков вокруг бота
+    SWD_CLOSE      = 15,   -- «вплотную»: настороженность резко растёт
+    SWD_MEM        = 90,   -- сколько секунд помним опасного игрока
+    SWD_DECAY      = 1.4,  -- спад score за секунду без подкрепления
+    SWD_WARY       = 55,   -- score «держимся настороже, не встаём вплотную»
+    SWD_ALERT      = 120,  -- score «опасен»: уходим/не подходим
+    SWD_CLOSE_SPD  = 6,    -- студ/с сближения = «идёт на нас»
+    SWD_MULTI_R    = 13,   -- радиус «кучи» угроз
+    SWD_MULTI_N    = 2,    -- столько опасных рядом → усиление осторожности
+    SWD_STEP       = 6,    -- на сколько студов отступаем вбок от набегающего
+    SWD_ZONE_SEC   = 45,   -- сколько помним «опасное место»
+    SWD_ZONE_R     = 16,   -- радиус опасной зоны, которую избегаем при блуждании
+    -- ── v21: АДАПТАЦИЯ СТРАХА/ДОВЕРИЯ (привыкание, перемирие, предательство) ──
+    HABIT_GAIN     = 0.05, -- привыкание к опасному рядом: +/сек без вреда
+    HABIT_MAX      = 0.70, -- максимум гашения страха привыканием
+    HABIT_DECAY    = 0.02, -- спад привыкания в разлуке (вернулся — снова насторожен)
+    TRUCE_SEC      = 50,   -- сколько длится перемирие после добрых слов
+    TRUST_START    = 0.5,  -- стартовое доверие к игроку
+    TRUST_BASE     = 0.45, -- минимальное доверие, чтобы принять перемирие
+    TRUST_REGEN    = 0.012,-- рост доверия за секунду мирного соседства
+    TRUST_BETRAY   = 0.35, -- падение доверия при обмане
+    TRUST_NEED_STEP= 0.16, -- каждый обман поднимает планку для нового перемирия
 }
 
 function lobSmartWalkNoteChat(userId, name)
@@ -6316,8 +6343,26 @@ function lobSmartClean(now)
     for uid in pairs(_smartWalk.greetAt) do
         if not Players:GetPlayerByUserId(uid) then _smartWalk.greetAt[uid] = nil end
     end
+    -- v21: чистим карту угроз от ушедших игроков
+    if _smartWalk.sight then
+        for uid in pairs(_smartWalk.sight) do
+            if not Players:GetPlayerByUserId(uid) then _smartWalk.sight[uid] = nil end
+        end
+    end
     for i = #_smartWalk.stuckZones, 1, -1 do
         if (_smartWalk.stuckZones[i].expireAt or 0) < now then table.remove(_smartWalk.stuckZones, i) end
+    end
+    -- v21: чистим просроченные опасные зоны
+    if _smartWalk.dangerZones then
+        for i = #_smartWalk.dangerZones, 1, -1 do
+            if (_smartWalk.dangerZones[i].expireAt or 0) < now then table.remove(_smartWalk.dangerZones, i) end
+        end
+    end
+    -- v21: чистим записи страха от ушедших игроков
+    if _smartWalk.fear then
+        for uid in pairs(_smartWalk.fear) do
+            if not Players:GetPlayerByUserId(uid) then _smartWalk.fear[uid] = nil end
+        end
     end
 end
 
@@ -6457,9 +6502,15 @@ end
 -- Опасен ли игрок: враг по команде + в игре реально есть PvP, либо он только
 -- что нанёс урон. Спит, пока выключен тумблер «Чувство опасности».
 function lobSmartIsThreat(p, now)
-    if not lobDangerActive() then return false end
     if not p or not p.Parent or not p.Character then return false end
     now = now or os.clock()
+    -- v21: активное перемирие — в рамках умной ходьбы НЕ считаем врагом
+    -- (глобальный тумблер сюда не примешивается; предательство снимет перемирие)
+    local fr = _smartWalk.fear and _smartWalk.fear[p.UserId]
+    if fr and (fr.truceUntil or 0) > now then return false end
+    -- v21: собственное чувство опасности умной ходьбы (не зависит от глобального тумблера)
+    if _smartWalk.active and lobSightDangerous(p, now) then return true end
+    if not lobDangerActive() then return false end
     local uid = p.UserId
     -- если СЕЙЧАС мы в одной команде — свой (даже если раньше бил и команды менялись)
     local myT, thT = "", ""
@@ -6476,6 +6527,108 @@ function lobSmartIsThreat(p, now)
     local pv = false
     pcall(function() pv = lobPvpConfirmedFor(p) end)
     return pv
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- §SW_DANGER (v21) — СОБСТВЕННОЕ ЧУВСТВО ОПАСНОСТИ УМНОЙ ХОДЬБЫ.
+-- Живёт внутри smart walk и работает, даже если глобальный тумблер «Чувство
+-- опасности» ВЫКЛЮЧЕН: бот сам читает живые сигналы (наш урон, набегание
+-- игрока, оружие в руках, взгляд в нашу сторону, слова угрозы, наша низкая
+-- HP) и ведёт локальную «карту угроз». Всё в глобалах (лимит 200 локалок!).
+-- ═══════════════════════════════════════════════════════════════════════════
+function lobSightMap()
+    local gw = _smartWalk
+    if not gw.sight then gw.sight = {} end
+    return gw.sight
+end
+
+-- Насколько игрок «идёт на нас» прямо сейчас: 0..1 (смотрит/сближается/оружие).
+function lobSightAggression(p, root, now)
+    local ch = p and p.Character
+    if not ch or not root then return 0 end
+    local pr = ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso")
+    if not pr then return 0 end
+    local toBot = pr.Position - root.Position
+    toBot = Vector3.new(toBot.X, 0, toBot.Z)
+    if toBot.Magnitude < 0.5 then return 1 end
+    local u = -toBot.Unit
+    local s = 0
+    if pr.CFrame.LookVector:Dot(u) > 0.55 then s = s + 1 end
+    local v = pr.AssemblyLinearVelocity
+    if Vector3.new(v.X, 0, v.Z):Dot(u) > _SW.SWD_CLOSE_SPD then s = s + 1 end
+    if ch:FindFirstChildOfClass("Tool") then s = s + 1 end
+    return math.min(1, s / 2)
+end
+
+-- Обновляет локальную карту угроз (вызывается каждый тик умной ходьбы, ≈0.25с).
+function lobSmartDangerTick(now)
+    now = now or os.clock()
+    local gw = _smartWalk
+    local root = getLocalRootPart()
+    if not root then return end
+    if (now - (gw.sightAt or 0)) < 0.25 then return end
+    gw.sightAt = now
+    local sight = lobSightMap()
+    local lowHp = false
+    pcall(function()
+        local hum = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.MaxHealth > 0 then lowHp = (hum.Health / hum.MaxHealth) < 0.5 end
+    end)
+    local dmgUid = _danger and _danger.suspectUid
+    local dmgFresh = _danger and (now - (_danger.lastDamageAt or -1e9)) < _SW.SWD_MEM
+    local thUid = _danger and _danger.threatUid
+    local thFresh = _danger and (now - (_danger.threatAt or -1e9)) < 120
+    local myPos = root.Position
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Players.LocalPlayer then
+            local ch = p.Character
+            local pr = ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso"))
+            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+            local rec = sight[p.UserId]
+            if rec and (not pr or not hum or hum.Health <= 0) then rec.score = 0 end
+            if pr and hum and hum.Health > 0 then
+                local dist = (pr.Position - myPos).Magnitude
+                if dist <= _SW.SWD_RADIUS then
+                    if not rec then rec = { score = 0, seenAt = now } sight[p.UserId] = rec end
+                    local dt = now - (rec.seenAt or now)
+                    if dt > 0 then rec.score = math.max(0, (rec.score or 0) - dt * _SW.SWD_DECAY) end
+                    rec.seenAt = now
+                    local gain = 0
+                    if dmgFresh and dmgUid == p.UserId then gain = gain + 140 end
+                    local enemy = false
+                    pcall(function() enemy = lobIsEnemyOf(p) end)
+                    if enemy then
+                        local pvp = false
+                        pcall(function() pvp = lobPvpConfirmedFor(p) end)
+                        if pvp then gain = gain + 100 end
+                    end
+                    if thFresh and thUid == p.UserId then gain = gain + 55 end
+                    local agg = 0
+                    pcall(function() agg = lobSightAggression(p, root, now) end)
+                    if agg > 0 then
+                        if dist <= _SW.SWD_CLOSE then gain = gain + agg * 70
+                        elseif dist <= _SW.SWD_RADIUS * 0.7 then gain = gain + agg * 30 end
+                    end
+                    if lowHp then gain = gain * 1.4 end
+                    rec.score = math.min(260, (rec.score or 0) + gain)
+                elseif rec then
+                    rec.score = math.max(0, (rec.score or 0) - (now - (rec.seenAt or now)) * _SW.SWD_DECAY * 2)
+                    rec.seenAt = now
+                end
+            end
+        end
+    end
+    -- «куча угроз»: сколько опасных рядом (усиливает осторожность)
+    local dn = 0
+    for uid, rec in pairs(sight) do
+        if (rec.score or 0) >= _SW.SWD_WARY then
+            local pp = Players:GetPlayerByUserId(uid)
+            local pr = pp and pp.Character and pp.Character:FindFirstChild("HumanoidRootPart")
+            if pr and (pr.Position - myPos).Magnitude <= _SW.SWD_MULTI_R then dn = dn + 1 end
+        end
+    end
+    gw.dangerNear = dn
+    lobSmartFearTick(now)
 end
 
 -- Видно ли игрока (сквозь щель — да, через стену — нет). Несколько лучей:
@@ -6507,6 +6660,236 @@ function lobSmartCanSee(p)
     }
     for _, r in ipairs(rays) do
         if not workspace:Raycast(r[1], r[2] - r[1], rp) then return true end
+    end
+    return false
+end
+
+function lobSightScore(uid)
+    local rec = _smartWalk.sight and _smartWalk.sight[uid]
+    return (rec and rec.score) or 0
+end
+
+-- ── §SW_FEAR (v21) — адаптация страха и доверия ─────────────────────────────
+-- Бот не «боится навсегда»: если опасный игрок долго рядом и НЕ вредит — страх
+-- гаснет (привыкание). Если тот скажет «не трону»/доброе — возможно перемирие
+-- (гасит страх), но лишь при достаточном доверии. Если обманули — доверие падает,
+-- страх возвращается, и договориться снова СЛОЖНЕЕ (но всё же возможно).
+_SOOTHE_WORDS = { "не трону", "не буду", "не ударю", "не обижу", "я не враг", "не враг",
+    "не бойся", "не бояться", "мир", "мирный", "дружить", "дружб", "спокойно", "безопасно",
+    "не кусаю", "не убиваю", "не атакую", "не агрессив", "просто стою", "безобид",
+    "friend", "friendly", "peace", "no harm", "not hurt", "won't hurt", "wont hurt",
+    "don't worry", "dont worry", "trust me", "i'm safe", "im safe", "no attack", "ally", "truce" }
+
+function lobFearRec(uid)
+    local gw = _smartWalk
+    gw.fear = gw.fear or {}
+    local f = gw.fear[uid]
+    if not f then
+        f = { fear = 0, trust = _SW.TRUST_START, habit = 0, truceUntil = 0,
+              betrayals = 0, hurtAt = 0, lastAt = 0, truceAt = 0 }
+        gw.fear[uid] = f
+    end
+    return f
+end
+
+function lobSootheWords(m)
+    m = tostring(m or ""):lower()
+    for _, w in ipairs(_SOOTHE_WORDS) do
+        if m:find(w, 1, true) then return true end
+    end
+    return false
+end
+
+-- Эффективный страх-балл: перемирие обнуляет, привыкание гасит (убегаем короче).
+function lobSightEffective(uid, now)
+    local gw = _smartWalk
+    local f = gw.fear and gw.fear[uid]
+    if f and (f.truceUntil or 0) > (now or os.clock()) then return 0 end
+    local s = lobSightScore(uid)
+    if f and (f.habit or 0) > 0 then s = s * (1 - f.habit) end
+    return s
+end
+
+-- Реакция на сообщение: добрые слова → (возможно) перемирие; угрозы → страх вверх.
+function lobSmartOnChat(p, msg)
+    if not p then return end
+    local now = os.clock()
+    local f = lobFearRec(p.UserId)
+    if lobHasThreatWords(msg) then
+        f.fear = math.max(f.fear or 0, 120)
+        f.trust = math.max(0, (f.trust or 0) - 0.15)
+        return
+    end
+    if not lobSootheWords(msg) then return end
+    -- планка перемирия растёт с каждым обманом — после предательства верить сложнее
+    local need = math.min(0.95, _SW.TRUST_BASE + (f.betrayals or 0) * _SW.TRUST_NEED_STEP)
+    if (f.trust or 0) >= need and math.random() < math.max(0.35, f.trust) then
+        f.truceUntil = now + _SW.TRUCE_SEC
+        f.truceAt = now
+        f.fear = (f.fear or 0) * 0.15
+        f.habit = math.min(_SW.HABIT_MAX, (f.habit or 0) + 0.25)
+        f.trust = math.min(1, (f.trust or 0) + 0.1)
+        local gw = _smartWalk
+        if gw.avoid then gw.avoid[p.UserId] = nil end
+        if gw.threatSet then gw.threatSet[p.UserId] = nil end
+        if gw.reachFail then gw.reachFail[p.UserId] = nil end
+        if gw.sight and gw.sight[p.UserId] then gw.sight[p.UserId].score = (gw.sight[p.UserId].score or 0) * 0.2 end
+        print("[LOB] SW truce with " .. tostring(p.Name))
+    else
+        f.trust = math.min(1, (f.trust or 0) + 0.03)  -- мирно заговорил — чуть мягче
+        print("[LOB] SW truce declined (trust=" .. string.format("%.2f", f.trust or 0) ..
+            " need=" .. string.format("%.2f", need) .. ")")
+    end
+end
+
+-- Тик адаптации: привыкание рядом, рост доверия, детект предательства.
+function lobSmartFearTick(now)
+    local gw = _smartWalk
+    if not gw.fear then return end
+    local dmgUid = _danger and _danger.suspectUid
+    local dmgFresh = _danger and (now - (_danger.lastDamageAt or -1e9)) < 30
+    local root = getLocalRootPart()
+    for uid, f in pairs(gw.fear) do
+        local dt = now - (f.lastAt or now)
+        if dt < 0 then dt = 0 elseif dt > 5 then dt = 5 end
+        f.lastAt = now
+        local pp = Players:GetPlayerByUserId(uid)
+        local near = false
+        if pp and pp.Parent and root and pp.Character then
+            local pr = pp.Character:FindFirstChild("HumanoidRootPart")
+            if pr and (pr.Position - root.Position).Magnitude <= _SW.SWD_RADIUS then near = true end
+        end
+        -- ПРЕДАТЕЛЬСТВО: он «казался мирным» (перемирие/привыкание), а потом ударил.
+        -- Враг известен по оружию (dmgUid) ЛИБО неизвестен, но рядом стоял тот,
+        -- с кем было перемирие — считаем обманом.
+        if dmgFresh then
+            local isMaker = (dmgUid == uid)
+            local liarNear = (dmgUid == nil) and near and ((f.truceUntil or 0) > now - 30)
+            if isMaker or liarNear then
+                local brokeTrust = ((f.truceUntil or 0) > now - 30) or ((f.habit or 0) > 0.15)
+                if brokeTrust then
+                    f.betrayals = (f.betrayals or 0) + 1
+                    f.trust = math.max(0, (f.trust or 0) - _SW.TRUST_BETRAY)
+                    print("[LOB] SW betrayal by " .. tostring(pp and pp.Name or uid) .. " n=" .. tostring(f.betrayals))
+                end
+                f.truceUntil = 0
+                f.habit = 0
+                f.fear = math.max(f.fear or 0, 180)
+                f.hurtAt = now
+            end
+        end
+        if near then
+            -- привыкание: рядом и без вреда → страх гаснет, убегаем короче
+            if (f.fear or 0) > 0 or (gw.sight and gw.sight[uid] and (gw.sight[uid].score or 0) > 0) then
+                f.habit = math.min(_SW.HABIT_MAX, (f.habit or 0) + _SW.HABIT_GAIN * dt)
+            end
+            f.trust = math.min(1, (f.trust or 0) + _SW.TRUST_REGEN * dt)
+        else
+            f.habit = math.max(0, (f.habit or 0) - _SW.HABIT_DECAY * dt)  -- в разлуке снова насторожен
+            f.fear = math.max(0, (f.fear or 0) - 20 * dt)
+        end
+    end
+end
+
+-- Локально опасен для бота (независимо от глобального тумблера), с учётом «кучи».
+function lobSightDangerous(p, now)
+    if not p then return false end
+    local s = lobSightEffective(p.UserId, now)
+    if s >= _SW.SWD_ALERT then return true end
+    return s >= _SW.SWD_WARY and (_smartWalk.dangerNear or 0) >= _SW.SWD_MULTI_N
+end
+
+-- Ближайший «опасный по собственному чутью» игрок в радиусе (с проверкой видимости).
+function lobSmartDangerScan(radius)
+    radius = radius or _SW.SWD_RADIUS
+    local root = getLocalRootPart()
+    if not root then return nil end
+    local best, bestD, bestS = nil, radius, -1
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Players.LocalPlayer and p.Character then
+            local pr = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if pr and hum and hum.Health > 0 then
+                local d = (pr.Position - root.Position).Magnitude
+                if d <= radius then
+                    local s = lobSightEffective(p.UserId, os.clock())
+                    if s >= _SW.SWD_WARY then
+                        local ok, see = pcall(lobSmartCanSee, p)
+                        if (not ok) or see then
+                            if s > bestS or (s == bestS and d < bestD) then best, bestD, bestS = p, d, s end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best, bestD, bestS
+end
+
+-- Не стоять вплотную к опасному: короткий шаг в более открытую сторону. true — сделали шаг.
+function lobSmartEvadeDanger(now)
+    now = now or os.clock()
+    local gw = _smartWalk
+    if (gw.fleeUntil or 0) > now then return false end
+    local threat = lobSmartDangerScan(_SW.SWD_CLOSE)
+    if not threat then return false end
+    local root = getLocalRootPart()
+    local hum = getLocalHumanoid()
+    local tr = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+    if not root or not hum or not tr then return false end
+    gw.avoid[threat.UserId] = now + _SW.AVOID_SEC
+    if gw.target and gw.target.UserId == threat.UserId then gw.target = nil gw.targetSince = 0 end
+    pcall(lobSmartMarkDanger, tr.Position)
+    -- во время разговора не стоим рядом с угрозой: вежливо сворачиваемся
+    if gw.state == "social" then
+        gw.state = "winddown"
+        gw.windUntil = now + _SW.WIND_DOWN
+    end
+    if (now - (gw.caughtAt or 0)) < 1.0 then return true end
+    gw.caughtAt = now
+    local away = Vector3.new(root.Position.X - tr.Position.X, 0, root.Position.Z - tr.Position.Z)
+    if away.Magnitude < 0.1 then away = root.CFrame.LookVector * -1 end
+    local base = away.Unit
+    -- выбираем более открытую сторону отхода (лево/право от направления «от угрозы»)
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    local ch = Players.LocalPlayer.Character
+    rp.FilterDescendantsInstances = ch and { ch } or {}
+    local eye = root.Position + Vector3.new(0, 2, 0)
+    local left  = CFrame.Angles(0, math.rad(45), 0) * base
+    local right = CFrame.Angles(0, math.rad(-45), 0) * base
+    local hitL = workspace:Raycast(eye, left  * (_SW.SWD_STEP + 2), rp)
+    local hitR = workspace:Raycast(eye, right * (_SW.SWD_STEP + 2), rp)
+    local dir = left
+    if (hitL and not hitR) then
+        dir = right
+    elseif (hitL and hitR) then
+        -- обе стороны заняты — шагаем назад со смещением по памяти
+        dir = base + root.CFrame.RightVector * (gw.offsetSide or 1)
+        gw.offsetSide = -(gw.offsetSide or 1)
+    end
+    pcall(function() hum:MoveTo(root.Position + dir.Unit * _SW.SWD_STEP) end)
+    return true
+end
+
+-- Память об «опасных местах»: блуждание их избегает (см. lobSmartInDangerZone).
+function lobSmartMarkDanger(pos)
+    if not pos then return end
+    local gw = _smartWalk
+    gw.dangerZones = gw.dangerZones or {}
+    local now = os.clock()
+    for _, z in ipairs(gw.dangerZones) do
+        if (pos - z.pos).Magnitude < _SW.SWD_ZONE_R * 0.6 then z.expireAt = now + _SW.SWD_ZONE_SEC return end
+    end
+    table.insert(gw.dangerZones, { pos = pos, expireAt = now + _SW.SWD_ZONE_SEC })
+    while #gw.dangerZones > 12 do table.remove(gw.dangerZones, 1) end
+end
+
+function lobSmartInDangerZone(pos, now)
+    if not pos then return false end
+    now = now or os.clock()
+    for _, z in ipairs(_smartWalk.dangerZones or {}) do
+        if (z.expireAt or 0) > now and (pos - z.pos).Magnitude < _SW.SWD_ZONE_R then return true end
     end
     return false
 end
@@ -6637,6 +7020,7 @@ function lobSmartFlee(threat)
                 end
                 local losClear = not workspace:Raycast(root.Position + Vector3.new(0, 3, 0), gp - root.Position, rp)
                 local score = (gp - tr.Position).Magnitude + open * 6 + (losClear and 10 or 0)
+                if lobSmartInDangerZone(gp) then score = score - 120 end
                 table.insert(cands, { pos = gp, score = score })
             end
         end
@@ -6758,6 +7142,16 @@ function lobSmartPick()
                             end
                         end
                         if crowd >= 2 then score = score - _SW.CROWD_PENALTY * crowd end
+                        -- v21: не идти в «гнездо» опасных игроков
+                        local dangerNearTarget = 0
+                        for uid, rec in pairs(_smartWalk.sight or {}) do
+                            if lobSightEffective(uid, now) >= _SW.SWD_WARY then
+                                local pp = Players:GetPlayerByUserId(uid)
+                                local ppr = pp and pp.Character and pp.Character:FindFirstChild("HumanoidRootPart")
+                                if ppr and (ppr.Position - pr.Position).Magnitude < _SW.SWD_MULTI_R then dangerNearTarget = dangerNearTarget + 1 end
+                            end
+                        end
+                        if dangerNearTarget > 0 then score = score - 220 * dangerNearTarget end
                         -- знакомых ищем чаще, а по «времени навестить» — целенаправленно
                         local rr = _rel[p.UserId]
                         if rr then
@@ -7065,7 +7459,7 @@ function lobSmartWander(cancelFn)
         for _, e in ipairs(enemies) do
             if e.pos and (p - e.pos).Magnitude < _SW.WANDER_ENEMY_R then nearEnemy = true break end
         end
-        if not nearEnemy and not lobSmartInStuckZone(p) then
+        if not nearEnemy and not lobSmartInStuckZone(p) and not lobSmartInDangerZone(p) then
             local rp = RaycastParams.new()
             rp.FilterType = Enum.RaycastFilterType.Exclude
             rp.FilterDescendantsInstances = { ch }
@@ -7084,6 +7478,26 @@ function lobSmartWander(cancelFn)
         if not tooClose then table.insert(novel, cp) end
     end
     if #novel > 0 then cands = novel end
+
+    -- v21: сортируем точки по открытости — меньше риск упереться в угол/стену
+    do
+        local scored = {}
+        for _, c in ipairs(cands) do
+            local rp = RaycastParams.new()
+            rp.FilterType = Enum.RaycastFilterType.Exclude
+            rp.FilterDescendantsInstances = { ch }
+            local open = 0
+            for _, a2 in ipairs({ 0, 90, 180, 270 }) do
+                local d2 = CFrame.Angles(0, math.rad(a2), 0) * Vector3.new(1, 0, 0)
+                if not workspace:Raycast(c + Vector3.new(0, 3, 0), d2 * 12, rp) then open = open + 1 end
+            end
+            table.insert(scored, { pos = c, open = open })
+        end
+        table.sort(scored, function(a, b) return a.open > b.open end)
+        local out = {}
+        for _, s in ipairs(scored) do table.insert(out, s.pos) end
+        cands = out
+    end
 
     local dest = nil
     local PathfindingService = game:GetService("PathfindingService")
@@ -7157,6 +7571,7 @@ function lobSmartWalkStart()
                 local now = os.clock()
                 local gw = _smartWalk
                 lobSmartClean(now)
+                lobSmartDangerTick(now)   -- v21: собственная карта угроз умной ходьбы
                 if not gw.home then gw.home = root.Position end  -- дом = текущая точка
 
                 -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
@@ -7170,6 +7585,10 @@ function lobSmartWalkStart()
                     end
                     if threat then
                         gw.lastThreatAt = now
+                        pcall(function()
+                            local tp = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+                            lobSmartMarkDanger(tp and tp.Position or root.Position)
+                        end)
                         gw.avoid[threat.UserId] = now + 60
                         gw.reachFail[threat.UserId] = now + 45
                         gw.threatSet[threat.UserId] = true
@@ -7185,7 +7604,11 @@ function lobSmartWalkStart()
                             gw.target = nil
                             gw.targetSince = 0
                             gw.leaveAt = 0
-                            gw.fleeUntil = now + 2.2
+                            -- v21: чем больше привыкли — тем КОРОЧЕ убегаем
+                            local fk = 1
+                            local ff = _smartWalk.fear and _smartWalk.fear[threat.UserId]
+                            if ff then fk = 1 - (ff.habit or 0) end
+                            gw.fleeUntil = now + 2.2 * math.max(0.4, fk)
                             gw.fleeFrom = threat.UserId
                             lobSmartFlee(threat)
                             task.wait(0.2)
@@ -7208,6 +7631,9 @@ function lobSmartWalkStart()
                         end
                     end
                 end
+
+                -- v21: собственное чутьё — не стоять вплотную к опасному игроку
+                if (gw.dangerNear or 0) > 0 and lobSmartEvadeDanger(now) then task.wait(0.2) return end
 
                 -- кто заговорил с ботом прямо сейчас
                 local spkUid, spkAt = gw.lastSpeakerUid, gw.lastSpeakerAt or 0
@@ -7557,6 +7983,15 @@ function lobSmartWalkStop()
     _smartWalk.threatSet = {}
     _smartWalk.threatAvoid = {}
     _smartWalk.threatFail = {}
+    -- v21: сбрасываем собственную карту угроз
+    _smartWalk.sight = {}
+    _smartWalk.sightAt = 0
+    _smartWalk.dangerUid = nil
+    _smartWalk.dangerAt = 0
+    _smartWalk.caughtAt = 0
+    _smartWalk.dangerNear = 0
+    _smartWalk.dangerZones = {}
+    _smartWalk.fear = {}
     pcall(function()
         local char = Players.LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -8914,6 +9349,7 @@ local function processChatMessage(player, rawMessage)
     -- v20 Beta 3: умная ходьба — кто общается; и «уйди» → отойти к другим
     if ClientSettings.SmartWalk then
         lobSmartWalkNoteChat(player.UserId, player.DisplayName or player.Name)
+        pcall(lobSmartOnChat, player, rawMessage)   -- v21: добрые слова → перемирие, угрозы → страх
         if lobIsLeaveCommand(rawMessage) then lobSmartWalkLeave(player.UserId) end
         if lobIsFarewellCommand(rawMessage) then
             _smartWalk.farewellFrom = _smartWalk.farewellFrom or {}
