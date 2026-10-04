@@ -7022,7 +7022,10 @@ function lobSmartWalkStart()
                     local seatPart = nil
                     pcall(function() seatPart = hum.SeatPart end)
                     if not (seatPart and seatPart:IsA("VehicleSeat")) then
+                        -- встаём прыжком (в играх это самый надёжный способ соскочить со стула)
                         pcall(function() hum.Sit = false end)
+                        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Jumping) end)
+                        pcall(function() hum.Jump = true end)
                         pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
                         -- шаг в сторону, чтобы не сесть обратно на тот же стул
                         local r0 = getLocalRootPart()
