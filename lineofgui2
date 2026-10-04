@@ -6201,7 +6201,7 @@ _smartWalk = {
     active = false, thread = nil, target = nil, targetSince = 0,
     avoid = {}, reachFail = {}, greetAt = {}, lastIdle = 0, lastGreetAt = 0,
     greeted = 0, moving = false, arrivedAt = 0, stuckCount = 0,
-    wanderDest = nil, wanderAt = 0, lastFaceAt = 0, lastWaveAt = 0, lastClean = 0,
+    wanderDest = nil, wanderAt = 0, visited = {}, lastFaceAt = 0, lastWaveAt = 0, lastClean = 0,
     stuckZones = {}, home = nil, offsetSide = 1, baseWalkSpeed = nil,
     state = "wander", socialSince = 0, stayUntil = 0, windUntil = 0,
     lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
@@ -6665,7 +6665,7 @@ function lobSmartFlee(threat)
         local chosen = nil
         local reachable = false
         for k = 1, math.min(3, #cands) do
-            local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+            local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
             local ok = pcall(function() path:ComputeAsync(root.Position, cands[k].pos) end)
             if ok and path.Status == Enum.PathStatus.Success then chosen = cands[k].pos reachable = true break end
         end
@@ -6860,14 +6860,20 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
         if not targetPos then return "cancelled" end
         if (pos - targetPos).Magnitude <= stopD then return "arrived" end
 
-        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
         local ok = pcall(function() path:ComputeAsync(pos, targetPos) end)
         if not ok or path.Status ~= Enum.PathStatus.Success then return "nopath" end
 
         local wps = path:GetWaypoints()
         local iterStart = os.clock()
         local goal0 = targetPos
-        for i = 2, #wps do
+        local rpLOS = RaycastParams.new()
+        rpLOS.FilterType = Enum.RaycastFilterType.Exclude
+        local lc = Players.LocalPlayer.Character
+        rpLOS.FilterDescendantsInstances = lc and { lc } or {}
+
+        local idx = 2
+        while idx <= #wps do
             if cancelFn and cancelFn() then return "cancelled" end
             -- если цель ушла далеко от исходной точки пути — пересчитываем сразу
             local moved = 0
@@ -6875,7 +6881,18 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             if gp then moved = (gp - goal0).Magnitude end
             local cap = (moved > _SW.REPATH_MOVE) and 0.5 or 2.5
             if (os.clock() - iterStart) > cap then break end
-            local wp = wps[i]
+
+            local c0 = Players.LocalPlayer.Character
+            local r0 = c0 and c0:FindFirstChild("HumanoidRootPart")
+            if not r0 then return "fail" end
+            -- ШОРТКАТ: если дальше по маршруту видно по прямой — срезаем углы
+            local eye = r0.Position + Vector3.new(0, 2, 0)
+            for j = #wps, idx + 1, -1 do
+                local dir = wps[j].Position - eye
+                if dir.Magnitude > 3 and not workspace:Raycast(eye, dir, rpLOS) then idx = j break end
+            end
+
+            local wp = wps[idx]
             local c1 = Players.LocalPlayer.Character
             local r1 = c1 and c1:FindFirstChild("HumanoidRootPart")
             local h1 = c1 and c1:FindFirstChildOfClass("Humanoid")
@@ -6898,6 +6915,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
                     wlast = r2.Position
                 end
             end
+            idx = idx + 1
         end
 
         -- прогресс за перерасчёт пути
@@ -6994,10 +7012,21 @@ function lobSmartWander(cancelFn)
         end
     end
 
+    -- ИССЛЕДОВАНИЕ: не идём туда, где недавно были (память посещённых точек)
+    local novel = {}
+    for _, cp in ipairs(cands) do
+        local tooClose = false
+        for _, v in ipairs(gw.visited or {}) do
+            if (now - v.t) < 90 and (cp - v.pos).Magnitude < 18 then tooClose = true break end
+        end
+        if not tooClose then table.insert(novel, cp) end
+    end
+    if #novel > 0 then cands = novel end
+
     local dest = nil
     local PathfindingService = game:GetService("PathfindingService")
     for k = 1, math.min(3, #cands) do
-        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
         local ok = pcall(function() path:ComputeAsync(root.Position, cands[k]) end)
         if ok and path.Status == Enum.PathStatus.Success then dest = cands[k] break end
     end
@@ -7006,6 +7035,10 @@ function lobSmartWander(cancelFn)
         local ang = math.random() * math.pi * 2
         dest = root.Position + Vector3.new(math.cos(ang) * _SW.WANDER_MIN, 0, math.sin(ang) * _SW.WANDER_MIN)
     end
+
+    gw.visited = gw.visited or {}
+    table.insert(gw.visited, { pos = dest, t = now })
+    while #gw.visited > 12 do table.remove(gw.visited, 1) end
 
     gw.wanderDest = dest
     gw.wanderAt = now
@@ -7271,6 +7304,8 @@ function lobSmartWalkStart()
                                         task.wait(0.5)
                                     end
                                     pcall(function() hum.Jump = true end)
+                                    -- следующая попытка подойдёт с ДРУГОЙ стороны (обход препятствия)
+                                    gw.offsetSide = -(gw.offsetSide or 1)
                                     if gw.stuckCount >= 2 then
                                         gw.avoid[target.UserId] = os.clock() + _SW.AVOID_SEC
                                         gw.target = nil
