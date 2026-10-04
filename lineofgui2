@@ -6508,16 +6508,17 @@ function lobSmartIsThreat(p, now)
     -- (глобальный тумблер сюда не примешивается; предательство снимет перемирие)
     local fr = _smartWalk.fear and _smartWalk.fear[p.UserId]
     if fr and (fr.truceUntil or 0) > now then return false end
-    -- v21: собственное чувство опасности умной ходьбы (не зависит от глобального тумблера)
-    if _smartWalk.active and lobSightDangerous(p, now) then return true end
-    if not lobDangerActive() then return false end
-    local uid = p.UserId
-    -- если СЕЙЧАС мы в одной команде — свой (даже если раньше бил и команды менялись)
+    -- v21: СВОИ (та же команда) не опасны ВСЕГДА — проверяем ДО собственного чутья,
+    -- иначе агрессия/оружие союзника ложно помечались как угроза (баг: бот убегал от своих)
     local myT, thT = "", ""
     pcall(function() myT = getTeamName(Players.LocalPlayer) or "" end)
     pcall(function() thT = getTeamName(p) or "" end)
     local teamsKnown = (myT ~= "" and thT ~= "")
     if teamsKnown and myT == thT then return false end
+    -- v21: собственное чувство опасности умной ходьбы (не зависит от глобального тумблера)
+    if _smartWalk.active and lobSightDangerous(p, now) then return true end
+    if not lobDangerActive() then return false end
+    local uid = p.UserId
     -- урон учитываем только без команд: иначе решают команды + PvP
     if (not teamsKnown) and _danger and _danger.suspectUid == uid
         and (now - (_danger.lastDamageAt or -999)) < 120 then return true end
@@ -6550,14 +6551,19 @@ function lobSightAggression(p, root, now)
     if not pr then return 0 end
     local toBot = pr.Position - root.Position
     toBot = Vector3.new(toBot.X, 0, toBot.Z)
-    if toBot.Magnitude < 0.5 then return 1 end
-    local u = -toBot.Unit
-    local s = 0
-    if pr.CFrame.LookVector:Dot(u) > 0.55 then s = s + 1 end
+    local dist = toBot.Magnitude
+    if dist < 0.5 then return 0.5 end           -- стоит вплотную — умеренно
+    local u = -toBot.Unit                        -- направление ОТ него К нам
     local v = pr.AssemblyLinearVelocity
-    if Vector3.new(v.X, 0, v.Z):Dot(u) > _SW.SWD_CLOSE_SPD then s = s + 1 end
-    if ch:FindFirstChildOfClass("Tool") then s = s + 1 end
-    return math.min(1, s / 2)
+    local closing = Vector3.new(v.X, 0, v.Z):Dot(u)   -- >0 = приближается к нам
+    local facing = pr.CFrame.LookVector:Dot(u)
+    -- главный сигнал — реально СБЛИЖАЕТСЯ; взгляд и оружие сами по себе слабые
+    local s = 0
+    if closing > _SW.SWD_CLOSE_SPD then s = s + 0.7
+    elseif closing > _SW.SWD_CLOSE_SPD * 0.5 then s = s + 0.3 end
+    if facing > 0.6 then s = s + 0.15 end
+    if ch:FindFirstChildOfClass("Tool") then s = s + 0.15 end
+    return math.min(1, s)
 end
 
 -- Обновляет локальную карту угроз (вызывается каждый тик умной ходьбы, ≈0.25с).
@@ -6579,14 +6585,23 @@ function lobSmartDangerTick(now)
     local thUid = _danger and _danger.threatUid
     local thFresh = _danger and (now - (_danger.threatAt or -1e9)) < 120
     local myPos = root.Position
+    local myTeam = ""
+    pcall(function() myTeam = getTeamName(Players.LocalPlayer) or "" end)
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= Players.LocalPlayer then
+            -- v21: СВОИ (та же команда) никогда не становятся «опасными»
+            local friendly = false
+            if myTeam ~= "" then
+                local tT = ""
+                pcall(function() tT = getTeamName(p) or "" end)
+                friendly = (tT ~= "" and tT == myTeam)
+            end
             local ch = p.Character
             local pr = ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso"))
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local rec = sight[p.UserId]
-            if rec and (not pr or not hum or hum.Health <= 0) then rec.score = 0 end
-            if pr and hum and hum.Health > 0 then
+            if friendly or (rec and (not pr or not hum or hum.Health <= 0)) then rec.score = 0 end
+            if (not friendly) and pr and hum and hum.Health > 0 then
                 local dist = (pr.Position - myPos).Magnitude
                 if dist <= _SW.SWD_RADIUS then
                     if not rec then rec = { score = 0, seenAt = now } sight[p.UserId] = rec end
