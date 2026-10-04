@@ -7016,8 +7016,22 @@ function lobSmartWalkStart()
                 -- не ходим в рагдолле/стане/на транспорте
                 local st = nil
                 pcall(function() st = hum:GetState() end)
-                if st == Enum.HumanoidStateType.Ragdoll or st == Enum.HumanoidStateType.Physics
-                    or st == Enum.HumanoidStateType.Seated or hum.PlatformStand then
+                if st == Enum.HumanoidStateType.Seated or hum.Sit then
+                    -- случайно сел (стул и т.п.) во время ходьбы — встаём сами.
+                    -- На транспорте (VehicleSeat) не трогаем.
+                    local seatPart = nil
+                    pcall(function() seatPart = hum.SeatPart end)
+                    if not (seatPart and seatPart:IsA("VehicleSeat")) then
+                        pcall(function() hum.Sit = false end)
+                        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+                        -- шаг в сторону, чтобы не сесть обратно на тот же стул
+                        local r0 = getLocalRootPart()
+                        if r0 then pcall(function() hum:MoveTo(r0.Position + r0.CFrame.LookVector * 4) end) end
+                    end
+                    task.wait(0.4)
+                    return
+                end
+                if st == Enum.HumanoidStateType.Ragdoll or st == Enum.HumanoidStateType.Physics or hum.PlatformStand then
                     task.wait(0.4) return
                 end
 
