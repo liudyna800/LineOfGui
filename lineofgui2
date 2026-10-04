@@ -6247,7 +6247,7 @@ _SW = {
     CLEAN_CD       = 60,
     OFFSET         = 2.5,  -- отступ вбок, чтобы не вставать в лицо/в путь
     REPATH_MOVE    = 8,    -- если цель ушла на столько от точки пути — пересчёт сразу
-    CATCHUP        = true, -- лёгкий спринт только на КОРОТКОМ догоне
+    CATCHUP        = false, -- без спринта: ходим спокойно, как живой игрок
     CATCHUP_SPEED  = 20,
     CATCHUP_MAX    = 2.5,  -- секунд на один спринт
     CATCHUP_DIST   = 60,   -- спринт только если цель ближе этого
@@ -6839,6 +6839,37 @@ function lobSmartWave()
     pcall(function() playEmote("wave", 3) end)
 end
 
+-- Локальное «зрение вперёд»: что мешает на пути и как это обойти.
+-- Возврат: nil | "jump" | "wall" | "void" | Vector3 (обходной курс в сторону).
+function lobSmartSteer(root, hum, desiredPos, rp)
+    local eye = root.Position + Vector3.new(0, 2.5, 0)
+    local dir = desiredPos - root.Position
+    dir = Vector3.new(dir.X, 0, dir.Z)
+    if dir.Magnitude < 1 then return nil end
+    local fwd = dir.Unit
+    -- не свалиться с края: ищем землю впереди
+    local ahead = root.Position + fwd * 4.5
+    if not workspace:Raycast(ahead + Vector3.new(0, 4, 0), Vector3.new(0, -16, 0), rp) then return "void" end
+    local hi = workspace:Raycast(eye, fwd * 4, rp)
+    local lo = workspace:Raycast(root.Position + Vector3.new(0, 0.6, 0), fwd * 3.2, rp)
+    local function isChar(inst)
+        if not inst then return false end
+        local m = inst:FindFirstAncestorOfClass("Model")
+        return (m and m:FindFirstChildOfClass("Humanoid")) and true or false
+    end
+    if isChar(hi and hi.Instance) or isChar(lo and lo.Instance) then
+        -- живой человек впереди: вежливо обходим сбоку, где свободнее
+        for _, s in ipairs({ 1, -1 }) do
+            local side = CFrame.Angles(0, math.rad(35 * s), 0) * fwd
+            if not workspace:Raycast(eye, side * 4, rp) then return root.Position + side * 6 end
+        end
+        return "wall"
+    end
+    if lo and (not hi or (hi.Position.Y - root.Position.Y) < 3) then return "jump" end
+    if hi then return "wall" end
+    return nil
+end
+
 -- Динамический подход к ЖИВОЙ позиции: пересчёт пути на ходу, анти-стак, таймаут.
 -- getPos() возвращает актуальную точку (с предсказанием движения на стороне вызова).
 function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
@@ -6848,6 +6879,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
     pcall(function() stopCurrentEmote() end)
     local t0 = os.clock()
     local lastPos, stuckTicks = nil, 0
+    local jitter = nil  -- боковое смещение цели после упора в стену (пробуем другой маршрут)
     while true do
         if cancelFn and cancelFn() then return "cancelled" end
         if (os.clock() - t0) > maxT then return "timeout" end
@@ -6860,9 +6892,12 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
         if not targetPos then return "cancelled" end
         if (pos - targetPos).Magnitude <= stopD then return "arrived" end
 
+        local pathGoal = targetPos
+        if jitter then pathGoal = targetPos + jitter end
         local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
-        local ok = pcall(function() path:ComputeAsync(pos, targetPos) end)
+        local ok = pcall(function() path:ComputeAsync(pos, pathGoal) end)
         if not ok or path.Status ~= Enum.PathStatus.Success then return "nopath" end
+        jitter = nil
 
         local wps = path:GetWaypoints()
         local iterStart = os.clock()
@@ -6900,20 +6935,47 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             if wp.Action == Enum.PathWaypointAction.Jump then pcall(function() h1.Jump = true end) end
             pcall(function() h1:MoveTo(wp.Position) end)
             local wt, wstuck, wlast = 0, 0, r1.Position
+            local blocked = 0
+            local abortPath = false
             while wt < 2.0 do
                 if cancelFn and cancelFn() then return "cancelled" end
                 task.wait(0.1); wt = wt + 0.1
                 local c2 = Players.LocalPlayer.Character
                 local r2 = c2 and c2:FindFirstChild("HumanoidRootPart")
-                if not r2 then return "fail" end
+                local h2 = c2 and c2:FindFirstChildOfClass("Humanoid")
+                if not r2 or not h2 then return "fail" end
                 if (r2.Position - wp.Position).Magnitude < 3.5 then break end
+
+                -- локальный объезд: низкое — прыжок, стена — пересчёт, обрыв — стоп, человек — вбок
+                local steer = nil
+                pcall(function() steer = lobSmartSteer(r2, h2, wp.Position, rpLOS) end)
+                if steer == "jump" then
+                    pcall(function() h2.Jump = true end)
+                elseif steer == "wall" then
+                    blocked = blocked + 1
+                    if blocked >= 2 then abortPath = true break end
+                elseif steer == "void" then
+                    abortPath = true break
+                elseif type(steer) == "Vector3" then
+                    pcall(function() h2:MoveTo(steer) end)
+                end
+
                 if (r2.Position - wlast).Magnitude < 0.25 then
                     wstuck = wstuck + 0.1
-                    if wstuck >= 0.7 then pcall(function() h1.Jump = true end) wstuck = 0 end
+                    if wstuck >= 0.7 then pcall(function() h2.Jump = true end) wstuck = 0 end
                 else
                     wstuck = 0
                     wlast = r2.Position
                 end
+            end
+            if abortPath then
+                -- упёрлись: следующий расчёт пути — со смещением цели вбок (другой маршрут)
+                local d = Vector3.new(targetPos.X - r1.Position.X, 0, targetPos.Z - r1.Position.Z)
+                if d.Magnitude > 1 then
+                    local perp = Vector3.new(-d.Unit.Z, 0, d.Unit.X)
+                    jitter = perp * ((math.random() < 0.5) and -1 or 1) * math.random(3, 6)
+                end
+                break
             end
             idx = idx + 1
         end
