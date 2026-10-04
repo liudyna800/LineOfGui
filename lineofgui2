@@ -5089,7 +5089,7 @@ task.spawn(function()
         end
     end)
 end)
-print("[LOB] build: beta2-gamewiki26 model-search")
+print("[LOB] build: beta2-gamewiki26 model-search sw-v22-chatfix")
 
 -- v20 Beta 3: авто-старт умной ходьбы, если включена в настройках
 task.spawn(function()
@@ -6282,6 +6282,9 @@ _SW = {
     SWD_STEP       = 6,    -- на сколько студов отступаем вбок от набегающего
     SWD_ZONE_SEC   = 45,   -- сколько помним «опасное место»
     SWD_ZONE_R     = 16,   -- радиус опасной зоны, которую избегаем при блуждании
+    -- ── v22: ЧАТ-СОБЕСЕДНИК ≠ УГРОЗА (лечит «бот убегает от того, кто пришёл поговорить») ──
+    SWD_PARTNER_MEM = 60,  -- столько секунд после реплики игрок считается СОБЕСЕДНИКОМ: на него не копим страх
+    SWD_SOFT       = 25,   -- «мягкая» настороженность от простого сближения (никогда не доходит до «опасен»)
     -- ── v21: АДАПТАЦИЯ СТРАХА/ДОВЕРИЯ (привыкание, перемирие, предательство) ──
     HABIT_GAIN     = 0.05, -- привыкание к опасному рядом: +/сек без вреда
     HABIT_MAX      = 0.70, -- максимум гашения страха привыканием
@@ -6607,26 +6610,42 @@ function lobSmartDangerTick(now)
                 if dist <= _SW.SWD_RADIUS then
                     if not rec then rec = { score = 0, seenAt = now } sight[p.UserId] = rec end
                     local dt = now - (rec.seenAt or now)
-                    if dt > 0 then rec.score = math.max(0, (rec.score or 0) - dt * _SW.SWD_DECAY) end
+                    local was = math.max(0, (rec.score or 0) - ((dt > 0) and (dt * _SW.SWD_DECAY) or 0))
                     rec.seenAt = now
-                    local gain = 0
-                    if dmgFresh and dmgUid == p.UserId then gain = gain + 140 end
-                    local enemy = false
+                    -- v22: разбираем ПРИЗНАКИ, а не «идёт в нашу сторону» = враг.
+                    -- Нас насторожить должны факт урона, подтверждённый PvP-враг, оружие
+                    -- в руке при реальном набегании или угрозы в чате — но НЕ простой
+                    -- факт, что игрок подошёл к боту поговорить.
+                    local hurtUs = (dmgFresh and dmgUid == p.UserId) or (thFresh and thUid == p.UserId)
+                    local enemy, pvp = false, false
                     pcall(function() enemy = lobIsEnemyOf(p) end)
-                    if enemy then
-                        local pvp = false
-                        pcall(function() pvp = lobPvpConfirmedFor(p) end)
-                        if pvp then gain = gain + 100 end
-                    end
-                    if thFresh and thUid == p.UserId then gain = gain + 80 end
+                    if enemy then pcall(function() pvp = lobPvpConfirmedFor(p) end) end
                     local agg = 0
                     pcall(function() agg = lobSightAggression(p, root, now) end)
-                    if agg > 0 then
-                        if dist <= _SW.SWD_CLOSE then gain = gain + agg * 70
-                        elseif dist <= _SW.SWD_RADIUS * 0.7 then gain = gain + agg * 30 end
+                    local fRec = _smartWalk.fear and _smartWalk.fear[p.UserId]
+                    local hard = hurtUs or (enemy and pvp)                 -- факт агрессии
+                    local tool = ch:FindFirstChildOfClass("Tool") ~= nil
+                    local soft = (not hard) and (enemy or (fRec and (fRec.fear or 0) >= 100)
+                        or (tool and agg >= 0.7))                          -- тревожно, но не факт
+                    -- v22: кто СЕЙЧАС переписывается с ботом — СОБЕСЕДНИК, а не угроза
+                    local partner = (not hard) and ((now - (_lastChatAt[p.UserId] or -1e9)) < _SW.SWD_PARTNER_MEM)
+                    if partner then
+                        rec.score = 0                                      -- обнуляем весь накопленный страх
+                    elseif hard then
+                        local gain = (hurtUs and 140 or 0) + ((enemy and pvp) and 100 or 0)
+                        if agg > 0 then
+                            if dist <= _SW.SWD_CLOSE then gain = gain + agg * 70
+                            elseif dist <= _SW.SWD_RADIUS * 0.7 then gain = gain + agg * 30 end
+                        end
+                        if lowHp then gain = gain * 1.4 end
+                        rec.score = math.min(260, was + gain)
+                    elseif soft then
+                        -- настораживаемся (не подходим вплотную), но НЕ паникуем и не убегаем
+                        rec.score = math.min(_SW.SWD_ALERT - 10, was + 6 + agg * 18)
+                    else
+                        -- обычный прохожий: только «мягкая» настороженность, ниже порога wary
+                        rec.score = math.min(_SW.SWD_WARY - 8, math.max(was, agg * _SW.SWD_SOFT))
                     end
-                    if lowHp then gain = gain * 1.4 end
-                    rec.score = math.min(260, (rec.score or 0) + gain)
                 elseif rec then
                     rec.score = math.max(0, (rec.score or 0) - (now - (rec.seenAt or now)) * _SW.SWD_DECAY * 2)
                     rec.seenAt = now
@@ -7808,7 +7827,13 @@ function lobSmartWalkStart()
                             if tspeed > _SW.GIVEUP_SPEED and dist > _SW.GIVEUP_DIST then giveUp = true end
                             if (now - (gw.travelSince or now)) > _SW.TRAVEL_MAX and dist > _SW.STOP_DIST then giveUp = true end
                             -- поздоровались, а он молчит и уходит — за ним не бегаем
-                            local greetedSilent = (botSpoke >= (gw.socialSince or 0))
+                            -- v22 FIX: «мы уже поздоровались» считается ТОЛЬКО внутри текущего визита
+                            -- (socialSince > 0). В пути socialSince == 0, из-за чего условие было
+                            -- всегда истинным и бот бросал подход к тому, кто ему только что написал
+                            -- (уходил бродить и снова выбирал его же) — «идёт к нему / отходит».
+                            local greetedSilent = (gw.socialSince or 0) > 0
+                                and botSpoke >= (gw.socialSince or 0)
+                                and (now - botSpoke) > 12
                                 and (gw.sessionChats or 0) == 0
                                 and (((_rel[target.UserId] or {}).chats or 0) == 0)
                             if greetedSilent and dist > _SW.RESUME_DIST then giveUp = true end
