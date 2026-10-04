@@ -7085,7 +7085,7 @@ function lobSmartFlee(threat)
 
         local r2 = getLocalRootPart()
         local moved = r2 and (r2.Position - p0).Magnitude or 0
-        if (not reachable) or res == "nopath" or res == "stuck" or res == "fail" or moved < 0.25 then
+        if (not reachable) or res == "nopath" or res == "stuck" or res == "fail" or (moved < 0.25 and res ~= "arrived") then
             -- путь не найден/не двигаемся: КОРОТКИЙ шаг в самую свободную сторону,
             -- угол обхода поворачивается с каждой неудачей
             local bestDir, bestScore = nil, -1e9
@@ -7348,6 +7348,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             local abortPath = false
             while wt < 2.0 do
                 if cancelFn and cancelFn() then return "cancelled" end
+                if (os.clock() - t0) > maxT then return "timeout" end
                 task.wait(0.1); wt = wt + 0.1
                 local c2 = Players.LocalPlayer.Character
                 local r2 = c2 and c2:FindFirstChild("HumanoidRootPart")
@@ -7455,9 +7456,18 @@ function lobSmartWander(cancelFn)
     if gw.wanderDest and (now - (gw.wanderAt or 0)) < 30
         and (root.Position - gw.wanderDest).Magnitude > 4 then
         local keep = gw.wanderDest
-        return lobSmartApproach(function() return gw.wanderDest end, function()
+        local r = lobSmartApproach(function() return gw.wanderDest end, function()
             return (cancelFn and cancelFn()) or (gw.wanderDest ~= keep)
         end, 4, 8)
+        -- v21 FIX: точка недостижима/застряли — забываем её и метим зону, чтобы взять новую
+        if r == "nopath" or r == "stuck" or r == "fail" then
+            gw.wanderDest = nil
+            local rp = getLocalRootPart()
+            if rp then
+                table.insert(gw.stuckZones, { pos = rp.Position, expireAt = now + _SW.STUCK_ZONE_SEC })
+            end
+        end
+        return r
     end
 
     -- НОВАЯ точка: кандидаты + проверка достижимости pathfinding-ом
@@ -7533,9 +7543,16 @@ function lobSmartWander(cancelFn)
 
     gw.wanderDest = dest
     gw.wanderAt = now
-    return lobSmartApproach(function() return gw.wanderDest end, function()
+    local r = lobSmartApproach(function() return gw.wanderDest end, function()
         return (cancelFn and cancelFn()) or (gw.wanderDest ~= dest)
     end, 4, 8)
+    -- v21 FIX: если новая точка тоже не берётся — забываем и метим зону (не зацикливаемся)
+    if r == "nopath" or r == "stuck" or r == "fail" then
+        gw.wanderDest = nil
+        local rp = getLocalRootPart() or root
+        table.insert(gw.stuckZones, { pos = rp.Position, expireAt = now + _SW.STUCK_ZONE_SEC })
+    end
+    return r
 end
 
 function lobSmartWalkStart()
