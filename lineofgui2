@@ -6201,7 +6201,7 @@ _smartWalk = {
     active = false, thread = nil, target = nil, targetSince = 0,
     avoid = {}, reachFail = {}, greetAt = {}, lastIdle = 0, lastGreetAt = 0,
     greeted = 0, moving = false, arrivedAt = 0, stuckCount = 0,
-    wanderDest = nil, lastFaceAt = 0, lastWaveAt = 0, lastClean = 0,
+    wanderDest = nil, wanderAt = 0, lastFaceAt = 0, lastWaveAt = 0, lastClean = 0,
     stuckZones = {}, home = nil, offsetSide = 1, baseWalkSpeed = nil,
     state = "wander", socialSince = 0, stayUntil = 0, windUntil = 0,
     lastInteract = 0, lastFarewellAt = 0, farewellFrom = {},
@@ -6214,7 +6214,6 @@ _smartWalk = {
 }
 _lastChatAt = _lastChatAt or {}
 _SW = {
-    IDLE_TALK_CD   = 35,   -- пауза между «бормотанием»
     AVOID_SEC      = 60,   -- не подходить после «уйди»
     REACH_FAIL_SEC = 45,   -- считать цель недостижимой после провала пути
     STOP_DIST      = 7,    -- комфортная дистанция остановки
@@ -6230,9 +6229,9 @@ _SW = {
     WIND_DOWN      = 2.5,  -- сколько постоять/попрощаться перед уходом
     FAREWELL_CD    = 90,   -- не прощаемся чаще, чем раз в N секунд
     RETURN_CD      = 30,   -- сколько не возвращаться к тому же игроку после ухода
-    WANDER_PAUSE   = 0.35, -- шанс остановиться осмотреться после прогулки
-    WANDER_PAUSE_MIN = 1.5,
-    WANDER_PAUSE_MAX = 4.0,
+    WANDER_PAUSE   = 0.12, -- изредка останавливается осмотреться (редко, чтобы не выглядел тупым)
+    WANDER_PAUSE_MIN = 0.8,
+    WANDER_PAUSE_MAX = 2.0,
     WANDER_ENEMY_R = 25,   -- не выбирать точки блуждания рядом с врагами
     OTHER_ENEMY_R  = 18,   -- штраф за отход в сторону других врагов
     NUDGE_T1       = 40,   -- «ты тут?» — только если реально долго молчит и не смотрит
@@ -6243,8 +6242,8 @@ _SW = {
     REVISIT_MAX    = 150,
     STUCK_LIMIT    = 3,    -- столько перерасчётов без прогресса → застревание
     APPROACH_MAX   = 10,   -- максимум секунд на один подход (чаще переоцениваем)
-    WANDER_MIN     = 18,
-    WANDER_MAX     = 70,
+    WANDER_MIN     = 25,
+    WANDER_MAX     = 90,
     CLEAN_CD       = 60,
     OFFSET         = 2.5,  -- отступ вбок, чтобы не вставать в лицо/в путь
     REPATH_MOVE    = 8,    -- если цель ушла на столько от точки пути — пересчёт сразу
@@ -6258,7 +6257,7 @@ _SW = {
     STAY_LOCK_SEC  = 120,  -- [DO:stay] держит визит к игроку
     CROWD_RADIUS   = 7,    -- радиус «компании» вокруг цели
     CROWD_PENALTY  = 140,  -- штраф за переполненную компанию
-    LEASH          = 130,  -- не уходить дальше от дома при блуждании
+    LEASH          = 180,  -- не уходить дальше от дома при блуждании
     STUCK_ZONE_SEC = 90,   -- как долго помнить место застревания
     STUCK_ZONE_R   = 10,
     THREAT_RADIUS  = 26,   -- враг в этом радиусе И ВИДЕН — «замечен»
@@ -6960,17 +6959,28 @@ function lobSmartWander(cancelFn)
     local ch = Players.LocalPlayer.Character
     local root = ch and ch:FindFirstChild("HumanoidRootPart")
     if not root then return "fail" end
-    local home = _smartWalk.home or root.Position
+    local gw = _smartWalk
+    local now = os.clock()
+
+    -- ПРОДОЛЖАЕМ идти к уже выбранной точке — не меняем курс каждый вызов
+    if gw.wanderDest and (now - (gw.wanderAt or 0)) < 30
+        and (root.Position - gw.wanderDest).Magnitude > 4 then
+        local keep = gw.wanderDest
+        return lobSmartApproach(function() return gw.wanderDest end, function()
+            return (cancelFn and cancelFn()) or (gw.wanderDest ~= keep)
+        end, 4, 8)
+    end
+
+    -- НОВАЯ точка: кандидаты + проверка достижимости pathfinding-ом
+    local home = gw.home or root.Position
     local enemies = lobSmartEnemyList()
-    local dest = nil
-    for _ = 1, 5 do
+    local cands = {}
+    for _ = 1, 6 do
         local ang = math.random() * math.pi * 2
         local rad = math.random(_SW.WANDER_MIN, _SW.WANDER_MAX)
         local p = root.Position + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
-        -- держимся в пределах лужа от дома
         local off = p - home
         if off.Magnitude > _SW.LEASH then p = home + off.Unit * _SW.LEASH end
-        -- не гуляем в сторону врагов
         local nearEnemy = false
         for _, e in ipairs(enemies) do
             if e.pos and (p - e.pos).Magnitude < _SW.WANDER_ENEMY_R then nearEnemy = true break end
@@ -6980,17 +6990,28 @@ function lobSmartWander(cancelFn)
             rp.FilterType = Enum.RaycastFilterType.Exclude
             rp.FilterDescendantsInstances = { ch }
             local hit = workspace:Raycast(p + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
-            if hit and hit.Position then dest = hit.Position break end
+            if hit and hit.Position then table.insert(cands, hit.Position) end
         end
     end
+
+    local dest = nil
+    local PathfindingService = game:GetService("PathfindingService")
+    for k = 1, math.min(3, #cands) do
+        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+        local ok = pcall(function() path:ComputeAsync(root.Position, cands[k]) end)
+        if ok and path.Status == Enum.PathStatus.Success then dest = cands[k] break end
+    end
+    if not dest and #cands > 0 then dest = cands[1] end
     if not dest then
         local ang = math.random() * math.pi * 2
         dest = root.Position + Vector3.new(math.cos(ang) * _SW.WANDER_MIN, 0, math.sin(ang) * _SW.WANDER_MIN)
     end
-    _smartWalk.wanderDest = dest
-    return lobSmartApproach(function() return _smartWalk.wanderDest end, function()
-        return (cancelFn and cancelFn()) or (_smartWalk.wanderDest ~= dest)
-    end, 5, 8)
+
+    gw.wanderDest = dest
+    gw.wanderAt = now
+    return lobSmartApproach(function() return gw.wanderDest end, function()
+        return (cancelFn and cancelFn()) or (gw.wanderDest ~= dest)
+    end, 4, 8)
 end
 
 function lobSmartWalkStart()
@@ -7413,35 +7434,6 @@ function lobSmartWalkStart()
                             lobSmartFace(r2.Position + Vector3.new(math.cos(ang2) * 12, 0, math.sin(ang2) * 12))
                         end
                         task.wait(math.random() * (_SW.WANDER_PAUSE_MAX - _SW.WANDER_PAUSE_MIN) + _SW.WANDER_PAUSE_MIN)
-                    end
-                    if ClientSettings.AutoReply and (now - (gw.lastIdle or 0)) > _SW.IDLE_TALK_CD
-                        and (now - (gw.lastThreatAt or 0)) > 30 then
-                        -- если рядом есть люди — не говорим «тут пусто / скучно»
-                        local near = 0
-                        local rr0 = getLocalRootPart()
-                        if rr0 then
-                            for _, pp in ipairs(Players:GetPlayers()) do
-                                if pp ~= Players.LocalPlayer and pp.Character then
-                                    local pr0 = pp.Character:FindFirstChild("HumanoidRootPart")
-                                    if pr0 and (pr0.Position - rr0.Position).Magnitude < 40 then near = near + 1 end
-                                end
-                            end
-                        end
-                        -- если кто-то недавно писал в чат — не бормочем «никого нет»
-                        local recentChat = false
-                        for _, t in pairs(_lastChatAt) do
-                            if (now - t) < 45 then recentChat = true break end
-                        end
-                        if near == 0 and not recentChat then
-                            gw.lastIdle = now
-                            local lines
-                            if _lastGlobalLang == "RU" then
-                                lines = { "хм, тут пусто…", "кто-нибудь тут?", "скучно…", "просто гуляю", "ау, где все?" }
-                            else
-                                lines = { "hmm, quiet here…", "anyone wanna chat?", "kinda bored…", "just walking around", "where is everyone?" }
-                            end
-                            pcall(sendBotMessage, lines[math.random(#lines)])
-                        end
                     end
                 end
             end)
