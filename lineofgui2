@@ -6601,7 +6601,7 @@ function lobSmartDangerTick(now)
             local pr = ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso"))
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local rec = sight[p.UserId]
-            if friendly or (rec and (not pr or not hum or hum.Health <= 0)) then rec.score = 0 end
+            if rec and (friendly or not pr or not hum or hum.Health <= 0) then rec.score = 0 end
             if (not friendly) and pr and hum and hum.Health > 0 then
                 local dist = (pr.Position - myPos).Magnitude
                 if dist <= _SW.SWD_RADIUS then
