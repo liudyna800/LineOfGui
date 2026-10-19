@@ -1977,7 +1977,7 @@ end
 function lobOllamaChatUrl()
     local base = lobOllamaBaseUrl()
     if base:find("/v1$") then return base .. "/chat/completions" end
-    return base .. "/v1/chat/completions"
+    return base .. "/api/chat"
 end
 
 function lobOllamaModelName(model)
@@ -2013,12 +2013,16 @@ function OllamaProvider:chatCompletions(payload)
     local modelName = lobOllamaModelName(payload.model)
     if modelName == "" then return nil, "OllamaMissingModelName" end
 
+    local opts = {}
+    if payload.temperature ~= nil then opts.temperature = payload.temperature end
+    if payload.max_tokens ~= nil then opts.num_predict = payload.max_tokens end
     local body = {
-        model       = modelName,
-        messages    = payload.messages,
-        temperature = payload.temperature,
-        max_tokens  = payload.max_tokens,
-        stream      = false,
+        model      = modelName,
+        messages   = payload.messages,
+        stream     = false,
+        think      = false,
+        keep_alive = "30m",
+        options    = opts,
     }
     local rawBody, statusCode, statusMsg, reqErr = lobOllamaPost(lobOllamaChatUrl(), body)
 
@@ -2042,12 +2046,28 @@ function OllamaProvider:chatCompletions(payload)
     local dok = pcall(function() res = HttpService:JSONDecode(rawBody) end)
     if not dok or type(res) ~= "table" then return nil, "OllamaBadJson" end
 
-    lobTrackUsage(payload.model, res.usage)
-    local choice = res.choices and res.choices[1]
-    if not choice then return nil, "NoChoicesReturned" end
-    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
-    local msg = choice.message
-    local content = msg and msg.content
+    local usage = res.usage
+    if not usage and (res.prompt_eval_count or res.eval_count) then
+        usage = {
+            prompt_tokens     = res.prompt_eval_count or 0,
+            completion_tokens = res.eval_count or 0,
+            total_tokens      = (res.prompt_eval_count or 0) + (res.eval_count or 0),
+        }
+    end
+    lobTrackUsage(payload.model, usage)
+
+    local msg
+    if type(res.choices) == "table" then
+        local choice = res.choices[1]
+        if not choice then return nil, "NoChoicesReturned" end
+        if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
+        msg = choice.message
+    elseif type(res.message) == "table" then
+        msg = res.message
+    end
+    if type(msg) ~= "table" then return nil, "NoChoicesReturned" end
+
+    local content = msg.content
     if type(content) == "table" then
         local parts = {}
         for _, block in ipairs(content) do
@@ -2058,7 +2078,7 @@ function OllamaProvider:chatCompletions(payload)
         content = table.concat(parts, " ")
     end
     -- thinking-модели могут вернуть пустой content и текст в msg.thinking
-    if (type(content) ~= "string" or content == "") and type(msg) == "table" and type(msg.thinking) == "string" then
+    if (type(content) ~= "string" or content == "") and type(msg.thinking) == "string" then
         content = msg.thinking
     end
     if type(content) ~= "string" or content == "" then return nil, "EmptyResponse" end
