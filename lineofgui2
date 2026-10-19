@@ -2013,9 +2013,11 @@ function OllamaProvider:chatCompletions(payload)
     local modelName = lobOllamaModelName(payload.model)
     if modelName == "" then return nil, "OllamaMissingModelName" end
 
+    local numPredict = tonumber(payload.max_tokens) or 0
+    if numPredict <= 0 or numPredict > 256 then numPredict = 256 end
     local opts = {}
     if payload.temperature ~= nil then opts.temperature = payload.temperature end
-    if payload.max_tokens ~= nil then opts.num_predict = payload.max_tokens end
+    opts.num_predict = numPredict
     local body = {
         model      = modelName,
         messages   = payload.messages,
