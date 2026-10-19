@@ -1990,6 +1990,18 @@ function lobIsOllamaModel(model)
     return tostring(model or ""):find("^ollama[:/]") ~= nil
 end
 
+-- Поиск значения в списке моделей (элементы — строки или { value, label })
+function lobModelListFind(list, value)
+    for _, item in ipairs(list or {}) do
+        if type(item) == "table" then
+            if item.value == value then return true end
+        elseif item == value then
+            return true
+        end
+    end
+    return false
+end
+
 OllamaProvider = {}
 OllamaProvider.__index = OllamaProvider
 
@@ -10868,7 +10880,19 @@ local function makeDropdown(parent, values, default, callback)
         tween(mainBtn, TWEEN_FAST, { BackgroundColor3 = THEME.Button })
     end)
 
-    local lbl = makeTextLabel(mainBtn, tostring(default), 14, "semibold")
+    -- v22: элементы списка могут быть строкой (value==label) или таблицей
+    -- { value = <id модели>, label = <текст в списке> }
+    local function _ddLabel(v)
+        for _, item in ipairs(values) do
+            if type(item) == "table" then
+                if item.value == v then return tostring(item.label or item.value) end
+            elseif item == v then
+                return tostring(item)
+            end
+        end
+        return tostring(v)
+    end
+    local lbl = makeTextLabel(mainBtn, _ddLabel(default), 14, "semibold")
     lbl.Size = UDim2.new(1, -34, 1, 0)
     lbl.Position = UDim2.new(0, 10, 0, 0) -- Flush left like inputs
 
@@ -10988,7 +11012,15 @@ local function makeDropdown(parent, values, default, callback)
              scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y / _guiScale)
         end)
 
-        for i, val in ipairs(values) do
+        for i, entry in ipairs(values) do
+            local val, disp
+            if type(entry) == "table" then
+                val  = entry.value
+                disp = tostring(entry.label or entry.value)
+            else
+                val  = entry
+                disp = tostring(entry)
+            end
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1, 0, 0, itemHeight)
             btn.BackgroundColor3 = Color3.fromRGB(24, 24, 27) -- Base color
@@ -11002,7 +11034,7 @@ local function makeDropdown(parent, values, default, callback)
             local isSelected = (val == default)
             
             local label = Instance.new("TextLabel")
-            label.Text = tostring(val)
+            label.Text = disp
             label.Font = Enum.Font.GothamMedium
             label.TextSize = 14
             label.TextXAlignment = Enum.TextXAlignment.Left
@@ -11035,7 +11067,7 @@ local function makeDropdown(parent, values, default, callback)
             end)
             
             btn.MouseButton1Click:Connect(function()
-                lbl.Text = tostring(val)
+                lbl.Text = disp
                 default = val -- update current selected local var
                 if callback then callback(val) end
                 close()
@@ -11059,7 +11091,7 @@ local function makeDropdown(parent, values, default, callback)
     return {
         Frame = holder,
         Set = function(val)
-            lbl.Text = tostring(val)
+            lbl.Text = _ddLabel(val)
             default = val
         end
     }
@@ -12833,11 +12865,15 @@ local groqModels = {
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
     -- ── 🖥 OLLAMA (локальные модели, нужен запущенный Ollama) ────────────
-    "ollama/llama3.2",                             -- Llama 3.2  (локально)
-    "ollama/qwen2.5",                              -- Qwen 2.5   (локально)
-    "ollama/gemma3",                               -- Gemma 3    (локально)
-    "ollama/phi4",                                 -- Phi-4      (локально)
-    "ollama/mistral",                              -- Mistral    (локально)
+    -- Формат: { value = тег в Ollama, label = как показать в списке }
+    { value = "ollama/qwen3.5:4b",  label = "qwen3.5:4b (ollama)" },
+    { value = "ollama/qwen3.5:9b",  label = "qwen3.5:9b (ollama)" },
+    { value = "ollama/gpt-oss:20b", label = "gpt-oss:20b (ollama)" },
+    { value = "ollama/llama3.2",    label = "llama3.2 (ollama)" },
+    { value = "ollama/qwen2.5",     label = "qwen2.5 (ollama)" },
+    { value = "ollama/gemma3",      label = "gemma3 (ollama)" },
+    { value = "ollama/phi4",        label = "phi4 (ollama)" },
+    { value = "ollama/mistral",     label = "mistral (ollama)" },
 }
 
 --[[ 
@@ -12908,7 +12944,7 @@ end
 
 -- Своя модель (локальные Ollama-теги, кастомные id Groq и т.п.)
 do
-    if not table.find(groqModels, currentModel) then
+    if not lobModelListFind(groqModels, currentModel) then
         local customBox = makeTextBox(generalScroll, "Своя модель: ollama/llama3.2")
         customBox.Size = UDim2.new(1, 0, 0, 38)
         customBox.Text = currentModel or ""
