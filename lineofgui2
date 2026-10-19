@@ -2013,14 +2013,47 @@ function OllamaProvider:chatCompletions(payload)
     local modelName = lobOllamaModelName(payload.model)
     if modelName == "" then return nil, "OllamaMissingModelName" end
 
+    -- Быстрый режим для локальной модели: длинный промпт бота (3k+ токенов)
+    -- сильно замедляет генерацию на CPU. Оставляем основной системный промпт
+    -- (сокращённый), контекст инвентаря и последние сообщения диалога.
+    local src = type(payload.messages) == "table" and payload.messages or {}
+    local msgs = {}
+    local dialog = {}
+    local invCtx = nil
+    for i = 1, #src do
+        local m = src[i]
+        if type(m) == "table" and type(m.content) == "string" then
+            if m.role == "system" then
+                if i == 1 then
+                    local c = m.content
+                    if #c > 3000 then c = c:sub(1, 3000) end
+                    table.insert(msgs, { role = "system", content = c })
+                elseif m.content:find("CURRENT INVENTORY", 1, true) then
+                    local c = m.content
+                    if #c > 1200 then c = c:sub(1, 1200) end
+                    invCtx = c
+                end
+            else
+                local c = m.content
+                if #c > 500 then c = c:sub(1, 500) end
+                table.insert(dialog, { role = m.role, content = c })
+            end
+        end
+    end
+    if invCtx then table.insert(msgs, { role = "system", content = invCtx }) end
+    local startI = #dialog - 7
+    if startI < 1 then startI = 1 end
+    for i = startI, #dialog do table.insert(msgs, dialog[i]) end
+    if #msgs == 0 then msgs = { { role = "user", content = "..." } } end
+
     local numPredict = tonumber(payload.max_tokens) or 0
-    if numPredict <= 0 or numPredict > 256 then numPredict = 256 end
-    local opts = {}
+    if numPredict <= 0 or numPredict > 160 then numPredict = 160 end
+    local opts = { num_ctx = 8192 }
     if payload.temperature ~= nil then opts.temperature = payload.temperature end
     opts.num_predict = numPredict
     local body = {
         model      = modelName,
-        messages   = payload.messages,
+        messages   = msgs,
         stream     = false,
         think      = false,
         keep_alive = "30m",
