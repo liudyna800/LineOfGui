@@ -14146,7 +14146,8 @@ do
 
     local function applyOllamaUrl()
         local u = (olUrlBox.Text or ""):match("^%s*(.-)%s*$") or ""
-        u = u:gsub("%s+", ""):gsub("/+$", "")
+    u = u:gsub("%s+", "")
+    u = u:gsub("/api/tags/?$", ""):gsub("/v1/?$", ""):gsub("/chat/completions/?$", ""):gsub("/+$", "")
         if u == "" then u = "http://127.0.0.1:11434" end
         ClientSettings.OllamaBaseUrl = u
         olUrlBox.Text = u
