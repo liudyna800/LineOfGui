@@ -2053,22 +2053,27 @@ end
 
 -- Проверка локального сервера + список установленных моделей (GET /api/tags)
 -- Возвращает: ok(boolean), names(table), err(string|nil)
+_ollamaServerOk = nil
+_ollamaProbeInFlight = false
 function lobOllamaTags()
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httprequest then return false, {}, "ExecutorHttpNotSupported" end
+    if not httprequest then _ollamaServerOk = false; return false, {}, "ExecutorHttpNotSupported" end
+    local base = lobOllamaBaseUrl():gsub("/v1$", "")
     local ok, response = pcall(httprequest, {
-        Url = lobOllamaBaseUrl() .. "/api/tags",
+        Url = base .. "/api/tags",
         Method = "GET",
         Headers = { ["Content-Type"] = "application/json" },
     })
     if not ok or type(response) ~= "table" then
+        _ollamaServerOk = false
         return false, {}, tostring(response or "request failed")
     end
     local sc = tonumber(response.StatusCode or response.statusCode or 0) or 0
-    if sc < 200 or sc >= 300 then return false, {}, "HTTP " .. tostring(sc) end
+    if sc < 200 or sc >= 300 then _ollamaServerOk = false; return false, {}, "HTTP " .. tostring(sc) end
     local data
     local dok = pcall(function() data = HttpService:JSONDecode(tostring(response.Body or response.body or "{}")) end)
     if not dok or type(data) ~= "table" or type(data.models) ~= "table" then
+        _ollamaServerOk = false
         return false, {}, "bad response"
     end
     local names = {}
@@ -2076,6 +2081,7 @@ function lobOllamaTags()
         local n = m and (m.name or m.model)
         if type(n) == "string" and n ~= "" then table.insert(names, n) end
     end
+    _ollamaServerOk = true
     return true, names, nil
 end
 
@@ -11386,17 +11392,35 @@ local function updateCtStatus()
         hasKey = type(dk)=="string" and #dk > 8
         apiName = "DeepSeek"
     elseif lobIsOllamaModel(model) then
-        local ol = lobOllamaBaseUrl()
-        hasKey = type(ol)=="string" and #ol > 0
-        apiName = "Ollama (local)"
+        apiName = "Ollama"
+        if _ollamaServerOk == true then
+            hasKey = true
+        elseif _ollamaServerOk == false then
+            hasKey = false
+        else
+            hasKey = nil
+        end
+        -- light async probe so the status eventually resolves without opening the card
+        if hasKey == nil and not _ollamaProbeInFlight then
+            _ollamaProbeInFlight = true
+            task.spawn(function()
+                pcall(lobOllamaTags)
+                _ollamaProbeInFlight = false
+            end)
+        end
     else
         local gk = getGroqApiKey and getGroqApiKey() or ""
         hasKey = type(gk)=="string" and #gk > 8 and gk:sub(1,4) == "gsk_"
         apiName = "Groq"
     end
 
-    dotApi.BackgroundColor3  = hasKey and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
-    lblApi.Text  = hasKey and (apiName .. ": OK") or (apiName .. ": нет ключа")
+    if hasKey == nil then
+        dotApi.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+        lblApi.Text = apiName
+    else
+        dotApi.BackgroundColor3  = hasKey and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
+        lblApi.Text  = hasKey and (apiName .. ": OK") or (apiName .. ": нет ключа")
+    end
 
     local on = s.Enabled and s.AutoReply
     dotBot.BackgroundColor3  = on and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
