@@ -2020,15 +2020,13 @@ function OllamaProvider:chatCompletions(payload)
         max_tokens  = payload.max_tokens,
         stream      = false,
     }
-    local res, statusCode, statusMsg, rawBody = postJson(lobOllamaChatUrl(), {
-        ["Content-Type"] = "application/json",
-    }, body)
+    local rawBody, statusCode, statusMsg, reqErr = lobOllamaPost(lobOllamaChatUrl(), body)
 
-    if not res then
+    if not rawBody then
         local sc = tonumber(statusCode) or 0
-        local detail = tostring(rawBody or ""):sub(1, 200)
+        local detail = tostring(reqErr or ""):sub(1, 200)
         pcall(function()
-            local b = HttpService:JSONDecode(tostring(rawBody or "{}"))
+            local b = HttpService:JSONDecode(tostring(reqErr or "{}"))
             if b and b.error then detail = tostring(b.error.message or b.error) end
         end)
         if sc == 404 then
@@ -2039,6 +2037,10 @@ function OllamaProvider:chatCompletions(payload)
         end
         return nil, tostring(sc) .. ":" .. tostring(statusMsg or "") .. ":" .. detail
     end
+
+    local res
+    local dok = pcall(function() res = HttpService:JSONDecode(rawBody) end)
+    if not dok or type(res) ~= "table" then return nil, "OllamaBadJson" end
 
     lobTrackUsage(payload.model, res.usage)
     local choice = res.choices and res.choices[1]
@@ -2063,22 +2065,56 @@ function OllamaProvider:chatCompletions(payload)
     return content, nil
 end
 
+-- Надёжный HTTP-запрос: перебирает все доступные функции экзекьютора.
+-- Возвращает response(table), nil, nil  или  nil, nil, err(string)
+function lobHttpRequest(opts)
+    local cands = {}
+    if type(request) == "function" then table.insert(cands, request) end
+    if syn and type(syn.request) == "function" then table.insert(cands, syn.request) end
+    if http and type(http.request) == "function" then table.insert(cands, http.request) end
+    if type(http_request) == "function" then table.insert(cands, http_request) end
+    if fluxus and type(fluxus.request) == "function" then table.insert(cands, fluxus.request) end
+    if #cands == 0 then return nil, nil, "ExecutorHttpNotSupported" end
+    local lastErr = "request failed"
+    for _, fn in ipairs(cands) do
+        local ok, res = pcall(fn, opts)
+        if ok and type(res) == "table" then return res, nil, nil end
+        lastErr = ok and "non-table response" or tostring(res)
+    end
+    return nil, nil, lastErr
+end
+
+function lobOllamaPost(url, bodyTable)
+    local okEnc, body = pcall(function() return HttpService:JSONEncode(bodyTable) end)
+    if not okEnc then return nil, 0, "JSONEncodeFailed", tostring(body) end
+    local response, _, err = lobHttpRequest({
+        Url = url,
+        Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body = body,
+    })
+    if not response then return nil, 0, "RequestFailed", tostring(err) end
+    local respBody = tostring(response.Body or response.body or "")
+    local sc = tonumber(response.StatusCode or response.statusCode or response.Status or response.status) or 200
+    local msg = tostring(response.StatusMessage or response.statusMessage or "Unknown")
+    if sc < 200 or sc >= 300 then return nil, sc, msg, respBody end
+    return respBody, sc, msg, nil
+end
+
 -- Проверка локального сервера + список установленных моделей (GET /api/tags)
 -- Возвращает: ok(boolean), names(table), err(string|nil)
 _ollamaServerOk = nil
 _ollamaProbeInFlight = false
 function lobOllamaTags()
-    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httprequest then _ollamaServerOk = false; return false, {}, "ExecutorHttpNotSupported" end
     local base = lobOllamaBaseUrl():gsub("/v1$", "")
-    local ok, response = pcall(httprequest, {
+    local response, _, err = lobHttpRequest({
         Url = base .. "/api/tags",
         Method = "GET",
         Headers = { ["Content-Type"] = "application/json" },
     })
-    if not ok or type(response) ~= "table" then
+    if not response then
         _ollamaServerOk = false
-        return false, {}, tostring(response or "request failed")
+        return false, {}, tostring(err or "request failed")
     end
     local sc = tonumber(response.StatusCode or response.statusCode or 0) or 0
     if sc < 200 or sc >= 300 then _ollamaServerOk = false; return false, {}, "HTTP " .. tostring(sc) end
