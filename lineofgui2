@@ -60,8 +60,13 @@
 --                      systemInstruction, contents[], thinkingConfig
 --                      Поддержка: 2.5-flash, 2.5-flash-lite, 3-flash, 3.1-flash-lite
 --
+--   §OLLAMA      ~1950 OllamaProvider — локальные модели через Ollama
+--                      model "ollama/<name>" → http://127.0.0.1:11434/v1
+--                      lobOllamaBaseUrl / lobOllamaModelName / lobOllamaTags
+--
 --   §ROUTER      ~1327 ProviderRouter:chatCompletions()
---                      Роутинг: gemini* → GeminiProvider, иначе → GroqProvider
+--                      Роутинг: gemini* → Gemini, deepseek* → DeepSeek,
+--                      ollama/* → Ollama, иначе → Groq
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 5: ЧАТ И ОЧЕРЕДЬ  (строки ~1382–1535)
@@ -283,6 +288,7 @@ local function saveSettings()
             "RangeShowVisualizer="      .. b(cs.Range and cs.Range.ShowVisualizer, false),
             "RangeSelectiveMode="       .. b(cs.Range and cs.Range.SelectiveMode, false),
             "UseCustomAnimSearch="      .. b(cs.UseCustomAnimSearch, false),
+            "OllamaBaseUrl="            .. tostring(cs.OllamaBaseUrl or "http://127.0.0.1:11434"),
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
@@ -354,6 +360,7 @@ local function loadSettings()
         cs.Range.ShowVisualizer     = getBool("RangeShowVisualizer", false)
         cs.Range.SelectiveMode      = getBool("RangeSelectiveMode", false)
         cs.UseCustomAnimSearch      = getBool("UseCustomAnimSearch", false)
+        cs.OllamaBaseUrl            = getStr("OllamaBaseUrl", "http://127.0.0.1:11434")
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
     end)
@@ -649,6 +656,8 @@ ClientSettings = {
     Models = {
         groq = "openai/gpt-oss-20b",
     },
+    -- v22: локальный сервер Ollama (модели выбираются как "ollama/<name>")
+    OllamaBaseUrl = "http://127.0.0.1:11434",
     Temperature = 0.7,
     MaxTokens = 1024,
     PersonalityId = "Friendly",
@@ -761,6 +770,7 @@ do
     if cs2.SmartWalk       == nil then cs2.SmartWalk       = false end
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     if cs2.LineOfMemory    == nil then cs2.LineOfMemory    = true  end
+    if cs2.OllamaBaseUrl   == nil or cs2.OllamaBaseUrl == "" then cs2.OllamaBaseUrl = "http://127.0.0.1:11434" end
     local savedGemini = loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
@@ -1243,6 +1253,8 @@ _tokenPrice = {
 }
 _tokenPriceDefault = { 0.15, 0.60 }
 function lobTokenPrice(model)
+    -- Локальные модели через Ollama бесплатны
+    if tostring(model or ""):find("^ollama[:/]") then return { 0, 0 } end
     if _tokenPrice[model] then return _tokenPrice[model] end
     local m = tostring(model or ""):lower()
     for k, v in pairs(_tokenPrice) do
@@ -1949,6 +1961,124 @@ function DeepSeekProvider:chatCompletions(payload)
     return content, nil
 end
 
+-- ── OLLAMA PROVIDER (локальные модели, OpenAI-совместимый /v1) ────────────
+-- §OLLAMA
+-- Запуск локальных моделей через Ollama (https://ollama.com).
+-- В дропдауне модель указывается как "ollama/llama3.2" — префикс нужен только
+-- для роутинга, в сам Ollama уходит чистое имя модели (llama3.2).
+-- API-ключ не нужен. Адрес сервера настраивается в ClientSettings.OllamaBaseUrl.
+function lobOllamaBaseUrl()
+    local u = tostring((ClientSettings and ClientSettings.OllamaBaseUrl) or "")
+    u = u:gsub("%s+", ""):gsub("/+$", "")
+    if u == "" then u = "http://127.0.0.1:11434" end
+    return u
+end
+
+function lobOllamaChatUrl()
+    local base = lobOllamaBaseUrl()
+    if base:find("/v1$") then return base .. "/chat/completions" end
+    return base .. "/v1/chat/completions"
+end
+
+function lobOllamaModelName(model)
+    local m = tostring(model or ""):match("^%s*(.-)%s*$") or ""
+    m = m:gsub("^ollama[:/]+", "")
+    return m
+end
+
+function lobIsOllamaModel(model)
+    return tostring(model or ""):find("^ollama[:/]") ~= nil
+end
+
+OllamaProvider = {}
+OllamaProvider.__index = OllamaProvider
+
+function OllamaProvider.new()
+    return setmetatable({}, OllamaProvider)
+end
+
+function OllamaProvider:chatCompletions(payload)
+    local modelName = lobOllamaModelName(payload.model)
+    if modelName == "" then return nil, "OllamaMissingModelName" end
+
+    local body = {
+        model       = modelName,
+        messages    = payload.messages,
+        temperature = payload.temperature,
+        max_tokens  = payload.max_tokens,
+        stream      = false,
+    }
+    local res, statusCode, statusMsg, rawBody = postJson(lobOllamaChatUrl(), {
+        ["Content-Type"] = "application/json",
+    }, body)
+
+    if not res then
+        local sc = tonumber(statusCode) or 0
+        local detail = tostring(rawBody or ""):sub(1, 200)
+        pcall(function()
+            local b = HttpService:JSONDecode(tostring(rawBody or "{}"))
+            if b and b.error then detail = tostring(b.error.message or b.error) end
+        end)
+        if sc == 404 then
+            return nil, "OllamaModelNotFound:" .. modelName .. ":" .. detail
+        end
+        if sc == 0 then
+            return nil, "OllamaUnavailable (" .. lobOllamaBaseUrl() .. "): " .. tostring(statusMsg or "") .. " " .. detail
+        end
+        return nil, tostring(sc) .. ":" .. tostring(statusMsg or "") .. ":" .. detail
+    end
+
+    lobTrackUsage(payload.model, res.usage)
+    local choice = res.choices and res.choices[1]
+    if not choice then return nil, "NoChoicesReturned" end
+    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
+    local msg = choice.message
+    local content = msg and msg.content
+    if type(content) == "table" then
+        local parts = {}
+        for _, block in ipairs(content) do
+            if type(block) == "table" and type(block.text) == "string" and block.text ~= "" then
+                table.insert(parts, block.text)
+            end
+        end
+        content = table.concat(parts, " ")
+    end
+    -- thinking-модели могут вернуть пустой content и текст в msg.thinking
+    if (type(content) ~= "string" or content == "") and type(msg) == "table" and type(msg.thinking) == "string" then
+        content = msg.thinking
+    end
+    if type(content) ~= "string" or content == "" then return nil, "EmptyResponse" end
+    return content, nil
+end
+
+-- Проверка локального сервера + список установленных моделей (GET /api/tags)
+-- Возвращает: ok(boolean), names(table), err(string|nil)
+function lobOllamaTags()
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return false, {}, "ExecutorHttpNotSupported" end
+    local ok, response = pcall(httprequest, {
+        Url = lobOllamaBaseUrl() .. "/api/tags",
+        Method = "GET",
+        Headers = { ["Content-Type"] = "application/json" },
+    })
+    if not ok or type(response) ~= "table" then
+        return false, {}, tostring(response or "request failed")
+    end
+    local sc = tonumber(response.StatusCode or response.statusCode or 0) or 0
+    if sc < 200 or sc >= 300 then return false, {}, "HTTP " .. tostring(sc) end
+    local data
+    local dok = pcall(function() data = HttpService:JSONDecode(tostring(response.Body or response.body or "{}")) end)
+    if not dok or type(data) ~= "table" or type(data.models) ~= "table" then
+        return false, {}, "bad response"
+    end
+    local names = {}
+    for _, m in ipairs(data.models) do
+        local n = m and (m.name or m.model)
+        if type(n) == "string" and n ~= "" then table.insert(names, n) end
+    end
+    return true, names, nil
+end
+
 local ProviderRouter = {}
 ProviderRouter.__index = ProviderRouter
 
@@ -1957,6 +2087,7 @@ function ProviderRouter.new()
     self._groq     = GroqProvider.new()
     self._gemini   = GeminiProvider.new()
     self._deepseek = DeepSeekProvider.new()
+    self._ollama   = OllamaProvider.new()
     return self
 end
 
@@ -1968,6 +2099,9 @@ function ProviderRouter:chatCompletions(payload)
     end
     if model:find("^deepseek") then
         return self._deepseek:chatCompletions(payload)
+    end
+    if model:find("^ollama[:/]") then
+        return self._ollama:chatCompletions(payload)
     end
     return self._groq:chatCompletions(payload)
 end
@@ -8642,10 +8776,12 @@ local function handleQueuedChat(item)
         if ClientSettings.Debug then print("[LOB] no model selected") end
         return
     end
+    local isOllama = lobIsOllamaModel(model)
 
     -- В экономном режиме max_tokens тоже уменьшаем (короткие ответы)
+    -- Локальные модели (Ollama) не экономим — запросы бесплатные
     local maxTok = tonumber(settings.MaxTokens) or 512
-    if settings.TokenEconomy then
+    if settings.TokenEconomy and not isOllama then
         local minTok = (model:find("maverick") or model:find("scout")) and 256 or 150
         maxTok = math.min(maxTok, minTok)
     end
@@ -8676,6 +8812,7 @@ local function handleQueuedChat(item)
     local skipTools = model:find("^gemini") or model:find("^deepseek") or model:find("compound%-beta")
         or model:find("^qwen/")
         or model:find("kimi") or model:find("moonshotai")
+        or isOllama
     if settings.WebSearch and not skipTools then
         payload.tools = {
             {
@@ -8700,11 +8837,12 @@ local function handleQueuedChat(item)
     end
 
     -- Таймаут модели: 20с. При таймауте/пустом ответе — СРАЗУ повторяем запрос заново.
+    -- Ollama: локальная модель может грузиться в память долго — даём 120с и 1 попытку.
     local isGemini = model:find("^gemini")
     local isKimi = model:find("kimi") or model:find("moonshotai")
-    local timeoutSec = isGemini and 20 or (isKimi and 15 or 8)
+    local timeoutSec = isOllama and 120 or (isGemini and 20 or (isKimi and 15 or 8))
     local text, err
-    local MAX_ATTEMPTS = 3
+    local MAX_ATTEMPTS = isOllama and 1 or 3
     local attempts = {}
     for attempt = 1, MAX_ATTEMPTS do
         local slot = { done = false, t = nil }
@@ -10567,6 +10705,7 @@ local _providerNames = {
     groq     = "Groq",
     gemini   = "Gemini",
     deepseek = "DeepSeek",
+    ollama   = "Ollama",
 }
 
 local function handleRateLimitNotice(provider, force)
@@ -11246,6 +11385,10 @@ local function updateCtStatus()
         local dk = s.ApiKeys and s.ApiKeys.deepseek or ""
         hasKey = type(dk)=="string" and #dk > 8
         apiName = "DeepSeek"
+    elseif lobIsOllamaModel(model) then
+        local ol = lobOllamaBaseUrl()
+        hasKey = type(ol)=="string" and #ol > 0
+        apiName = "Ollama (local)"
     else
         local gk = getGroqApiKey and getGroqApiKey() or ""
         hasKey = type(gk)=="string" and #gk > 8 and gk:sub(1,4) == "gsk_"
@@ -12665,6 +12808,12 @@ local groqModels = {
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
+    -- ── 🖥 OLLAMA (локальные модели, нужен запущенный Ollama) ────────────
+    "ollama/llama3.2",                             -- Llama 3.2  (локально)
+    "ollama/qwen2.5",                              -- Qwen 2.5   (локально)
+    "ollama/gemma3",                               -- Gemma 3    (локально)
+    "ollama/phi4",                                 -- Phi-4      (локально)
+    "ollama/mistral",                              -- Mistral    (локально)
 }
 
 --[[ 
@@ -12731,6 +12880,22 @@ do
         ClientSettings.Models.groq = val
         saveModel(val)
     end)
+end
+
+-- Своя модель (локальные Ollama-теги, кастомные id Groq и т.п.)
+do
+    if not table.find(groqModels, currentModel) then
+        local customBox = makeTextBox(generalScroll, "Своя модель: ollama/llama3.2")
+        customBox.Size = UDim2.new(1, 0, 0, 38)
+        customBox.Text = currentModel or ""
+        customBox.FocusLost:Connect(function()
+            local val = (customBox.Text or ""):match("^%s*(.-)%s*$") or ""
+            if val ~= "" then
+                ClientSettings.Models.groq = val
+                saveModel(val)
+            end
+        end)
+    end
 end
 
 -- Принудительно обновляем CanvasSize после того как AutomaticSize карточек сработает
@@ -13816,6 +13981,179 @@ do
         task.wait(0.9)
         local savedKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
         if savedKey and #savedKey > 8 then doDeepSeekCheck() end
+    end)
+end
+
+-- ── OLLAMA (ЛОКАЛЬНЫЕ МОДЕЛИ) CARD ─────────────────────────────────────
+do
+    local olCard = Instance.new("Frame")
+    olCard.Name = "OllamaCard"
+    olCard.BackgroundColor3 = THEME.Card
+    olCard.BackgroundTransparency = 0
+    olCard.BorderSizePixel = 0
+    olCard.Size = UDim2.new(1, 0, 0, 248)
+    olCard.Parent = advancedScroll
+    makeCorner(olCard, 12)
+    local olCardStroke = makeStroke(olCard, 1, THEME.Stroke, 0.5)
+
+    local olPad = Instance.new("UIPadding")
+    olPad.PaddingTop    = UDim.new(0, 12)
+    olPad.PaddingBottom = UDim.new(0, 12)
+    olPad.PaddingLeft   = UDim.new(0, 14)
+    olPad.PaddingRight  = UDim.new(0, 14)
+    olPad.Parent = olCard
+
+    local olTitleRow = Instance.new("Frame")
+    olTitleRow.BackgroundTransparency = 1
+    olTitleRow.Size = UDim2.new(1, 0, 0, 18)
+    olTitleRow.Parent = olCard
+
+    local olTitle = makeTextLabel(olTitleRow, "Ollama (локальные ИИ)", 14, "bold")
+    olTitle.Size = UDim2.new(1, -90, 1, 0)
+    olTitle.TextColor3 = THEME.Text
+
+    local olStatusDot = Instance.new("Frame")
+    olStatusDot.Size = UDim2.new(0, 8, 0, 8)
+    olStatusDot.AnchorPoint = Vector2.new(1, 0.5)
+    olStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
+    olStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    olStatusDot.BorderSizePixel = 0
+    olStatusDot.Parent = olTitleRow
+    makeCorner(olStatusDot, 999)
+
+    local olStatusLbl = makeTextLabel(olTitleRow, "не проверен", 11, "medium")
+    olStatusLbl.Size = UDim2.new(0, 70, 1, 0)
+    olStatusLbl.Position = UDim2.new(1, -70, 0, 0)
+    olStatusLbl.TextColor3 = THEME.TextDim
+    olStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
+
+    local olDesc = makeTextLabel(olCard, "Локальный сервер Ollama — без облака и API-ключей", 11, "medium")
+    olDesc.Size = UDim2.new(1, 0, 0, 14)
+    olDesc.Position = UDim2.new(0, 0, 0, 21)
+    olDesc.TextColor3 = THEME.TextDim
+
+    local olUrlLbl = makeTextLabel(olCard, "Адрес сервера", 11, "medium")
+    olUrlLbl.Size = UDim2.new(1, 0, 0, 14)
+    olUrlLbl.Position = UDim2.new(0, 0, 0, 42)
+    olUrlLbl.TextColor3 = THEME.TextDim
+
+    local olUrlBox = makeTextBox(olCard, "http://127.0.0.1:11434")
+    olUrlBox.Size = UDim2.new(1, 0, 0, 32)
+    olUrlBox.Position = UDim2.new(0, 0, 0, 58)
+    olUrlBox.Text = lobOllamaBaseUrl()
+
+    local olModelLbl = makeTextLabel(olCard, "Локальная модель (тег Ollama)", 11, "medium")
+    olModelLbl.Size = UDim2.new(1, 0, 0, 14)
+    olModelLbl.Position = UDim2.new(0, 0, 0, 96)
+    olModelLbl.TextColor3 = THEME.TextDim
+
+    local olModelBox = makeTextBox(olCard, "llama3.2")
+    olModelBox.Size = UDim2.new(1, 0, 0, 32)
+    olModelBox.Position = UDim2.new(0, 0, 0, 112)
+    local _curModel = (ClientSettings.Models and ClientSettings.Models.groq) or ""
+    if lobIsOllamaModel(_curModel) then olModelBox.Text = lobOllamaModelName(_curModel) end
+
+    local olCheckBtn = Instance.new("TextButton")
+    olCheckBtn.Size = UDim2.new(1, 0, 0, 28)
+    olCheckBtn.Position = UDim2.new(0, 0, 0, 150)
+    olCheckBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 230)
+    olCheckBtn.BackgroundTransparency = 0.15
+    olCheckBtn.Text = "Проверить подключение"
+    olCheckBtn.Font = Enum.Font.GothamBold
+    olCheckBtn.TextSize = 13
+    olCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    olCheckBtn.AutoButtonColor = false
+    olCheckBtn.Parent = olCard
+    makeCorner(olCheckBtn, 8)
+
+    olCheckBtn.MouseEnter:Connect(function() tween(olCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
+    olCheckBtn.MouseLeave:Connect(function() tween(olCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
+
+    local olInfoLbl = makeTextLabel(olCard, "Запусти Ollama на этом ПК: ollama serve", 11, "medium")
+    olInfoLbl.Size = UDim2.new(1, 0, 0, 42)
+    olInfoLbl.Position = UDim2.new(0, 0, 0, 184)
+    olInfoLbl.TextColor3 = THEME.TextDim
+    olInfoLbl.TextWrapped = true
+    olInfoLbl.TextYAlignment = Enum.TextYAlignment.Top
+
+    local function setOlStatus(ok, text)
+        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
+        tween(olStatusDot, TWEEN_MED, { BackgroundColor3 = col })
+        olStatusLbl.Text = text
+        olStatusLbl.TextColor3 = col
+        tween(olCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
+    end
+
+    local function applyOllamaUrl()
+        local u = (olUrlBox.Text or ""):match("^%s*(.-)%s*$") or ""
+        u = u:gsub("%s+", ""):gsub("/+$", "")
+        if u == "" then u = "http://127.0.0.1:11434" end
+        ClientSettings.OllamaBaseUrl = u
+        olUrlBox.Text = u
+        saveSettings()
+        return u
+    end
+
+    local function applyOllamaModel()
+        local nm = (olModelBox.Text or ""):match("^%s*(.-)%s*$") or ""
+        if nm == "" then return end
+        nm = nm:gsub("^ollama[:/]+", "")
+        if nm == "" then return end
+        local full = "ollama/" .. nm
+        ClientSettings.Models = ClientSettings.Models or {}
+        ClientSettings.Models.groq = full
+        olModelBox.Text = nm
+        saveModel(full)
+    end
+
+    local function doOllamaCheck()
+        applyOllamaUrl()
+        applyOllamaModel()
+        olCheckBtn.Text = "Проверяю..."
+        olCheckBtn.BackgroundTransparency = 0.4
+        olInfoLbl.Text = "Подключаюсь к " .. lobOllamaBaseUrl() .. " ..."
+        task.spawn(function()
+            local ok, names, err = lobOllamaTags()
+            olCheckBtn.Text = "Проверить подключение"
+            olCheckBtn.BackgroundTransparency = 0.15
+            if not ok then
+                setOlStatus(false, "нет связи")
+                olInfoLbl.Text = "Не удалось подключиться к " .. lobOllamaBaseUrl()
+                    .. ". Запусти Ollama и повтори. (" .. tostring(err) .. ")"
+                return
+            end
+            setOlStatus(true, "работает")
+            if #names == 0 then
+                olInfoLbl.Text = "Сервер работает, но моделей нет. Выполни в терминале: ollama pull llama3.2"
+                return
+            end
+            local shown = {}
+            for i = 1, math.min(#names, 5) do table.insert(shown, names[i]) end
+            olInfoLbl.Text = "Моделей: " .. #names .. " — " .. table.concat(shown, ", ")
+                .. (#names > 5 and "…" or "")
+            if (olModelBox.Text or ""):match("^%s*$") then
+                olModelBox.Text = names[1]
+                applyOllamaModel()
+            end
+        end)
+    end
+
+    olCheckBtn.MouseButton1Click:Connect(doOllamaCheck)
+
+    olUrlBox.FocusLost:Connect(function()
+        applyOllamaUrl()
+        tween(olStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
+        olStatusLbl.Text = "не проверен"
+        olStatusLbl.TextColor3 = THEME.TextDim
+        tween(olCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
+    end)
+    olModelBox.FocusLost:Connect(applyOllamaModel)
+
+    task.spawn(function()
+        task.wait(1)
+        if lobIsOllamaModel(ClientSettings.Models and ClientSettings.Models.groq) then
+            doOllamaCheck()
+        end
     end)
 end
 
@@ -16627,16 +16965,19 @@ local function ctDoSend()
         end
 
         -- v20 Beta 2: timeout 25s + retry only on fast fail (no doubling of slow calls)
+        -- Ollama: локальная модель может грузиться долго — даём 120с, без авто-retry
+        local isLocalModel = lobIsOllamaModel(payload.model)
+        local waitSec = isLocalModel and 120 or 25
         local text, err
         local _dt0 = os.clock()
         do
             local done = false
             task.spawn(function() text, err = providerRouter:chatCompletions(payload) done = true end)
-            while not done and (os.clock() - _dt0) < 25 do task.wait(0.5) end
-            if not done then err = "timeout (25s direct)" end
+            while not done and (os.clock() - _dt0) < waitSec do task.wait(0.5) end
+            if not done then err = "timeout (" .. waitSec .. "s direct)" end
         end
         -- Авто-retry при сетевой ошибке (1 попытка)
-        if not text and err then
+        if not text and err and not isLocalModel then
             local errL = tostring(err):lower()
             local isNetErr = errL:find("timeout") or errL:find("timed") or errL:find("network") or errL:find("connection")
             if isNetErr and (os.clock() - _dt0) < 10 then
@@ -16668,6 +17009,8 @@ local function ctDoSend()
                     or errLower:find("missinggroqkey")
                     then
                     friendlyErr = "🔑 API ключ неверный или не указан. Проверь вкладку Настройки."
+                elseif errLower:find("ollama") then
+                    friendlyErr = "🖥 Ollama: проверь, что сервер запущен (ollama serve) и модель скачана (ollama pull ...)."
                 elseif errLower:find("400") or errLower:find("bad request") then
                     friendlyErr = "⚠️ Gemini отклонил запрос: " .. tostring(err):sub(1, 220)
                 elseif errLower:find("timeout") or errLower:find("timed") then
@@ -16684,9 +17027,11 @@ local function ctDoSend()
 
     -- БАГ-ФИХ таймаута: thisReqId сохранён ДО инкремента счётчика
     -- Таймер сработает только если этот конкретный запрос завис
-    task.delay(90, function()
+    -- Ollama: первая загрузка локальной модели в память может идти дольше 90с
+    local _hardTimeout = lobIsOllamaModel(getModel(settings)) and 130 or 90
+    task.delay(_hardTimeout, function()
         if ChatTestCallback and ctMsgCounter - 1 == thisReqId then
-            ChatTestCallback("⏱️ Нет ответа (90с). Проверь интернет или смени модель.", true)
+            ChatTestCallback("⏱️ Нет ответа (" .. _hardTimeout .. "с). Проверь интернет или смени модель.", true)
         end
     end)
 end
