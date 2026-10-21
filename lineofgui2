@@ -376,6 +376,9 @@ local function loadCustomPrompt()
 end
 local function saveModel(model)
     pcall(function() if writefile then writefile(LOB_MODEL_FILE, tostring(model or "")) end end)
+    if type(model) == "string" and model:find("^ollama/") and type(lobOllamaWarmup) == "function" then
+        task.spawn(function() pcall(lobOllamaWarmup, model) end)
+    end
 end
 local function loadModel()
     local ok, result = pcall(function() if readfile then return readfile(LOB_MODEL_FILE) end return "" end)
@@ -2051,12 +2054,15 @@ function OllamaProvider:chatCompletions(payload)
     local opts = { num_ctx = 8192 }
     if payload.temperature ~= nil then opts.temperature = payload.temperature end
     opts.num_predict = numPredict
+    local lname = modelName:lower()
+    local thinkParam = false
+    if lname:find("gpt-oss", 1, true) or lname:find("gpt_oss", 1, true) then thinkParam = "low" end
     local body = {
         model      = modelName,
         messages   = msgs,
         stream     = false,
-        think      = false,
-        keep_alive = "30m",
+        think      = thinkParam,
+        keep_alive = -1,
         options    = opts,
     }
     local rawBody, statusCode, statusMsg, reqErr = lobOllamaPost(lobOllamaChatUrl(), body)
@@ -2186,6 +2192,25 @@ function lobOllamaTags()
     end
     _ollamaServerOk = true
     return true, names, nil
+end
+
+-- Прогрев локальной модели: держим её в памяти (keep_alive = -1), чтобы первый
+-- ответ игроку не ждал загрузку. Вызывается асинхронно при выборе модели и на старте.
+function lobOllamaWarmup(model)
+    local m = lobOllamaModelName(model or "")
+    if m == "" then return false end
+    local body = {
+        model      = m,
+        messages   = { { role = "user", content = "hi" } },
+        stream     = false,
+        think      = false,
+        keep_alive = -1,
+        options    = { num_predict = 1, num_ctx = 8192 },
+    }
+    task.spawn(function()
+        pcall(function() lobOllamaPost(lobOllamaChatUrl(), body) end)
+    end)
+    return true
 end
 
 local ProviderRouter = {}
@@ -8946,10 +8971,10 @@ local function handleQueuedChat(item)
     end
 
     -- Таймаут модели: 20с. При таймауте/пустом ответе — СРАЗУ повторяем запрос заново.
-    -- Ollama: локальная модель может грузиться в память долго — даём 120с и 1 попытку.
+    -- Ollama: локальная модель может грузиться в память долго — ждём до 10 минут, 1 попытка.
     local isGemini = model:find("^gemini")
     local isKimi = model:find("kimi") or model:find("moonshotai")
-    local timeoutSec = isOllama and 120 or (isGemini and 20 or (isKimi and 15 or 8))
+    local timeoutSec = isOllama and 600 or (isGemini and 20 or (isKimi and 15 or 8))
     local text, err
     local MAX_ATTEMPTS = isOllama and 1 or 3
     local attempts = {}
@@ -13426,7 +13451,15 @@ do
                 if not ClientSettings.UI then ClientSettings.UI = {} end
                 ClientSettings.UI.WindowWidth = p.w
                 ClientSettings.UI.WindowHeight = p.h
-                createInterface()
+createInterface()
+
+-- Локальная модель: сразу греем её в фоне, чтобы первый ответ игроку был быстрым
+task.defer(function()
+    local m = ClientSettings.Models and ClientSettings.Models.groq or ""
+    if type(m) == "string" and m:find("^ollama/") then
+        pcall(lobOllamaWarmup, m)
+    end
+end)
                 return
             end
         end
@@ -17117,9 +17150,9 @@ local function ctDoSend()
         end
 
         -- v20 Beta 2: timeout 25s + retry only on fast fail (no doubling of slow calls)
-        -- Ollama: локальная модель может грузиться долго — даём 120с, без авто-retry
+        -- Ollama: локальная модель может грузиться долго — ждём до 10 минут, без авто-retry
         local isLocalModel = lobIsOllamaModel(payload.model)
-        local waitSec = isLocalModel and 120 or 25
+        local waitSec = isLocalModel and 600 or 25
         local text, err
         local _dt0 = os.clock()
         do
