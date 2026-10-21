@@ -2052,7 +2052,7 @@ function OllamaProvider:chatCompletions(payload)
 
     local numPredict = tonumber(payload.max_tokens) or 0
     if numPredict <= 0 or numPredict > 160 then numPredict = 160 end
-    local opts = { num_ctx = 8192 }
+    local opts = {}
     if payload.temperature ~= nil then opts.temperature = payload.temperature end
     opts.num_predict = numPredict
     local lname = modelName:lower()
@@ -2206,7 +2206,7 @@ function lobOllamaWarmup(model)
         stream     = false,
         think      = false,
         keep_alive = -1,
-        options    = { num_predict = 1, num_ctx = 8192 },
+        options    = { num_predict = 1 },
     }
     task.spawn(function()
         pcall(function() lobOllamaPost(lobOllamaChatUrl(), body) end)
