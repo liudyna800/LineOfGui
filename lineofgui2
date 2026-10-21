@@ -2044,6 +2044,7 @@ function OllamaProvider:chatCompletions(payload)
         end
     end
     if invCtx then table.insert(msgs, { role = "system", content = invCtx }) end
+    table.insert(msgs, { role = "system", content = "Keep replies short: ONE sentence (max ~20 words) unless the player explicitly asks for details. Do not explain your reasoning." })
     local startI = #dialog - 7
     if startI < 1 then startI = 1 end
     for i = startI, #dialog do table.insert(msgs, dialog[i]) end
