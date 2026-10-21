@@ -2041,20 +2041,23 @@ function OllamaProvider:chatCompletions(payload)
         end
     end
     if invCtx then table.insert(msgs, { role = "system", content = invCtx }) end
-    table.insert(msgs, { role = "system", content = "Keep replies short: ONE sentence (max ~20 words) unless the player explicitly asks for details. Do not explain your reasoning." })
+    table.insert(msgs, { role = "system", content = "Keep replies short: ONE sentence (max ~20 words) unless the player explicitly asks for details. Output ONLY the final reply text: never print analysis, reasoning, or English meta-commentary." })
     local startI = #dialog - 7
     if startI < 1 then startI = 1 end
     for i = startI, #dialog do table.insert(msgs, dialog[i]) end
     if #msgs == 0 then msgs = { { role = "user", content = "..." } } end
 
+    local lname = modelName:lower()
+    local isGptOss = lname:find("gpt-oss", 1, true) or lname:find("gpt_oss", 1, true)
+    -- gpt-oss всегда тратит токены на reasoning, поэтому ему нужен запас,
+    -- иначе content остаётся пустым (и раньше в чат утекал thinking).
+    local capPredict = isGptOss and 512 or 160
     local numPredict = tonumber(payload.max_tokens) or 0
-    if numPredict <= 0 or numPredict > 160 then numPredict = 160 end
+    if numPredict <= 0 or numPredict > capPredict then numPredict = capPredict end
     local opts = {}
     if payload.temperature ~= nil then opts.temperature = payload.temperature end
     opts.num_predict = numPredict
-    local lname = modelName:lower()
-    local thinkParam = false
-    if lname:find("gpt-oss", 1, true) or lname:find("gpt_oss", 1, true) then thinkParam = "low" end
+    local thinkParam = isGptOss and "low" or false
     local body = {
         model      = modelName,
         messages   = msgs,
@@ -2116,10 +2119,8 @@ function OllamaProvider:chatCompletions(payload)
         end
         content = table.concat(parts, " ")
     end
-    -- thinking-модели могут вернуть пустой content и текст в msg.thinking
-    if (type(content) ~= "string" or content == "") and type(msg.thinking) == "string" then
-        content = msg.thinking
-    end
+    -- reasoning (msg.thinking) в ответ НИКОГДА не подставляем — это утечка
+    -- цепочки размышлений в чат. Если content пуст, считаем ответ неудачным.
     if type(content) ~= "string" or content == "" then return nil, "EmptyResponse" end
     return content, nil
 end
