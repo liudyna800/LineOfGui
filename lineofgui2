@@ -376,9 +376,6 @@ local function loadCustomPrompt()
 end
 local function saveModel(model)
     pcall(function() if writefile then writefile(LOB_MODEL_FILE, tostring(model or "")) end end)
-    if type(model) == "string" and model:find("^ollama/") and type(lobOllamaWarmup) == "function" then
-        task.spawn(function() pcall(lobOllamaWarmup, model) end)
-    end
 end
 local function loadModel()
     local ok, result = pcall(function() if readfile then return readfile(LOB_MODEL_FILE) end return "" end)
@@ -13453,14 +13450,6 @@ do
                 ClientSettings.UI.WindowWidth = p.w
                 ClientSettings.UI.WindowHeight = p.h
 createInterface()
-
--- Локальная модель: сразу греем её в фоне, чтобы первый ответ игроку был быстрым
-task.defer(function()
-    local m = ClientSettings.Models and ClientSettings.Models.groq or ""
-    if type(m) == "string" and m:find("^ollama/") then
-        pcall(lobOllamaWarmup, m)
-    end
-end)
                 return
             end
         end
