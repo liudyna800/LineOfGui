@@ -214,23 +214,84 @@
 --   §FOLLOW_MGR  ~4657  FollowManager — UI кнопка следования (отдельно от [DO:follow])
 --   §UI_CREATE   ~5146  createInterface() — вся UI: окно, вкладки, все карточки
 --                       Вкладки: Поведение / Восприятие / Директ-чат / Настройки / Модерация
+--   §MODLOADER   ~11680 v24.1: мод-лоадер — единая папка «LineOfBots» (mods/libs/configs)
+--                       API модов: свои вкладки/тогглы/теги/тексты/темы/патчи/хуки/библиотеки
 --   §MODELS      ~6741  groqModels{} — список всех моделей в дропдауне
 --                       Groq (llama/gpt-oss/llama4/kimi/qwen) + Gemini + compound
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v21 LOADED")
+print("LOB VERSION: v24.1 LOADED")
+
+-- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
+-- Всё, что скрипт хранит на диске, живёт здесь:
+--   LineOfBots/configs  — настройки, ключи, промпт, модель, список откл. модов
+--   LineOfBots/mods     — моды (.lua): кладёшь файл → мод появляется во вкладке «Моды»
+--   LineOfBots/libs     — общие библиотеки модов (.lua): api.lib("имя")
+-- Старые плоские файлы (lob_*.txt) и папка «LineOfBots - Mods» мигрируются
+-- автоматически (копируются, оригиналы не трогаем).
+LOB_ROOT     = "LineOfBots"
+LOB_CFG_DIR  = "LineOfBots/configs"
+LOB_MODS_DIR = "LineOfBots/mods"
+LOB_LIBS_DIR = "LineOfBots/libs"
+do
+    local function lobMkdirOk()
+        return (type(isfolder) == "function") and (type(makefolder) == "function")
+    end
+    pcall(function()
+        if not lobMkdirOk() then return end
+        if not isfolder(LOB_ROOT)     then makefolder(LOB_ROOT)     end
+        if not isfolder(LOB_CFG_DIR)  then makefolder(LOB_CFG_DIR)  end
+        if not isfolder(LOB_MODS_DIR) then makefolder(LOB_MODS_DIR) end
+        if not isfolder(LOB_LIBS_DIR) then makefolder(LOB_LIBS_DIR) end
+    end)
+    -- однократная миграция старых конфигов в configs/ (старые файлы НЕ удаляем)
+    pcall(function()
+        if type(isfile) ~= "function" or type(readfile) ~= "function" or type(writefile) ~= "function" then return end
+        local function migrateFile(name)
+            local newPath = LOB_CFG_DIR .. "/" .. name
+            if isfile(name) and not isfile(newPath) then
+                local okR, data = pcall(readfile, name)
+                if okR and type(data) == "string" then pcall(writefile, newPath, data) end
+            end
+        end
+        migrateFile("lob_settings.txt")
+        migrateFile("lob_apikey.txt")
+        migrateFile("lob_apikey2.txt")
+        migrateFile("lob_apikey3.txt")
+        migrateFile("lob_geminikey.txt")
+        migrateFile("lob_deepseekkey.txt")
+        migrateFile("lob_customprompt.txt")
+        migrateFile("lob_model.txt")
+        -- миграция старой папки модов v24 → LineOfBots/mods
+        if isfolder("LineOfBots - Mods") and not isfile(LOB_CFG_DIR .. "/mods_migrated.txt") then
+            local okL, oldList = pcall(listfiles, "LineOfBots - Mods")
+            if okL and type(oldList) == "table" then
+                for _, oldPath in ipairs(oldList) do
+                    local fn = oldPath:match("([^/\\]+)$") or oldPath
+                    local dst = LOB_MODS_DIR .. "/" .. fn
+                    if not isfile(dst) then
+                        local okR, data = pcall(readfile, oldPath)
+                        if okR and type(data) == "string" then pcall(writefile, dst, data) end
+                    end
+                end
+                pcall(writefile, LOB_CFG_DIR .. "/mods_migrated.txt", "1")
+            end
+        end
+    end)
+end
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
-local LOB_KEY_FILE       = "lob_apikey.txt"
-local LOB_KEY_FILE2      = "lob_apikey2.txt"
-local LOB_KEY_FILE3      = "lob_apikey3.txt"
-local LOB_GEMINI_FILE    = "lob_geminikey.txt"
-LOB_DEEPSEEK_FILE  = "lob_deepseekkey.txt"
-local LOB_SETTINGS_FILE  = "lob_settings.txt"
-local LOB_CSP_FILE       = "lob_customprompt.txt"
-local LOB_MODEL_FILE     = "lob_model.txt"
+-- v24.1: все конфиги теперь в LineOfBots/configs (миграция выше переносит старые файлы)
+local LOB_KEY_FILE       = LOB_CFG_DIR .. "/lob_apikey.txt"
+local LOB_KEY_FILE2      = LOB_CFG_DIR .. "/lob_apikey2.txt"
+local LOB_KEY_FILE3      = LOB_CFG_DIR .. "/lob_apikey3.txt"
+local LOB_GEMINI_FILE    = LOB_CFG_DIR .. "/lob_geminikey.txt"
+LOB_DEEPSEEK_FILE  = LOB_CFG_DIR .. "/lob_deepseekkey.txt"
+local LOB_SETTINGS_FILE  = LOB_CFG_DIR .. "/lob_settings.txt"
+local LOB_CSP_FILE       = LOB_CFG_DIR .. "/lob_customprompt.txt"
+local LOB_MODEL_FILE     = LOB_CFG_DIR .. "/lob_model.txt"
 local function normalizeApiKey(value)
     local key = tostring(value or "")
     key = key:gsub("\239\187\191", "")
@@ -270,6 +331,7 @@ local function saveSettings()
             "ReplyCache="      .. b(cs.ReplyCache,      false),
             "SearchNotice="    .. b(cs.SearchNotice,    true),
             "SmartWalk="       .. b(cs.SmartWalk,       false),
+            "ModLoader="       .. b(cs.ModLoader,       true),
             "PerUserMemory="   .. b(cs.PerUserMemory,   false),
             "LineOfMemory="    .. b(cs.LineOfMemory,    true),
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
@@ -342,6 +404,7 @@ local function loadSettings()
         cs.ReplyCache      = getBool("ReplyCache",      false)
         cs.SearchNotice    = getBool("SearchNotice",    true)
         cs.SmartWalk       = getBool("SmartWalk",       false)
+        cs.ModLoader       = getBool("ModLoader",       true)
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
         cs.LineOfMemory    = getBool("LineOfMemory",    true)
         cs.Temperature     = getNum("Temperature",      0.7)
@@ -691,6 +754,7 @@ ClientSettings = {
     ReplyCache = false,     -- v20 Beta 3: кэш ответов ИИ (повторный вопрос — мгновенно, без запроса)
     SearchNotice = true,    -- v20 Beta 3: заготовленные сообщения "ищу в интернете/вики…" во время поиска
     SmartWalk = false,      -- v20 Beta 3: умная ходьба (бот сам ходит, ищет собеседников, бродит)
+    ModLoader = true,       -- v24.1: встроенный мод-лоадер (папка «LineOfBots/mods» в инжекторе)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     GameUnderstanding = false, -- v20 Beta 2: game understanding
     DangerSense = false, -- v20 Beta 2: чувство опасности (только с GameUnderstanding)
@@ -2278,6 +2342,8 @@ end
 local function sendChatMessage(text)
     text = tostring(text or "")
     if text == "" then return end
+    -- v24.1: событие для модов — бот отправляет реплику в чат
+    if LOB_MODS and LOB_MODS.fire then pcall(LOB_MODS.fire, "botSay", text) end
 
     -- Метод 1: TextChatService SendAsync (новые игры 2022+)
     local ok1 = false
@@ -2469,7 +2535,10 @@ local function makeSystemPrompt(settings)
                 "[DO:wave]=hi/bye  [DO:laugh]=haha/lol  [DO:agree]=yes  [DO:disagree]=no\n" ..
                 "[DO:shrug]=idk  [DO:dance]=dance  [DO:spin]=spin/крутись  [DO:jump]=jump  [DO:goto]=come here\n" ..
                 "[DO:follow]=follow me  [DO:stop]=stop  [DO:cheer]=nice/gg  [DO:sad]=rip\n" ..
-                "[DO:stay]=останься со мной/побудь  [DO:leave]=уходи/хватит\n" ..
+                -- v23.1: [DO:wander] в промпте ТОЛЬКО при включённой умной ходьбе —
+                -- иначе ИИ обещает «пойду погуляю», а тег заглушен
+                "[DO:stay]=останься со мной/побудь  [DO:leave]=уходи/хватит" ..
+                (ClientSettings.SmartWalk and "  [DO:wander]=погуляй/иди по своим делам" or "") .. "\n" ..
                 "spin=крутиться НЕ танцевать! Example: [DO:laugh]haha  покрутись→[DO:spin]")
         else
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
@@ -2493,6 +2562,8 @@ local function makeSystemPrompt(settings)
                 "\n[DO:goto]   — подойти к игроку, come here" ..
                 "\n[DO:follow] — следовать за игроком постоянно" ..
                 "\n[DO:stop]   — остановиться, стоп, прекрати" ..
+                -- v23.1: строка появляется в списке только при включённой умной ходьбе
+                (ClientSettings.SmartWalk and "\n[DO:wander] — погуляй, иди по своим делам (бот сам гуляет и ищет, чем заняться)" or "") ..
                 "\nПРАВИЛА:" ..
                 "\n- Используй РАЗНЫЕ теги. Не залипай на wave и laugh." ..
                 "\n- Нейтральный ответ = [DO:point] или вообще без тега" ..
@@ -2538,7 +2609,7 @@ local function makeSystemPrompt(settings)
     -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
     -- v20 Beta 2: honesty about abilities (static, fast)
     table.insert(parts,
-        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop/stay/leave), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
+        "HONESTY ABOUT ABILITIES: Only claim abilities from this list: text chat, ONE [DO:tag] emotion/movement per reply (wave/laugh/cheer/point/sit/dance/spin/shrug/agree/disagree/sorry/shy/confused/sad/jump/goto/follow/stop/stay/leave" .. (ClientSettings.SmartWalk and "/wander" or "") .. "), UGC animation search and playback via [DO:searchanim <query>] then [DO:playanim <ref>], simple follow/goto movement, inventory take/use/putaway/eat ONLY from CURRENT INVENTORY snapshot via [DO:take/use/eat/putaway <exact name>], avatar look (hair/accessories/clothes, never face) ONLY when AVATAR block is provided. You CANNOT: hear voice chat, see player screen/video, parkour/climb/build/fight/teleport/change the game. If asked about anything outside the list (e.g. can you hear me in voice, can you see my screen, can you parkour), honestly say you cannot do it, briefly, without inventing. Never say yes to an ability you do not have.")
     do
         local stA = settings.ActionsEnabled and "on" or "off"
         local stU = (settings.ActionsEnabled and EmoteAPI and ClientSettings.UseCustomAnimSearch) and "on" or "off"
@@ -2628,6 +2699,12 @@ local function makeSystemPrompt(settings)
     -- ── 9. compound-beta: жёсткий лимит длины ────────────────────────────
     if model == "compound-beta" or model == "compound-beta-mini" then
         table.insert(parts, "CRITICAL: After web search give ONLY 1-3 sentences. Never paste article text or long lists.")
+    end
+
+    -- v24.1: [DO:теги], зарегистрированные модами (api.action), попадают в промпт ИИ
+    if LOB_MODS and LOB_MODS.promptHints and #LOB_MODS.promptHints > 0 then
+        table.insert(parts, "MOD ACTIONS (extra actions registered by mods, use ONLY these exact tags when relevant): "
+            .. table.concat(LOB_MODS.promptHints, "; "))
     end
 
     return table.concat(parts, "\n\n")
@@ -3674,11 +3751,37 @@ local ACTION_HANDLERS = {
             _smartWalk.nudgeStage = 0
         end
     end,
-    leave    = function(_)
-        if _smartWalk.target then
+    leave    = function(p)
+        -- v23.4 FIX: «уходи/хватит» от игрока P раньше сворачивало визит к ТЕКУЩЕЙ цели,
+        -- даже если просил совсем другой игрок рядом: бот бросал ни в чём не виноватого
+        -- собеседника посреди разговора. Теперь: просивший получает avoid-бан (подходить
+        -- к нему не будем), а визит рвём ТОЛЬКО если «уходи» сказал сам текущий собеседник.
+        if p and p.UserId then
+            _smartWalk.avoid[p.UserId] = os.clock() + (_SW and _SW.AVOID_SEC or 60)
+            _lastLeaveAt[p.UserId] = os.clock()
+        end
+        local tgt = _smartWalk.target
+        if tgt and (not p or not p.UserId or tgt.UserId == p.UserId) then
             _smartWalk.state = "winddown"
             _smartWalk.windUntil = os.clock() + (_SW and _SW.WIND_DOWN or 2.5)
         end
+    end,
+    -- v23: ИИ может отправить бота гулять (умная ходьба): «погуляй», «иди по своим делам».
+    -- Бросает текущий визит мягко (без avoid-бана), stay-lock тоже снимается.
+    -- v23.1: тег работает ТОЛЬКО при включённой умной ходьбе (тумблер «🚶 Умная ходьба»
+    -- во вкладке «Основное»). Выключена — тег полностью игнорируется (ни блуждания,
+    -- ни остановки); в промпт ИИ он тоже не подмешивается, чтобы ИИ его не выдавал.
+    wander   = function(_)
+        if not ClientSettings.SmartWalk then return end  -- умная ходьба выключена — тег НЕ работает
+        -- тумблер включён, а цикл ещё не запущен (крайний случай) — запускаем сами
+        if not _smartWalk.active then pcall(lobSmartWalkStart) end
+        _smartWalk.target = nil
+        _smartWalk.targetSince = 0
+        _smartWalk.state = "wander"
+        _smartWalk.leaveAt = os.clock()
+        _smartWalk.stayLockUid = nil
+        _smartWalk.stayLockUntil = 0
+        pcall(function() stopFollowing() end)
     end,
     -- ── Прыжки (1-10) ─────────────────────────────────────────────────────
     jump     = function(_) doJump(1) end,
@@ -3797,331 +3900,331 @@ InventoryBeta2 = {}
 local Players = game:GetService("Players")
 
 local function getPlayer()
-	return Players.LocalPlayer
+        return Players.LocalPlayer
 end
 
 local function getChar()
-	local p = getPlayer()
-	return p and p.Character
+        local p = getPlayer()
+        return p and p.Character
 end
 
 local function getHumanoid()
-	local ch = getChar()
-	return ch and ch:FindFirstChildOfClass("Humanoid")
+        local ch = getChar()
+        return ch and ch:FindFirstChildOfClass("Humanoid")
 end
 
 local function getBackpack()
-	local p = getPlayer()
-	return p and p:FindFirstChildOfClass("Backpack")
+        local p = getPlayer()
+        return p and p:FindFirstChildOfClass("Backpack")
 end
 
 local function getGui()
-	local p = getPlayer()
-	return p and p:FindFirstChildOfClass("PlayerGui")
+        local p = getPlayer()
+        return p and p:FindFirstChildOfClass("PlayerGui")
 end
 
 local function norm(s)
-	s = tostring(s or ""):lower()
-	s = s:gsub("%s+", " ")
-	s = s:match("^%s*(.-)%s*$") or ""
-	return s
+        s = tostring(s or ""):lower()
+        s = s:gsub("%s+", " ")
+        s = s:match("^%s*(.-)%s*$") or ""
+        return s
 end
 
 -- Транслит RU->EN.
 local TR = {
-	["а"]="a",["б"]="b",["в"]="v",["г"]="g",["д"]="d",["е"]="e",["ё"]="yo",
-	["ж"]="zh",["з"]="z",["и"]="i",["й"]="y",["к"]="k",["л"]="l",["м"]="m",
-	["н"]="n",["о"]="o",["п"]="p",["р"]="r",["с"]="s",["т"]="t",["у"]="u",
-	["ф"]="f",["х"]="kh",["ц"]="ts",["ч"]="ch",["ш"]="sh",["щ"]="shch",
-	["ъ"]="",["ы"]="y",["ь"]="",["э"]="e",["ю"]="yu",["я"]="ya",
+        ["а"]="a",["б"]="b",["в"]="v",["г"]="g",["д"]="d",["е"]="e",["ё"]="yo",
+        ["ж"]="zh",["з"]="z",["и"]="i",["й"]="y",["к"]="k",["л"]="l",["м"]="m",
+        ["н"]="n",["о"]="o",["п"]="p",["р"]="r",["с"]="s",["т"]="t",["у"]="u",
+        ["ф"]="f",["х"]="kh",["ц"]="ts",["ч"]="ch",["ш"]="sh",["щ"]="shch",
+        ["ъ"]="",["ы"]="y",["ь"]="",["э"]="e",["ю"]="yu",["я"]="ya",
 }
 local function translit(s)
-	local out = {}
-	for _, cp in utf8.codes(s) do
-		local ch = utf8.char(cp)
-		local r = TR[ch]
-		if r ~= nil then table.insert(out, r) else table.insert(out, ch) end
-	end
-	return table.concat(out)
+        local out = {}
+        for _, cp in utf8.codes(s) do
+                local ch = utf8.char(cp)
+                local r = TR[ch]
+                if r ~= nil then table.insert(out, r) else table.insert(out, ch) end
+        end
+        return table.concat(out)
 end
 
 -- Стемминг: срезать русские окончания и английские хвосты.
 local RU_ENDS = { "ами", "ями", "ов", "ев", "ей", "ой", "ем", "ом", "ам", "ям", "ах", "ях", "ую", "юю", "ая", "яя", "ое", "ее", "ые", "ие", "ого", "его", "ому", "ему", "а", "я", "у", "ю", "о", "е", "ы", "и", "й", "ь" }
 local function stem(s)
-	s = norm(s)
-	for _, e in ipairs(RU_ENDS) do
-		if #s > #e + 2 and s:sub(-#e) == e then
-			s = s:sub(1, -#e - 1)
-			break
-		end
-	end
-	if not s:find("[\128-\255]") then
-		if #s > 4 and s:sub(-3) == "ing" then s = s:sub(1, -4)
-		elseif #s > 3 and s:sub(-2) == "es" then s = s:sub(1, -3)
-		elseif #s > 3 and s:sub(-1) == "s" then s = s:sub(1, -2) end
-	end
-	return s
+        s = norm(s)
+        for _, e in ipairs(RU_ENDS) do
+                if #s > #e + 2 and s:sub(-#e) == e then
+                        s = s:sub(1, -#e - 1)
+                        break
+                end
+        end
+        if not s:find("[\128-\255]") then
+                if #s > 4 and s:sub(-3) == "ing" then s = s:sub(1, -4)
+                elseif #s > 3 and s:sub(-2) == "es" then s = s:sub(1, -3)
+                elseif #s > 3 and s:sub(-1) == "s" then s = s:sub(1, -2) end
+        end
+        return s
 end
 
 local function consonants(s)
-	return (s:gsub("[aeiouyаеёиоуыэюя]", ""))
+        return (s:gsub("[aeiouyаеёиоуыэюя]", ""))
 end
 -- Skel
 local function skel(s)
-	local t = translit(stem(s))
-	t = t:gsub("(.)%1+", "%1")
-	t = consonants(t)
-	return t
+        local t = translit(stem(s))
+        t = t:gsub("(.)%1+", "%1")
+        t = consonants(t)
+        return t
 end
 
 -- Левенштейн с ранним выходом.
 local function lev(a, b, lim)
-	lim = lim or 99
-	local la, lb = #a, #b
-	if math.abs(la - lb) > lim then return lim + 1 end
-	if la == 0 then return lb end
-	if lb == 0 then return la end
-	local prev, cur = {}, {}
-	for j = 0, lb do prev[j] = j end
-	for i = 1, la do
-		cur[0] = i
-		local ai = a:sub(i, i)
-		local rowMin = i
-		for j = 1, lb do
-			local cost = (ai == b:sub(j, j)) and 0 or 1
-			local v = math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + cost)
-			cur[j] = v
-			if v < rowMin then rowMin = v end
-		end
-		if rowMin > lim then return lim + 1 end
-		prev, cur = cur, prev
-	end
-	return prev[lb]
+        lim = lim or 99
+        local la, lb = #a, #b
+        if math.abs(la - lb) > lim then return lim + 1 end
+        if la == 0 then return lb end
+        if lb == 0 then return la end
+        local prev, cur = {}, {}
+        for j = 0, lb do prev[j] = j end
+        for i = 1, la do
+                cur[0] = i
+                local ai = a:sub(i, i)
+                local rowMin = i
+                for j = 1, lb do
+                        local cost = (ai == b:sub(j, j)) and 0 or 1
+                        local v = math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + cost)
+                        cur[j] = v
+                        if v < rowMin then rowMin = v end
+                end
+                if rowMin > lim then return lim + 1 end
+                prev, cur = cur, prev
+        end
+        return prev[lb]
 end
 
 -- Все ключи имени: стем, транслит стема, словарные варианты.
 local function keysOf(raw)
-	local s = stem(raw)
-	local k = { [s] = true }
-	local ts = translit(s)
-	k[ts] = true
-	return k
+        local s = stem(raw)
+        local k = { [s] = true }
+        local ts = translit(s)
+        k[ts] = true
+        return k
 end
 
 -- Оценка пары: 0 = совпало, 1 = почти (опечатка), 99 = мимо.
 -- v20 Beta 3: встроенный словарик частых предметов (RU-основа -> EN-основа),
 -- чтобы «дубиночку»/«бутылочку» матчились даже без ИИ-описания.
 local ITEM_HINTS = {
-	["бит"]="bat", ["дубин"]="bat", ["палк"]="bat", ["клюшк"]="bat", ["дубинк"]="bat",
-	["бутыл"]="bottle", ["бутл"]="bottle", ["фляг"]="bottle", ["склянк"]="bottle",
-	["меч"]="sword", ["клинок"]="sword", ["шашк"]="sword",
-	["нож"]="knife", ["кинжал"]="knife", ["резак"]="knife",
-	["пистолет"]="gun", ["ружь"]="gun", ["автомат"]="gun", ["винтовк"]="gun", ["пушк"]="gun",
-	["еда"]="food", ["яблок"]="apple", ["банан"]="banana", ["хлеб"]="bread", ["пицц"]="pizza",
-	["аптек"]="med", ["бинт"]="bandage", ["таблет"]="pill", ["шприц"]="syringe",
-	["ключ"]="key", ["фонар"]="flashlight", ["факел"]="torch", ["карт"]="map",
-	["гранат"]="grenade", ["бомб"]="bomb", ["лук"]="bow", ["стрел"]="arrow",
-	["удочк"]="fishing", ["кирк"]="pickaxe", ["топор"]="axe", ["лопат"]="shovel",
+        ["бит"]="bat", ["дубин"]="bat", ["палк"]="bat", ["клюшк"]="bat", ["дубинк"]="bat",
+        ["бутыл"]="bottle", ["бутл"]="bottle", ["фляг"]="bottle", ["склянк"]="bottle",
+        ["меч"]="sword", ["клинок"]="sword", ["шашк"]="sword",
+        ["нож"]="knife", ["кинжал"]="knife", ["резак"]="knife",
+        ["пистолет"]="gun", ["ружь"]="gun", ["автомат"]="gun", ["винтовк"]="gun", ["пушк"]="gun",
+        ["еда"]="food", ["яблок"]="apple", ["банан"]="banana", ["хлеб"]="bread", ["пицц"]="pizza",
+        ["аптек"]="med", ["бинт"]="bandage", ["таблет"]="pill", ["шприц"]="syringe",
+        ["ключ"]="key", ["фонар"]="flashlight", ["факел"]="torch", ["карт"]="map",
+        ["гранат"]="grenade", ["бомб"]="bomb", ["лук"]="bow", ["стрел"]="arrow",
+        ["удочк"]="fishing", ["кирк"]="pickaxe", ["топор"]="axe", ["лопат"]="shovel",
 }
 local function pairScore(wantRaw, toolRaw)
-	local w, t = norm(wantRaw), norm(toolRaw)
-	if w == "" or t == "" then return 99 end
-	if w == t then return 0 end
-	if t:find(w, 1, true) or w:find(t, 1, true) then return 0 end
-	local kw, kt = keysOf(wantRaw), keysOf(toolRaw)
-	for k in pairs(kw) do
-		if kt[k] then return 0 end
-	end
-	for k1 in pairs(kw) do
-		for k2 in pairs(kt) do
-			if #k1 >= 3 and #k2 >= 3 and (k1:find(k2, 1, true) or k2:find(k1, 1, true)) then
-				return 0
-			end
-		end
-	end
-	local tw, tt = translit(stem(wantRaw)), translit(stem(toolRaw))
-	if tw ~= "" and tt ~= "" and lev(tw, tt, 1) <= 1 then return 1 end
-	local sw2, st2 = skel(wantRaw), skel(toolRaw)
-	if sw2 ~= "" and st2 ~= "" and #sw2 >= 2 and #st2 >= 2 and lev(sw2, st2, 1) <= 1 then return 1 end
-	-- v20 Beta 3: синонимы из ИИ-описания — сравнение по СТЕМАМ («дубиночку»~«дубина»)
-	local d = InventoryItemDesc and InventoryItemDesc[toolRaw]
-	if d and type(d.syn) == "string" and d.syn ~= "" then
-		local wstem = stem(wantRaw)
-		for s in tostring(d.syn):gmatch("[^,;]+") do
-			local ns = norm(s)
-			if ns ~= "" then
-				local nstem = stem(ns)
-				if ns == w or w:find(ns, 1, true) or ns:find(w, 1, true)
-					or (nstem ~= "" and (nstem == wstem or wstem:find(nstem, 1, true) or nstem:find(wstem, 1, true)))
-				then return 0 end
-			end
-		end
-	end
-	-- встроенный словарик (RU-основа -> EN-основа): дубиночку->bat, бутылочку->bottle
-	local wstem2, tstem2 = stem(wantRaw), stem(toolRaw)
-	if wstem2 ~= "" and tstem2 ~= "" then
-		for k, v in pairs(ITEM_HINTS) do
-			if (wstem2 == k or wstem2:find(k, 1, true)) and tstem2:find(v, 1, true) then return 0 end
-		end
-	end
-	return 99
+        local w, t = norm(wantRaw), norm(toolRaw)
+        if w == "" or t == "" then return 99 end
+        if w == t then return 0 end
+        if t:find(w, 1, true) or w:find(t, 1, true) then return 0 end
+        local kw, kt = keysOf(wantRaw), keysOf(toolRaw)
+        for k in pairs(kw) do
+                if kt[k] then return 0 end
+        end
+        for k1 in pairs(kw) do
+                for k2 in pairs(kt) do
+                        if #k1 >= 3 and #k2 >= 3 and (k1:find(k2, 1, true) or k2:find(k1, 1, true)) then
+                                return 0
+                        end
+                end
+        end
+        local tw, tt = translit(stem(wantRaw)), translit(stem(toolRaw))
+        if tw ~= "" and tt ~= "" and lev(tw, tt, 1) <= 1 then return 1 end
+        local sw2, st2 = skel(wantRaw), skel(toolRaw)
+        if sw2 ~= "" and st2 ~= "" and #sw2 >= 2 and #st2 >= 2 and lev(sw2, st2, 1) <= 1 then return 1 end
+        -- v20 Beta 3: синонимы из ИИ-описания — сравнение по СТЕМАМ («дубиночку»~«дубина»)
+        local d = InventoryItemDesc and InventoryItemDesc[toolRaw]
+        if d and type(d.syn) == "string" and d.syn ~= "" then
+                local wstem = stem(wantRaw)
+                for s in tostring(d.syn):gmatch("[^,;]+") do
+                        local ns = norm(s)
+                        if ns ~= "" then
+                                local nstem = stem(ns)
+                                if ns == w or w:find(ns, 1, true) or ns:find(w, 1, true)
+                                        or (nstem ~= "" and (nstem == wstem or wstem:find(nstem, 1, true) or nstem:find(wstem, 1, true)))
+                                then return 0 end
+                        end
+                end
+        end
+        -- встроенный словарик (RU-основа -> EN-основа): дубиночку->bat, бутылочку->bottle
+        local wstem2, tstem2 = stem(wantRaw), stem(toolRaw)
+        if wstem2 ~= "" and tstem2 ~= "" then
+                for k, v in pairs(ITEM_HINTS) do
+                        if (wstem2 == k or wstem2:find(k, 1, true)) and tstem2:find(v, 1, true) then return 0 end
+                end
+        end
+        return 99
 end
 
 local function acceptScore(d)
-	return d <= 1
+        return d <= 1
 end
 
 -- Все места где могут лежать Tools: руки, рюкзак, PlayerGui.
 local function scanSources()
-	local out = {}
-	local ch = getChar()
-	if ch then
-		for _, c in ipairs(ch:GetChildren()) do
-			if c:IsA("Tool") then table.insert(out, { tool = c, where = "hands" }) end
-		end
-	end
-	local bp = getBackpack()
-	if bp then
-		for _, c in ipairs(bp:GetChildren()) do
-			if c:IsA("Tool") then table.insert(out, { tool = c, where = "backpack" }) end
-		end
-	end
-	local gui = getGui()
-	if gui then
-		for _, c in ipairs(gui:GetDescendants()) do
-			if c:IsA("Tool") then table.insert(out, { tool = c, where = "gui" }) end
-		end
-	end
-	return out
+        local out = {}
+        local ch = getChar()
+        if ch then
+                for _, c in ipairs(ch:GetChildren()) do
+                        if c:IsA("Tool") then table.insert(out, { tool = c, where = "hands" }) end
+                end
+        end
+        local bp = getBackpack()
+        if bp then
+                for _, c in ipairs(bp:GetChildren()) do
+                        if c:IsA("Tool") then table.insert(out, { tool = c, where = "backpack" }) end
+                end
+        end
+        local gui = getGui()
+        if gui then
+                for _, c in ipairs(gui:GetDescendants()) do
+                        if c:IsA("Tool") then table.insert(out, { tool = c, where = "gui" }) end
+                end
+        end
+        return out
 end
 
 function InventoryBeta2.DumpAll()
-	local lines = {}
-	local p = getPlayer()
-	table.insert(lines, "player=" .. tostring(p and p.Name or "?"))
-	local found = scanSources()
-	if #found == 0 then
-		table.insert(lines, "TOOLS: none anywhere")
-	end
-	for _, e in ipairs(found) do
-		table.insert(lines, "TOOL [" .. e.where .. "]: " .. e.tool.Name .. " parent=" .. tostring(e.tool.Parent and e.tool.Parent.Name or "?"))
-	end
-	local bp = getBackpack()
-	table.insert(lines, "backpackExists=" .. tostring(bp ~= nil))
-	return table.concat(lines, "\n")
+        local lines = {}
+        local p = getPlayer()
+        table.insert(lines, "player=" .. tostring(p and p.Name or "?"))
+        local found = scanSources()
+        if #found == 0 then
+                table.insert(lines, "TOOLS: none anywhere")
+        end
+        for _, e in ipairs(found) do
+                table.insert(lines, "TOOL [" .. e.where .. "]: " .. e.tool.Name .. " parent=" .. tostring(e.tool.Parent and e.tool.Parent.Name or "?"))
+        end
+        local bp = getBackpack()
+        table.insert(lines, "backpackExists=" .. tostring(bp ~= nil))
+        return table.concat(lines, "\n")
 end
 
 -- Найти Tool: лучший по оценке, с приоритетом руки -> рюкзак -> gui.
 function InventoryBeta2.FindTool(name)
-	local want = norm(name)
-	if want == "" then return nil end
-	local order = { hands = 1, backpack = 2, gui = 3 }
-	local best, bestScore, bestRank = nil, 99, 99
-	for _, e in ipairs(scanSources()) do
-		local d = pairScore(want, e.tool.Name)
-		local r = order[e.where] or 50
-		if d < bestScore or (d == bestScore and r < bestRank) then
-			best, bestScore, bestRank = e.tool, d, r
-		end
-	end
-	if best and acceptScore(bestScore) then
-		for _, e in ipairs(scanSources()) do
-			if e.tool == best then return best, e.where, bestScore end
-		end
-	end
-	return nil
+        local want = norm(name)
+        if want == "" then return nil end
+        local order = { hands = 1, backpack = 2, gui = 3 }
+        local best, bestScore, bestRank = nil, 99, 99
+        for _, e in ipairs(scanSources()) do
+                local d = pairScore(want, e.tool.Name)
+                local r = order[e.where] or 50
+                if d < bestScore or (d == bestScore and r < bestRank) then
+                        best, bestScore, bestRank = e.tool, d, r
+                end
+        end
+        if best and acceptScore(bestScore) then
+                for _, e in ipairs(scanSources()) do
+                        if e.tool == best then return best, e.where, bestScore end
+                end
+        end
+        return nil
 end
 
 function InventoryBeta2.ListInventory()
-	local backpack = {}
-	local hands = nil
-	local guiList = {}
-	for _, e in ipairs(scanSources()) do
-		if e.where == "hands" and not hands then hands = e.tool.Name end
-		if e.where == "backpack" then table.insert(backpack, e.tool.Name) end
-		if e.where == "gui" then table.insert(guiList, e.tool.Name) end
-	end
-	table.sort(backpack)
-	table.sort(guiList)
-	return backpack, hands, guiList
+        local backpack = {}
+        local hands = nil
+        local guiList = {}
+        for _, e in ipairs(scanSources()) do
+                if e.where == "hands" and not hands then hands = e.tool.Name end
+                if e.where == "backpack" then table.insert(backpack, e.tool.Name) end
+                if e.where == "gui" then table.insert(guiList, e.tool.Name) end
+        end
+        table.sort(backpack)
+        table.sort(guiList)
+        return backpack, hands, guiList
 end
 
 function InventoryBeta2.DescribeTool(tool)
-	local nm = tostring(tool.Name or "")
-	local tip = ""
-	pcall(function() tip = tostring(tool.ToolTip or "") end)
-	tip = (tip:match("^%s*(.-)%s*$") or "")
-	tip = tip:gsub("[%[%]]", ""):match("^%s*(.-)%s*$") or ""
-	if #tip > 50 then tip = tip:sub(1, 50) end
-	-- приоритет — ИИ-описание (перевод + что это), иначе ToolTip
-	local d = InventoryItemDesc[nm]
-	local extra = ""
-	if d then
-		if d.ru ~= "" then extra = d.ru end
-		if d.what ~= "" then extra = (extra ~= "" and (extra .. " — " .. d.what)) or d.what end
-	end
-	if extra == "" then extra = tip end
-	if extra ~= "" then return nm .. " (" .. extra .. ")" end
-	return nm
+        local nm = tostring(tool.Name or "")
+        local tip = ""
+        pcall(function() tip = tostring(tool.ToolTip or "") end)
+        tip = (tip:match("^%s*(.-)%s*$") or "")
+        tip = tip:gsub("[%[%]]", ""):match("^%s*(.-)%s*$") or ""
+        if #tip > 50 then tip = tip:sub(1, 50) end
+        -- приоритет — ИИ-описание (перевод + что это), иначе ToolTip
+        local d = InventoryItemDesc[nm]
+        local extra = ""
+        if d then
+                if d.ru ~= "" then extra = d.ru end
+                if d.what ~= "" then extra = (extra ~= "" and (extra .. " — " .. d.what)) or d.what end
+        end
+        if extra == "" then extra = tip end
+        if extra ~= "" then return nm .. " (" .. extra .. ")" end
+        return nm
 end
 
 function InventoryBeta2.CandidateNames()
-	local names = {}
-	for _, e in ipairs(scanSources()) do
-		if e.where == "hands" or e.where == "backpack" then
-			table.insert(names, e.tool.Name)
-		end
-	end
-	return names
+        local names = {}
+        for _, e in ipairs(scanSources()) do
+                if e.where == "hands" or e.where == "backpack" then
+                        table.insert(names, e.tool.Name)
+                end
+        end
+        return names
 end
 
 -- УНИВЕРСАЛЬНЫЙ резолвер без словарей: спрашиваем ту же ИИ-модель,
 -- какой предмет из инвентаря имел в виду игрок. Работает для любого
 -- языка, опечаток, уменьшительных (бутылка=Bottle, бита=Bat и т.д.).
 function InventoryBeta2.ResolveNameAI(want, candidates)
-	want = tostring(want or ""):match("^%s*(.-)%s*$") or ""
-	if want == "" or not candidates or #candidates == 0 then return nil end
-	-- быстрый путь уже проверен FindTool — сюда попадаем только при score=99
-	local model = "openai/gpt-oss-20b"
-	pcall(function()
-		if getModel and ClientSettings then model = getModel(ClientSettings) or model end
-	end)
-	if not providerRouter then return nil end
-	local payload = {
-		model = model,
-		temperature = 0,
-		max_tokens = 20,
-		messages = {
-			{ role = "system", content = "You map a wanted item to inventory. Reply with ONLY the exact inventory name or NONE. Consider translations RU<->EN, typos, diminutives, plurals." },
-			{ role = "user", content = "Want: \"" .. want .. "\" Inventory: " .. table.concat(candidates, ", ") .. ". Which one? Exact name or NONE." },
-		},
-	}
-	if tostring(model):find("^qwen/") then
-		payload.reasoning_effort = "none"
-		payload.temperature = nil
-	end
-	local text, err = nil, nil
-	local done = false
-	task.spawn(function()
-		local ok, t, e = pcall(function() return providerRouter:chatCompletions(payload) end)
-		if ok then text, err = t, e else text, err = nil, t end
-		done = true
-	end)
-	local w = 0
-	while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
-	if not done or not text or text == "" then return nil end
-	text = tostring(text):match("^%s*(.-)%s*$") or ""
-	-- чистим кавычки/точки которые любят добавлять маленькие модели
-	text = text:gsub("^[\"'`]+", ""):gsub("[\"'`.]+$", ""):match("^%s*(.-)%s*$") or ""
-	if text == "" or text:upper() == "NONE" then return nil end
-	for _, c in ipairs(candidates) do
-		if c:lower() == text:lower() then return c end
-	end
-	-- модель могла вернуть с лишними словами — ищем вхождение
-	for _, c in ipairs(candidates) do
-		if text:lower():find(c:lower(), 1, true) then return c end
-	end
-	return nil
+        want = tostring(want or ""):match("^%s*(.-)%s*$") or ""
+        if want == "" or not candidates or #candidates == 0 then return nil end
+        -- быстрый путь уже проверен FindTool — сюда попадаем только при score=99
+        local model = "openai/gpt-oss-20b"
+        pcall(function()
+                if getModel and ClientSettings then model = getModel(ClientSettings) or model end
+        end)
+        if not providerRouter then return nil end
+        local payload = {
+                model = model,
+                temperature = 0,
+                max_tokens = 20,
+                messages = {
+                        { role = "system", content = "You map a wanted item to inventory. Reply with ONLY the exact inventory name or NONE. Consider translations RU<->EN, typos, diminutives, plurals." },
+                        { role = "user", content = "Want: \"" .. want .. "\" Inventory: " .. table.concat(candidates, ", ") .. ". Which one? Exact name or NONE." },
+                },
+        }
+        if tostring(model):find("^qwen/") then
+                payload.reasoning_effort = "none"
+                payload.temperature = nil
+        end
+        local text, err = nil, nil
+        local done = false
+        task.spawn(function()
+                local ok, t, e = pcall(function() return providerRouter:chatCompletions(payload) end)
+                if ok then text, err = t, e else text, err = nil, t end
+                done = true
+        end)
+        local w = 0
+        while not done and w < 8 do task.wait(0.25) w = w + 0.25 end
+        if not done or not text or text == "" then return nil end
+        text = tostring(text):match("^%s*(.-)%s*$") or ""
+        -- чистим кавычки/точки которые любят добавлять маленькие модели
+        text = text:gsub("^[\"'`]+", ""):gsub("[\"'`.]+$", ""):match("^%s*(.-)%s*$") or ""
+        if text == "" or text:upper() == "NONE" then return nil end
+        for _, c in ipairs(candidates) do
+                if c:lower() == text:lower() then return c end
+        end
+        -- модель могла вернуть с лишними словами — ищем вхождение
+        for _, c in ipairs(candidates) do
+                if text:lower():find(c:lower(), 1, true) then return c end
+        end
+        return nil
 end
 
 -- v20 Beta 3: СЕМАНТИКА инвентаря. Один раз на предмет спрашиваем ИИ (перевод RU +
@@ -4130,267 +4233,267 @@ end
 InventoryItemDesc = InventoryItemDesc or {}
 InventoryDescPending = InventoryDescPending or {}
 function InventoryBeta2.EnsureDescriptions(names)
-	if not providerRouter or not ClientSettings then return end
-	local uniq = {}
-	for _, nm in ipairs(names or {}) do
-		if type(nm) == "string" and nm ~= "" and not InventoryItemDesc[nm] and not InventoryDescPending[nm] then
-			InventoryDescPending[nm] = true
-			table.insert(uniq, nm)
-		end
-	end
-	if #uniq == 0 then return end
-	local model = "openai/gpt-oss-20b"
-	pcall(function() if getModel then model = getModel(ClientSettings) or model end end)
-	for _, nm in ipairs(uniq) do
-		task.spawn(function()
-			pcall(function()
-				local payload = {
-					model = model, temperature = 0, max_tokens = 60,
-					messages = {
-						{ role = "system", content = "You describe Roblox items. Reply ONLY as JSON: {\"ru\":\"<russian translation>\",\"what\":\"<2-4 russian words for what it is>\",\"syn\":\"<comma-separated russian synonyms>\"}" },
-						{ role = "user", content = "Item name: " .. nm },
-					},
-				}
-				if tostring(model):find("^qwen/") then payload.reasoning_effort = "none" payload.temperature = nil end
-				if tostring(model):find("gpt%-oss") then payload.reasoning_effort = "low" end
-				local t = providerRouter:chatCompletions(payload)
-				local ru, what, syn = "", "", ""
-				if type(t) == "string" then
-					ru   = t:match('"ru"%s*:%s*"([^"]*)"') or ""
-					what = t:match('"what"%s*:%s*"([^"]*)"') or ""
-					syn  = t:match('"syn"%s*:%s*"([^"]*)"') or ""
-				end
-				InventoryItemDesc[nm] = { ru = ru, what = what, syn = syn }
-			end)
-			InventoryDescPending[nm] = nil
-		end)
-	end
+        if not providerRouter or not ClientSettings then return end
+        local uniq = {}
+        for _, nm in ipairs(names or {}) do
+                if type(nm) == "string" and nm ~= "" and not InventoryItemDesc[nm] and not InventoryDescPending[nm] then
+                        InventoryDescPending[nm] = true
+                        table.insert(uniq, nm)
+                end
+        end
+        if #uniq == 0 then return end
+        local model = "openai/gpt-oss-20b"
+        pcall(function() if getModel then model = getModel(ClientSettings) or model end end)
+        for _, nm in ipairs(uniq) do
+                task.spawn(function()
+                        pcall(function()
+                                local payload = {
+                                        model = model, temperature = 0, max_tokens = 60,
+                                        messages = {
+                                                { role = "system", content = "You describe Roblox items. Reply ONLY as JSON: {\"ru\":\"<russian translation>\",\"what\":\"<2-4 russian words for what it is>\",\"syn\":\"<comma-separated russian synonyms>\"}" },
+                                                { role = "user", content = "Item name: " .. nm },
+                                        },
+                                }
+                                if tostring(model):find("^qwen/") then payload.reasoning_effort = "none" payload.temperature = nil end
+                                if tostring(model):find("gpt%-oss") then payload.reasoning_effort = "low" end
+                                local t = providerRouter:chatCompletions(payload)
+                                local ru, what, syn = "", "", ""
+                                if type(t) == "string" then
+                                        ru   = t:match('"ru"%s*:%s*"([^"]*)"') or ""
+                                        what = t:match('"what"%s*:%s*"([^"]*)"') or ""
+                                        syn  = t:match('"syn"%s*:%s*"([^"]*)"') or ""
+                                end
+                                InventoryItemDesc[nm] = { ru = ru, what = what, syn = syn }
+                        end)
+                        InventoryDescPending[nm] = nil
+                end)
+        end
 end
 
 function InventoryBeta2.InventoryLine()
-	pcall(function() InventoryBeta2.EnsureDescriptions(InventoryBeta2.CandidateNames()) end)
-	local backpackNames, handsName, guiNames = {}, nil, {}
-	-- enriched: имя + ToolTip чтобы ИИ понимала ЧТО это за предмет, а не только название
-	local function descOf(tool) return InventoryBeta2.DescribeTool(tool) end
-	for _, e in ipairs(scanSources()) do
-		if e.where == "hands" and not handsName then handsName = descOf(e.tool) end
-		if e.where == "backpack" then table.insert(backpackNames, descOf(e.tool)) end
-		if e.where == "gui" then table.insert(guiNames, e.tool.Name) end
-	end
-	table.sort(backpackNames)
-	table.sort(guiNames)
-	if (not handsName) and (#backpackNames == 0) and (#guiNames == 0) then
-		return "INVENTORY: пусто"
-	end
-	local parts = {}
-	if handsName then table.insert(parts, "в руках: " .. handsName) end
-	if #backpackNames > 0 then table.insert(parts, "рюкзак: " .. table.concat(backpackNames, ", ")) end
-	if #guiNames > 0 then table.insert(parts, "GUI (обычно взять нельзя): " .. table.concat(guiNames, ", ")) end
-	return "INVENTORY: " .. table.concat(parts, " | ")
+        pcall(function() InventoryBeta2.EnsureDescriptions(InventoryBeta2.CandidateNames()) end)
+        local backpackNames, handsName, guiNames = {}, nil, {}
+        -- enriched: имя + ToolTip чтобы ИИ понимала ЧТО это за предмет, а не только название
+        local function descOf(tool) return InventoryBeta2.DescribeTool(tool) end
+        for _, e in ipairs(scanSources()) do
+                if e.where == "hands" and not handsName then handsName = descOf(e.tool) end
+                if e.where == "backpack" then table.insert(backpackNames, descOf(e.tool)) end
+                if e.where == "gui" then table.insert(guiNames, e.tool.Name) end
+        end
+        table.sort(backpackNames)
+        table.sort(guiNames)
+        if (not handsName) and (#backpackNames == 0) and (#guiNames == 0) then
+                return "INVENTORY: пусто"
+        end
+        local parts = {}
+        if handsName then table.insert(parts, "в руках: " .. handsName) end
+        if #backpackNames > 0 then table.insert(parts, "рюкзак: " .. table.concat(backpackNames, ", ")) end
+        if #guiNames > 0 then table.insert(parts, "GUI (обычно взять нельзя): " .. table.concat(guiNames, ", ")) end
+        return "INVENTORY: " .. table.concat(parts, " | ")
 end
 
 function InventoryBeta2.SayInventory(wantName)
-	local backpack, hands, guiList = InventoryBeta2.ListInventory()
-	local have = {}
-	if hands then table.insert(have, hands) end
-	for _, n in ipairs(backpack) do table.insert(have, n) end
-	for _, n in ipairs(guiList) do table.insert(have, n .. " (в меню)") end
-	if #have == 0 then
-		return "у меня нет этого предмета"
-	end
-	if wantName and wantName ~= "" then
-		return "у меня нет " .. tostring(wantName) .. ", но есть: " .. table.concat(have, ", ") .. " — могу использовать их"
-	end
-	return "у меня есть: " .. table.concat(have, ", ")
+        local backpack, hands, guiList = InventoryBeta2.ListInventory()
+        local have = {}
+        if hands then table.insert(have, hands) end
+        for _, n in ipairs(backpack) do table.insert(have, n) end
+        for _, n in ipairs(guiList) do table.insert(have, n .. " (в меню)") end
+        if #have == 0 then
+                return "у меня нет этого предмета"
+        end
+        if wantName and wantName ~= "" then
+                return "у меня нет " .. tostring(wantName) .. ", но есть: " .. table.concat(have, ", ") .. " — могу использовать их"
+        end
+        return "у меня есть: " .. table.concat(have, ", ")
 end
 
 function InventoryBeta2.DoTake(name)
-	local nm = norm(name)
-	if nm == "" or nm == "something" or nm == "anything" or nm == "thing"
-		or nm == "sth" or nm == "any" or nm == "random"
-		or nm == "что-нибудь" or nm == "что-то" or nm == "чего-нибудь"
-		or nm == "чтото" or nm == "чтонить" or nm == "что-нить" or nm == "чёнить" or nm == "чё-нибудь"
-		or nm == "чёто" or nm == "че-то" or nm == "любой" or nm == "любое" or nm == "рандом"
-		or nm == "взять" or nm == "возьми" or nm == "give" or nm == "take" or nm == "grab" or nm == "equip" or nm == "it"
-		or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
-	then name = "" end
-	if name == "" then
-		local ch0 = getChar()
-		local held0 = ch0 and ch0:FindFirstChildOfClass("Tool")
-		if held0 then InventoryBeta2.lastScore = 0 return true, "в руках уже есть " .. held0.Name end
-		local bp0 = getBackpack()
-		if bp0 then
-			for _, c in ipairs(bp0:GetChildren()) do
-				if c:IsA("Tool") then
-					local hum0 = getHumanoid()
-					local took = false
-					if hum0 then
-						for att = 1, 3 do
-							pcall(function() hum0:EquipTool(c) end)
-							task.wait(0.4)
-							local chv0 = getChar()
-							local hd0 = chv0 and chv0:FindFirstChild(c.Name)
-							if hd0 and hd0:IsA("Tool") then took = true break end
-							task.wait(0.3)
-						end
-					end
-					if not took then
-						print("[INV] equip FAILED: " .. c.Name)
-						return false, "не получилось взять " .. c.Name
-					end
-					InventoryBeta2.lastScore = 1
-					return true, "взял " .. c.Name .. " в руки"
-				end
-			end
-		end
-		return false, InventoryBeta2.SayInventory()
-	end
-	local tool, where, score = InventoryBeta2.FindTool(name)
-	if not tool then
-		-- УНИВЕРСАЛЬНЫЙ фолбэк: локальный скоринг не знает переводы
-		-- (бутылка vs Bottle), поэтому спрашиваем ИИ напрямую.
-		local aiName = nil
-		pcall(function()
-			aiName = InventoryBeta2.ResolveNameAI(name, InventoryBeta2.CandidateNames())
-		end)
-		if aiName then
-			print("[INV] AI-resolved '" .. tostring(name) .. "' -> '" .. tostring(aiName) .. "'")
-			tool, where, score = InventoryBeta2.FindTool(aiName)
-		end
-	end
-	if not tool then
+        local nm = norm(name)
+        if nm == "" or nm == "something" or nm == "anything" or nm == "thing"
+                or nm == "sth" or nm == "any" or nm == "random"
+                or nm == "что-нибудь" or nm == "что-то" or nm == "чего-нибудь"
+                or nm == "чтото" or nm == "чтонить" or nm == "что-нить" or nm == "чёнить" or nm == "чё-нибудь"
+                or nm == "чёто" or nm == "че-то" or nm == "любой" or nm == "любое" or nm == "рандом"
+                or nm == "взять" or nm == "возьми" or nm == "give" or nm == "take" or nm == "grab" or nm == "equip" or nm == "it"
+                or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
+        then name = "" end
+        if name == "" then
+                local ch0 = getChar()
+                local held0 = ch0 and ch0:FindFirstChildOfClass("Tool")
+                if held0 then InventoryBeta2.lastScore = 0 return true, "в руках уже есть " .. held0.Name end
+                local bp0 = getBackpack()
+                if bp0 then
+                        for _, c in ipairs(bp0:GetChildren()) do
+                                if c:IsA("Tool") then
+                                        local hum0 = getHumanoid()
+                                        local took = false
+                                        if hum0 then
+                                                for att = 1, 3 do
+                                                        pcall(function() hum0:EquipTool(c) end)
+                                                        task.wait(0.4)
+                                                        local chv0 = getChar()
+                                                        local hd0 = chv0 and chv0:FindFirstChild(c.Name)
+                                                        if hd0 and hd0:IsA("Tool") then took = true break end
+                                                        task.wait(0.3)
+                                                end
+                                        end
+                                        if not took then
+                                                print("[INV] equip FAILED: " .. c.Name)
+                                                return false, "не получилось взять " .. c.Name
+                                        end
+                                        InventoryBeta2.lastScore = 1
+                                        return true, "взял " .. c.Name .. " в руки"
+                                end
+                        end
+                end
+                return false, InventoryBeta2.SayInventory()
+        end
+        local tool, where, score = InventoryBeta2.FindTool(name)
+        if not tool then
+                -- УНИВЕРСАЛЬНЫЙ фолбэк: локальный скоринг не знает переводы
+                -- (бутылка vs Bottle), поэтому спрашиваем ИИ напрямую.
+                local aiName = nil
+                pcall(function()
+                        aiName = InventoryBeta2.ResolveNameAI(name, InventoryBeta2.CandidateNames())
+                end)
+                if aiName then
+                        print("[INV] AI-resolved '" .. tostring(name) .. "' -> '" .. tostring(aiName) .. "'")
+                        tool, where, score = InventoryBeta2.FindTool(aiName)
+                end
+        end
+        if not tool then
         InventoryBeta2.lastScore = nil
-		print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
-		return false, InventoryBeta2.SayInventory(name)
-	end
-	print("[INV] matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "' score=" .. tostring(score))
+                print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
+                return false, InventoryBeta2.SayInventory(name)
+        end
+        print("[INV] matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "' score=" .. tostring(score))
         InventoryBeta2.lastScore = score
-	if where == "hands" then
-		return true, "взял " .. tool.Name .. " (уже в руках)"
-	end
-	if where == "gui" then
-		return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
-	end
-	local hum = getHumanoid()
-	if not hum then
-		return false, "нет персонажа"
-	end
-	-- Roblox САМ переключает инструменты: EquipTool меняет текущий без "убрать".
-	-- Раньше сначала звали UnequipTools — из-за этого смена предмета ломалась.
-	local function isHeld()
-		local chv = getChar()
-		local h = chv and chv:FindFirstChild(tool.Name)
-		return h and h:IsA("Tool")
-	end
-	for attempt = 1, 4 do
-		pcall(function() hum:EquipTool(tool) end)
-		task.wait(0.35)
-		if isHeld() then return true, "взял " .. tool.Name end
-		-- фоллбэк только если прямое переключение не сработало
-		if attempt == 2 then
-			pcall(function() hum:UnequipTools() end)
-			task.wait(0.2)
-		elseif attempt >= 3 then
-			pcall(function()
-				local chv2 = getChar()
-				if chv2 then tool.Parent = chv2 end
-			end)
-			task.wait(0.35)
-			if isHeld() then return true, "взял " .. tool.Name end
-		end
-		task.wait(0.2)
-	end
-	print("[INV] equip FAILED: " .. tool.Name)
-	return false, "не получилось взять " .. tool.Name
+        if where == "hands" then
+                return true, "взял " .. tool.Name .. " (уже в руках)"
+        end
+        if where == "gui" then
+                return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
+        end
+        local hum = getHumanoid()
+        if not hum then
+                return false, "нет персонажа"
+        end
+        -- Roblox САМ переключает инструменты: EquipTool меняет текущий без "убрать".
+        -- Раньше сначала звали UnequipTools — из-за этого смена предмета ломалась.
+        local function isHeld()
+                local chv = getChar()
+                local h = chv and chv:FindFirstChild(tool.Name)
+                return h and h:IsA("Tool")
+        end
+        for attempt = 1, 4 do
+                pcall(function() hum:EquipTool(tool) end)
+                task.wait(0.35)
+                if isHeld() then return true, "взял " .. tool.Name end
+                -- фоллбэк только если прямое переключение не сработало
+                if attempt == 2 then
+                        pcall(function() hum:UnequipTools() end)
+                        task.wait(0.2)
+                elseif attempt >= 3 then
+                        pcall(function()
+                                local chv2 = getChar()
+                                if chv2 then tool.Parent = chv2 end
+                        end)
+                        task.wait(0.35)
+                        if isHeld() then return true, "взял " .. tool.Name end
+                end
+                task.wait(0.2)
+        end
+        print("[INV] equip FAILED: " .. tool.Name)
+        return false, "не получилось взять " .. tool.Name
 end
 -- Использовать: если предмет назван — взять (даже из рюкзака) и сразу применить.
 -- Без названия — применить то, что уже в руках.
 function InventoryBeta2.DoUse(name)
-	local nm = norm(name)
-	if nm == "" or nm == "something" or nm == "anything" or nm == "thing" or nm == "sth"
-		or nm == "что-нибудь" or nm == "что-то" or nm == "чтото" or nm == "чтонить"
-		or nm == "что-нить" or nm == "чёнить" or nm == "чёто" or nm == "любой" or nm == "рандом"
-		or nm == "используй" or nm == "использовать" or nm == "использую" or nm == "примени" or nm == "use"
-		or nm == "it" or nm == "this" or nm == "that" or nm == "его" or nm == "её" or nm == "это"
-		or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
-	then name = nil end
-	if name and name ~= "" then
-		local tool, where = InventoryBeta2.FindTool(name)
-		if not tool then
-			local aiName = nil
-			pcall(function()
-				aiName = InventoryBeta2.ResolveNameAI(name, InventoryBeta2.CandidateNames())
-			end)
-			if aiName then
-				print("[INV] AI-resolved(use) '" .. tostring(name) .. "' -> '" .. tostring(aiName) .. "'")
-				tool, where = InventoryBeta2.FindTool(aiName)
-				if tool then name = aiName end
-			end
-		end
-		if not tool then
-			print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
-			InventoryBeta2.lastScore = nil
-			return false, InventoryBeta2.SayInventory(name)
-		end
-		print("[INV] use-matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "'")
-		if where == "gui" then
-			return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
-		end
-		if where == "backpack" then
-			local okT, msgT = InventoryBeta2.DoTake(name)
-			if not okT then return false, msgT end
-		end
-	end
-	local ch = getChar()
-	local held = ch and ch:FindFirstChildOfClass("Tool")
-	if not held then
-		return false, InventoryBeta2.SayInventory()
-	end
-	pcall(function() held:Activate() end)
-	return true, "использую " .. held.Name
+        local nm = norm(name)
+        if nm == "" or nm == "something" or nm == "anything" or nm == "thing" or nm == "sth"
+                or nm == "что-нибудь" or nm == "что-то" or nm == "чтото" or nm == "чтонить"
+                or nm == "что-нить" or nm == "чёнить" or nm == "чёто" or nm == "любой" or nm == "рандом"
+                or nm == "используй" or nm == "использовать" or nm == "использую" or nm == "примени" or nm == "use"
+                or nm == "it" or nm == "this" or nm == "that" or nm == "его" or nm == "её" or nm == "это"
+                or nm:find("^что[%s%-]?то$") or nm:find("^чё[%s%-]?то$") or nm:find("^что[%s%-]?нибудь$")
+        then name = nil end
+        if name and name ~= "" then
+                local tool, where = InventoryBeta2.FindTool(name)
+                if not tool then
+                        local aiName = nil
+                        pcall(function()
+                                aiName = InventoryBeta2.ResolveNameAI(name, InventoryBeta2.CandidateNames())
+                        end)
+                        if aiName then
+                                print("[INV] AI-resolved(use) '" .. tostring(name) .. "' -> '" .. tostring(aiName) .. "'")
+                                tool, where = InventoryBeta2.FindTool(aiName)
+                                if tool then name = aiName end
+                        end
+                end
+                if not tool then
+                        print("[INV] dump on fail:\n" .. InventoryBeta2.DumpAll())
+                        InventoryBeta2.lastScore = nil
+                        return false, InventoryBeta2.SayInventory(name)
+                end
+                print("[INV] use-matched '" .. tostring(name) .. "' -> '" .. tool.Name .. "'")
+                if where == "gui" then
+                        return false, tool.Name .. " в меню, руками взять не могу — нажми сам"
+                end
+                if where == "backpack" then
+                        local okT, msgT = InventoryBeta2.DoTake(name)
+                        if not okT then return false, msgT end
+                end
+        end
+        local ch = getChar()
+        local held = ch and ch:FindFirstChildOfClass("Tool")
+        if not held then
+                return false, InventoryBeta2.SayInventory()
+        end
+        pcall(function() held:Activate() end)
+        return true, "использую " .. held.Name
 end
 
 function InventoryBeta2.DoPutaway()
-	local hum = getHumanoid()
-	if hum then
-		pcall(function() hum:UnequipTools() end)
-	end
-	return true, "убрал"
+        local hum = getHumanoid()
+        if hum then
+                pcall(function() hum:UnequipTools() end)
+        end
+        return true, "убрал"
 end
 
 function InventoryBeta2.DoEat(name)
-	local ok, msg = InventoryBeta2.DoTake(name)
-	if not ok then
-		return false, msg
-	end
-	task.wait(0.4)
-	InventoryBeta2.DoUse()
-	task.wait(0.8)
-	InventoryBeta2.DoPutaway()
-	return true, "съел " .. tostring(name) .. " и убрал"
+        local ok, msg = InventoryBeta2.DoTake(name)
+        if not ok then
+                return false, msg
+        end
+        task.wait(0.4)
+        InventoryBeta2.DoUse()
+        task.wait(0.8)
+        InventoryBeta2.DoPutaway()
+        return true, "съел " .. tostring(name) .. " и убрал"
 end
 
 -- Вытащить название предмета из фразы: идёт с конца, пропуская глаголы,
 -- предлоги и слова-места (рюкзак, руки). "взял желе из рюкзака" -> "желе".
 function InventoryBeta2.ExtractName(msg)
-	msg = tostring(msg or "")
-	local m = msg:lower()
-	local words = {}
-	for w in m:gmatch("%S+") do table.insert(words, w) end
-	local stopVerbs = { ["это"]=1, ["it"]=1, ["меня"]=1, ["его"]=1, ["возьми"]=1, ["возьму"]=1, ["взять"]=1, ["используй"]=1, ["использую"]=1, ["использовать"]=1, ["убери"]=1, ["убрать"]=1, ["убираю"]=1, ["съешь"]=1, ["съесть"]=1, ["скушай"]=1, ["take"]=1, ["use"]=1, ["using"]=1, ["eat"]=1, ["put"]=1, ["away"]=1, ["equip"]=1, ["держи"]=1, ["покажи"]=1, ["дай"]=1, ["ударь"]=1, ["удар"]=1, ["ударить"]=1, ["ударю"]=1, ["удары"]=1, ["бей"]=1, ["бить"]=1, ["бью"]=1, ["атакуй"]=1, ["атаковать"]=1, ["атака"]=1, ["махни"]=1, ["махнуть"]=1, ["взмахни"]=1, ["стукни"]=1, ["стукнуть"]=1, ["дерись"]=1, ["замахнись"]=1 }
-	local skipNouns = { ["рюкзак"]=1, ["рюкзака"]=1, ["рюкзаке"]=1, ["руки"]=1, ["рук"]=1, ["руку"]=1, ["рука"]=1, ["карман"]=1, ["кармана"]=1, ["меню"]=1, ["инвентарь"]=1, ["инвентаря"]=1 }
-	local preps = { ["из"]=1, ["в"]=1, ["во"]=1, ["на"]=1, ["с"]=1, ["со"]=1, ["к"]=1, ["у"]=1, ["для"]=1, ["про"]=1, ["о"]=1, ["об"]=1, ["от"]=1, ["до"]=1, ["без"]=1, ["через"]=1, ["под"]=1, ["над"]=1 }
-	local last = ""
-	for _ = 1, 5 do
-		if #words == 0 then break end
-		local cand = words[#words]:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
-		if cand ~= "" and not stopVerbs[cand] and not skipNouns[cand] and not preps[cand] then
-			last = cand
-			break
-		end
-		table.remove(words)
-	end
-	return last
+        msg = tostring(msg or "")
+        local m = msg:lower()
+        local words = {}
+        for w in m:gmatch("%S+") do table.insert(words, w) end
+        local stopVerbs = { ["это"]=1, ["it"]=1, ["меня"]=1, ["его"]=1, ["возьми"]=1, ["возьму"]=1, ["взять"]=1, ["используй"]=1, ["использую"]=1, ["использовать"]=1, ["убери"]=1, ["убрать"]=1, ["убираю"]=1, ["съешь"]=1, ["съесть"]=1, ["скушай"]=1, ["take"]=1, ["use"]=1, ["using"]=1, ["eat"]=1, ["put"]=1, ["away"]=1, ["equip"]=1, ["держи"]=1, ["покажи"]=1, ["дай"]=1, ["ударь"]=1, ["удар"]=1, ["ударить"]=1, ["ударю"]=1, ["удары"]=1, ["бей"]=1, ["бить"]=1, ["бью"]=1, ["атакуй"]=1, ["атаковать"]=1, ["атака"]=1, ["махни"]=1, ["махнуть"]=1, ["взмахни"]=1, ["стукни"]=1, ["стукнуть"]=1, ["дерись"]=1, ["замахнись"]=1 }
+        local skipNouns = { ["рюкзак"]=1, ["рюкзака"]=1, ["рюкзаке"]=1, ["руки"]=1, ["рук"]=1, ["руку"]=1, ["рука"]=1, ["карман"]=1, ["кармана"]=1, ["меню"]=1, ["инвентарь"]=1, ["инвентаря"]=1 }
+        local preps = { ["из"]=1, ["в"]=1, ["во"]=1, ["на"]=1, ["с"]=1, ["со"]=1, ["к"]=1, ["у"]=1, ["для"]=1, ["про"]=1, ["о"]=1, ["об"]=1, ["от"]=1, ["до"]=1, ["без"]=1, ["через"]=1, ["под"]=1, ["над"]=1 }
+        local last = ""
+        for _ = 1, 5 do
+                if #words == 0 then break end
+                local cand = words[#words]:gsub("[%p%c]+$", ""):gsub("^[%p%c]+", "")
+                if cand ~= "" and not stopVerbs[cand] and not skipNouns[cand] and not preps[cand] then
+                        last = cand
+                        break
+                end
+                table.remove(words)
+        end
+        return last
 end
 end
 if InventoryBeta2 and ACTION_HANDLERS then
@@ -4502,6 +4605,8 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
                 if not ok and ClientSettings.Debug then
                     print("[LOB] action error [" .. tostring(actionName) .. "]: " .. tostring(err))
                 end
+                -- v24.1: событие для модов (перехват/расширение действий бота)
+                if LOB_MODS and LOB_MODS.fire then pcall(LOB_MODS.fire, "action", actionName, sourcePlayer, actionArg) end
             end)
         end
     end
@@ -6463,6 +6568,26 @@ end
 -- v20 Beta 3: УМНАЯ ХОДЬБА — бот сам ходит как игрок: обходит препятствия
 -- (Pathfinding), идёт к тем, кто общается, уходит если попросили, а если
 -- никого — бродит и бормочет. Всё в глобалах (лимит локалок).
+--
+-- v23: УМНАЯ ХОДЬБА+ (все правки инкрементальные, ничего не удалено):
+--  ФИКСЫ:
+--   1. «уйди» теперь работает сразу: раньше bypass по свежему чату в lobSmartPick
+--      позволял боту ещё 15с подходить к тому, кто его только что прогнал.
+--   2. приветствие больше не «теряется» при сбое очереди чата (greetAt писался до
+--      фактической отправки — бот молчал 120с).
+--   3. респавн: дом/маршруты сбрасываются — бот не пытается брести через карту
+--      к старому «дому» и не спамит nopath.
+--   4. анти-пинг-понг: при двух болтающих бот больше не дёргается туда-сюда.
+--   5. застревание: не бьётся головой в низкий потолок бесконечными прыжками —
+--      после 3 попыток маршрут пересчитывается в обход (jitter).
+--  НОВОЕ:
+--   6. замечает «хвостов»: молчаливый игрок рядом 8с+ → бот сам заговаривает.
+--   7. бормотание наедине — было обещано в описании, теперь реально работает.
+--   8. соц-магнетизм: блуждание тянется к недавним собеседникам и компаниям.
+--   9. flee: убегает В СТОРОНУ своих (мирные рядом = безопаснее).
+--  10. адаптивное упреждение бегущих целей (вместо фиксированного 0.35с).
+--  11. [DO:wander] — ИИ может отправить бота гулять.
+--  12. кап среза углов (CPU на длинных путях) + чистка _lastLeaveAt/followSince.
 -- ═══════════════════════════════════════════════════════════════════════════
 _smartWalk = {
     active = false, thread = nil, target = nil, targetSince = 0,
@@ -6485,6 +6610,10 @@ _smartWalk = {
     lastPos = nil, lastMoveAt = 0,
 }
 _lastChatAt = _lastChatAt or {}
+-- v23: память «уйди»-команд: лечит баг, когда бот в первые 15с после «уйди» снова
+-- подходил к игроку (см. lobSmartPick — bypass по свежему чату не должен срабатывать
+-- на само сообщение «уйди», оно ведь ТОЖЕ обновляет _lastChatAt)
+_lastLeaveAt = _lastLeaveAt or {}
 _SW = {
     AVOID_SEC      = 60,   -- не подходить после «уйди»
     REACH_FAIL_SEC = 45,   -- считать цель недостижимой после провала пути
@@ -6501,6 +6630,7 @@ _SW = {
     WIND_DOWN      = 2.5,  -- сколько постоять/попрощаться перед уходом
     FAREWELL_CD    = 90,   -- не прощаемся чаще, чем раз в N секунд
     RETURN_CD      = 30,   -- сколько не возвращаться к тому же игроку после ухода
+    RETURN_CD_TALK = 180,  -- v23.4: пауза возврата после ЖИВОГО разговора (анти пинг-понг «пока → привет»)
     WANDER_PAUSE   = 0.12, -- изредка останавливается осмотреться (редко, чтобы не выглядел тупым)
     WANDER_PAUSE_MIN = 0.8,
     WANDER_PAUSE_MAX = 2.0,
@@ -6562,6 +6692,18 @@ _SW = {
     TRUST_REGEN    = 0.012,-- рост доверия за секунду мирного соседства
     TRUST_BETRAY   = 0.35, -- падение доверия при обмане
     TRUST_NEED_STEP= 0.16, -- каждый обман поднимает планку для нового перемирия
+    -- ── v23: УМНАЯ ХОДЬБА+ (замечает «хвостов», бормотание, соц-магнетизм) ──
+    HOVER_R        = 14,   -- игрок в этом радиусе молча держится рядом = «хвост»
+    HOVER_TIME     = 8,    -- столько секунд нужно продержаться, чтобы бот сам заговорил
+    HOVER_TALK_GAP = 300,  -- «хвост» — только тот, кто давно (или никогда) не писал боту
+    LEAVE_BYPASS_BLOCK = 12, -- столько секунд после «уйди» bypass по свежему чату не работает
+    MUMBLE_CD_MIN  = 240,  -- мин кулдаун бормотания наедине
+    MUMBLE_CD_MAX  = 360,  -- макс кулдаун бормотания (случайный разброс)
+    MUMBLE_EMPTY_R = 35,   -- бормочет только если вокруг действительно пусто
+    HOT_SPOT_R     = 24,   -- радиус «компании» при поиске горячей точки для блуждания
+    SWITCH_CD      = 4,    -- анти-пинг-понг: не чаще этого переключаемся между говорящими
+    SHORTCUT_CAP   = 12,   -- сколько точек пути вперёд проверяем на срез углов (CPU)
+    STUCK_JUMPS    = 3,    -- столько прыжков без прогресса на точке — маршрут в мусор
 }
 
 function lobSmartWalkNoteChat(userId, name)
@@ -6576,7 +6718,12 @@ function lobSmartWalkNoteChat(userId, name)
 end
 
 function lobSmartWalkLeave(userId)
-    if userId then _smartWalk.avoid[userId] = os.clock() + _SW.AVOID_SEC end
+    if userId then
+        _smartWalk.avoid[userId] = os.clock() + _SW.AVOID_SEC
+        -- v23: запоминаем КОГДА сказали «уйди» — чтобы свежий чат не заставил бота
+        -- снова подойти (см. lobSmartPick)
+        _lastLeaveAt[userId] = os.clock()
+    end
     if _smartWalk.target and _smartWalk.target.UserId == userId then
         _smartWalk.target = nil
         _smartWalk.targetSince = 0
@@ -6604,6 +6751,15 @@ function lobSmartClean(now)
     end
     for uid in pairs(_lastChatAt) do
         if not Players:GetPlayerByUserId(uid) then _lastChatAt[uid] = nil end
+    end
+    -- v23: чистим память «уйди» и «хвостов» от ушедших игроков
+    for uid in pairs(_lastLeaveAt) do
+        if not Players:GetPlayerByUserId(uid) then _lastLeaveAt[uid] = nil end
+    end
+    if _smartWalk.followSince then
+        for uid in pairs(_smartWalk.followSince) do
+            if not Players:GetPlayerByUserId(uid) then _smartWalk.followSince[uid] = nil end
+        end
     end
     for uid in pairs(_smartWalk.farewellFrom) do
         if not Players:GetPlayerByUserId(uid) then _smartWalk.farewellFrom[uid] = nil end
@@ -6665,7 +6821,26 @@ function lobIsFarewellCommand(msg)
     local m = tostring(msg or ""):lower()
     local words = { "пока", "покеда", "до связи", "до встречи", "прощай", "увидимся",
         "хорошего дня", "спокойной ночи", "bye", "goodbye", "cya", "see ya", "see you", "farewell" }
-    for _, w in ipairs(words) do if m:find(w, 1, true) then return true end end
+    -- v23.3 FIX: раньше совпадение шло по подстроке — «покажи биту» содержало «пока», «nice to see you»
+    -- содержало «see you» → бот прощался посреди диалога на ЛЮБОЕ такое сообщение.
+    -- Теперь слово должно стоять ОТДЕЛЬНО (не внутри другого слова).
+    local function isLetterByte(c)
+        if c == nil or c == "" then return false end
+        local b = c:byte()
+        if b and b >= 128 then return true end  -- кириллица (UTF-8 байты)
+        return c:match("%w") ~= nil
+    end
+    for _, w in ipairs(words) do
+        local s = 1
+        while true do
+            local a, bb = m:find(w, s, true)
+            if not a then break end
+            local before = m:sub(a - 1, a - 1)
+            local after = m:sub(bb + 1, bb + 1)
+            if (not isLetterByte(before)) and (not isLetterByte(after)) then return true end
+            s = bb + 1
+        end
+    end
     return false
 end
 
@@ -6674,14 +6849,58 @@ function lobSmartFarewell(p)
     if not ClientSettings.AutoReply then return end
     if not p or not p.Parent then return end
     local now = os.clock()
+    -- v23.3 FIX: «пока» говорят только тому, с кем РЕАЛЬНО общались: молчун, который
+    -- за сессию ни разу ничего не написал, прощание не получает — бот молча уходит.
+    -- Раньше бот говорил «пока, ник» человеку, который не проронил ни слова — бред.
+    -- v23.4 FIX: прошлую проверку обходил ещё один бред-кейс: rrF.chats растёт от ЛЮБОЙ
+    -- реплики игрока в общем чате сервера (даже адресованной другим), а _lastChatAt —
+    -- от реплик СТАРЫХ визитов. Итог: бот стоит в толпе, «пока ‹ник›» получает человек,
+    -- который боту ни разу не ответил. Теперь прощание ТОЛЬКО после реального обмена
+    -- репликами ИМЕННО в этом визите: игрок написал что-то после начала визита
+    -- И бот после этого ему ответил (nudge/ответ ИИ обновляют botReplyAt).
+    local spkF = _lastChatAt[p.UserId] or 0
+    local botF = ((_smartWalk.botReplyAt or {})[p.UserId] or 0)
+    local visF = _smartWalk.socialSince or 0
+    local hadRealTalk = visF > 0 and spkF > visF and botF > spkF
+    if not hadRealTalk then return end
     if (now - (_smartWalk.lastFarewellAt or 0)) < _SW.FAREWELL_CD then return end
     _smartWalk.lastFarewellAt = now
     local qk = "swf:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
     local okQ = enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
-        cleaned = "[SYSTEM: You are about to leave " .. nm .. " after a chat. Say ONE very short casual goodbye in your own style and language, then go. Do not ask a question.]",
+        cleaned = "[SYSTEM: You are about to leave " .. nm .. " after a chat. Say ONE very short casual goodbye in your own style and language, then go. Vary the wording, do not repeat the same goodbye twice; you may name them or not. Do not ask a question.]",
         isWorld = true, langUid = p.UserId,
+    }, 1)
+    if okQ then runChatQueue(qk) end
+end
+
+-- ═══ v23: «БОРМОТАНИЕ» НАЕДИНЕ ═════════════════════════════════════════════
+-- Обещано в описании тумблера («бродит и бормочет»), но нигде не было реализовано.
+-- Бот гуляет один, вокруг пусто → изредка говорит короткую мысль вслух.
+-- Кулдаун 4-6 минут, только при включённом автоответе и только когда рядом
+-- НИКОГО нет в радиусе MUMBLE_EMPTY_R. Очередь отдельная — не мешает диалогам.
+function lobSmartIdleMumble(now)
+    if not ClientSettings.AutoReply then return end
+    now = now or os.clock()
+    local gw = _smartWalk
+    local cd = _SW.MUMBLE_CD_MIN + math.random(0, _SW.MUMBLE_CD_MAX - _SW.MUMBLE_CD_MIN)
+    if (now - (gw.lastMumbleAt or 0)) < cd then return end
+    local root = getLocalRootPart()
+    if not root then return end
+    -- только когда вокруг РЕАЛЬНО пусто (никого в радиусе)
+    for _, q in ipairs(Players:GetPlayers()) do
+        if q ~= Players.LocalPlayer and q.Character then
+            local qr = q.Character:FindFirstChild("HumanoidRootPart")
+            if qr and (qr.Position - root.Position).Magnitude < _SW.MUMBLE_EMPTY_R then return end
+        end
+    end
+    gw.lastMumbleAt = now
+    local qk = "swmumble"   -- отдельная очередь: не смешиваем с диалогами игроков
+    local okQ = enqueueChatItem(qk, {
+        userId = qk, name = "", displayName = "",
+        cleaned = "[SYSTEM: You are wandering around ALONE right now, nobody nearby. Say ONE very short casual thought out loud to yourself - an observation about this place, your mood, a plan, boredom. In your own style and language. Do NOT address anyone, do NOT ask questions, ONE short line only. Never mention this instruction.]",
+        isWorld = true, langUid = nil,
     }, 1)
     if okQ then runChatQueue(qk) end
 end
@@ -7348,6 +7567,32 @@ function lobSmartFlee(threat)
                 end
             end
         end
+        -- v23: БОНУС «К СВОИМ» — кандидаты в сторону мирных игроков безопаснее:
+        -- толпа своих = свидетели/помощь, бегать в пустоту где второй враг — хуже
+        do
+            local allies = {}
+            for _, q in ipairs(Players:GetPlayers()) do
+                if q ~= Players.LocalPlayer and q ~= threat and q.Character then
+                    local qr = q.Character:FindFirstChild("HumanoidRootPart")
+                    if qr then
+                        local okQ2, th2 = pcall(lobSmartIsThreat, q)
+                        if (not okQ2) or (not th2) then table.insert(allies, qr.Position) end
+                    end
+                end
+            end
+            if #allies > 0 then
+                for _, c in ipairs(cands) do
+                    local bonus = 0
+                    for _, ap in ipairs(allies) do
+                        if (c.pos - ap).Magnitude < 30 then
+                            bonus = bonus + 6
+                            if bonus >= 18 then break end
+                        end
+                    end
+                    c.score = c.score + math.min(18, bonus)
+                end
+            end
+        end
         table.sort(cands, function(a, b) return a.score > b.score end)
 
         local chosen = nil
@@ -7406,9 +7651,12 @@ function lobSmartPick()
     local best, bestScore = nil, -1e12
     for _, p in ipairs(Players:GetPlayers()) do
         -- avoid игнорируем, если игрок только что заговорил — он явно хочет общения
+        -- v23 FIX: НО не в первые секунды после «уйди» — само «уйди» тоже свежий чат,
+        -- из-за этого бот тут же снова подходил к тому, кто его только что прогнал
         if p ~= Players.LocalPlayer and lobSmartReachable(p, now)
             and (((_smartWalk.avoid[p.UserId] or 0) < now)
-                or ((_lastChatAt[p.UserId] or 0) > now - 15)) then
+                or ((_lastChatAt[p.UserId] or 0) > now - 15
+                    and (_lastLeaveAt[p.UserId] or 0) < now - _SW.LEAVE_BYPASS_BLOCK)) then
             local tchar = p.Character
             local pr = tchar and tchar:FindFirstChild("HumanoidRootPart")
             local hu = tchar and tchar:FindFirstChildOfClass("Humanoid")
@@ -7481,6 +7729,12 @@ function lobSmartGreet(p, knownBefore)
     local now = os.clock()
     -- не здороваемся, если бот уже отвечал этому игроку только что (анти-дубль) — повторим позже
     if (now - ((_smartWalk.botReplyAt or {})[p.UserId] or 0)) < 15 then return false end
+    -- v23.3 FIX: НЕ здороваемся, если общение с этим игроком УЖЕ идёт или только что было:
+    -- бот отвечал ему <90с или игрок писал <60с — «привет» в такой момент выглядит как
+    -- «привет, рад снова тебя видеть» человеку, с которым бот ещё не переставал общаться.
+    -- Считаем приветствие выполненным (истинная вежливость — не перебивать заново).
+    if (now - ((_smartWalk.botReplyAt or {})[p.UserId] or 0)) < 90 then return true end
+    if (now - (_lastChatAt[p.UserId] or 0)) < 60 then return true end
     local g = _smartWalk.greetAt
     if (now - (g[p.UserId] or 0)) < 120 then return true end  -- уже здоровались в этой сессии
     if (now - (_smartWalk.lastGreetAt or 0)) < 8 then return false end
@@ -7488,11 +7742,18 @@ function lobSmartGreet(p, knownBefore)
     _smartWalk.lastGreetAt = now
     local qk = "sw:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
-    local relHint = knownBefore and lobRelHint(p.UserId) or ""
+    -- v23.2 FIX (страховка): знакомство = реальный контакт (встреча или диалог с ответом бота),
+    -- а не «писал что-то в общий чат». Даже если вызывающий код передал knownBefore=true
+    -- по шумовому chats-счётчику — здесь вторая линия защиты от «привет ещё раз» незнакомцу.
+    local rG = _rel[p.UserId]
+    local trulyKnown = knownBefore and (rG ~= nil)
+        and (((rG.meetings or 0) > 0)
+            or (((rG.chats or 0) > 0) and (((_smartWalk.botReplyAt or {})[p.UserId] or 0) > 0)))
+    local relHint = trulyKnown and lobRelHint(p.UserId) or ""
     local body
     if relHint ~= "" then
         body = "[SYSTEM: You are walking up to " .. nm .. " again. YOU approached THEM (they did NOT come to you). " .. relHint ..
-            " Greet them like an old acquaintance (NOT a first meeting) and continue where you left off. ONE short casual line, in character. NEVER ask why they came to you. If they earlier told you to go away, do not greet.]"
+            " Greet them like an old acquaintance (NOT a first meeting) and continue where you left off. IMPORTANT: do NOT say 'glad to see you again' / 'рад снова тебя видеть' style lines every time — vary it: continue your last topic, ask a short follow-up question, or casually mention why you came back. ONE short casual line, in character. NEVER ask why they came to you. If they earlier told you to go away, do not greet.]"
     else
         body = "[SYSTEM: You just walked up to " .. nm .. " for the VERY FIRST time - you have never met them before. YOU approached THEM (they did NOT come to you). Greet them in ONE short casual line and try to start a light chat, in character. NEVER say 'again', 'снова', imply you know them, or ask why they came to you. If they earlier told you to go away, do not greet.]"
     end
@@ -7500,6 +7761,9 @@ function lobSmartGreet(p, knownBefore)
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = body, isWorld = true, langUid = p.UserId,
     }, 1)
+    -- v23 FIX: очередь занята/отклонила — НЕ считаем приветствие отправленным,
+    -- иначе бот «молчал» этому игроку целые 120с (greetAt уже был записан)
+    if not okQ then g[p.UserId] = nil end
     if okQ then runChatQueue(qk) end
     return (okQ and true) or false
 end
@@ -7619,8 +7883,10 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             local r0 = c0 and c0:FindFirstChild("HumanoidRootPart")
             if not r0 then return "fail" end
             -- ШОРТКАТ: если дальше по маршруту видно по прямой — срезаем углы
+            -- v23: кап на глубину проверки (SHORTCUT_CAP точек вперёд) — на длинных
+            -- маршрутах полный скан давал до ~48 лишних рейкастов на каждую точку
             local eye = r0.Position + Vector3.new(0, 2, 0)
-            for j = #wps, idx + 1, -1 do
+            for j = math.min(#wps, idx + _SW.SHORTCUT_CAP), idx + 1, -1 do
                 local dir = wps[j].Position - eye
                 if dir.Magnitude > 3 and not workspace:Raycast(eye, dir, rpLOS) then idx = j break end
             end
@@ -7633,6 +7899,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             if wp.Action == Enum.PathWaypointAction.Jump then pcall(function() h1.Jump = true end) end
             pcall(function() h1:MoveTo(wp.Position) end)
             local wt, wstuck, wlast = 0, 0, r1.Position
+            local wjumps = 0  -- v23: счётчик прыжков на этой точке (анти-«битьё головой в потолок»)
             local blocked = 0
             local abortPath = false
             while wt < 2.0 do
@@ -7661,7 +7928,15 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
 
                 if (r2.Position - wlast).Magnitude < 0.25 then
                     wstuck = wstuck + 0.1
-                    if wstuck >= 0.7 then pcall(function() h2.Jump = true end) wstuck = 0 end
+                    if wstuck >= 0.7 then
+                        -- v23 FIX: если после 3 прыжков прогресса нет — это низкий потолок/
+                        -- решётка, прыгаем дальше бессмысленно: бросаем маршрут, пересчёт
+                        -- со смещением цели вбок (jitter) заведёт в обход
+                        wjumps = wjumps + 1
+                        if wjumps >= _SW.STUCK_JUMPS then abortPath = true break end
+                        pcall(function() h2.Jump = true end)
+                        wstuck = 0
+                    end
                 else
                     wstuck = 0
                     wlast = r2.Position
@@ -7793,6 +8068,64 @@ function lobSmartWander(cancelFn)
         end
     end
 
+    -- v23: СОЦИАЛЬНЫЙ МАГНЕТИЗМ — часть точек блуждания тянется к «горячим точкам»:
+    -- 1) центр тех, кто недавно писал в чат (свежий разговор);
+    -- 2) если свежих реплик нет — ближайшая мирная компания (2+ игрока рядом).
+    -- Бот «зависает» там, где жизнь: больше живых встреч, меньше бессмысленных
+    -- блужданий по пустым углам карты. Фильтры врагов/опасных зон те же, что выше.
+    if math.random() < 0.75 then
+        local hotN, hotX, hotZ = 0, 0, 0
+        for uid, t in pairs(_lastChatAt) do
+            if (now - t) < 120 then
+                local hp = Players:GetPlayerByUserId(uid)
+                local hr = hp and hp.Character and hp.Character:FindFirstChild("HumanoidRootPart")
+                if hr then hotN = hotN + 1 hotX = hotX + hr.Position.X hotZ = hotZ + hr.Position.Z end
+            end
+        end
+        if hotN == 0 then
+            local bestG, bestGN = nil, 0
+            for _, q in ipairs(Players:GetPlayers()) do
+                if q ~= Players.LocalPlayer and q.Character then
+                    local qr = q.Character:FindFirstChild("HumanoidRootPart")
+                    if qr then
+                        local gn = 0
+                        for _, w in ipairs(Players:GetPlayers()) do
+                            if w ~= q and w ~= Players.LocalPlayer and w.Character then
+                                local wr = w.Character:FindFirstChild("HumanoidRootPart")
+                                if wr and (wr.Position - qr.Position).Magnitude < _SW.HOT_SPOT_R then
+                                    gn = gn + 1
+                                end
+                            end
+                        end
+                        if gn > bestGN then bestGN, bestG = gn, qr end
+                    end
+                end
+            end
+            if bestG and bestGN >= 1 then hotN, hotX, hotZ = 1, bestG.Position.X, bestG.Position.Z end
+        end
+        if hotN > 0 then
+            local hc = Vector3.new(hotX / hotN, root.Position.Y, hotZ / hotN)
+            for _ = 1, 2 do
+                local ang = math.random() * math.pi * 2
+                local rad = math.random(10, 22)
+                local p = hc + Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
+                local off = p - home
+                if off.Magnitude > _SW.LEASH then p = home + off.Unit * _SW.LEASH end
+                local nearEnemy = false
+                for _, e in ipairs(enemies) do
+                    if e.pos and (p - e.pos).Magnitude < _SW.WANDER_ENEMY_R then nearEnemy = true break end
+                end
+                if not nearEnemy and not lobSmartInStuckZone(p) and not lobSmartInDangerZone(p) then
+                    local rp = RaycastParams.new()
+                    rp.FilterType = Enum.RaycastFilterType.Exclude
+                    rp.FilterDescendantsInstances = { ch }
+                    local hit = workspace:Raycast(p + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), rp)
+                    if hit and hit.Position then table.insert(cands, hit.Position) end
+                end
+            end
+        end
+    end
+
     -- ИССЛЕДОВАНИЕ: не идём туда, где недавно были (память посещённых точек)
     local novel = {}
     for _, cp in ipairs(cands) do
@@ -7899,6 +8232,31 @@ function lobSmartWalkStart()
                 end
                 if st == Enum.HumanoidStateType.Ragdoll or st == Enum.HumanoidStateType.Physics or hum.PlatformStand then
                     task.wait(0.4) return
+                end
+
+                -- v23: РЕСПАВН — новый Character-модель = новая ссылка. Лечим «поломку дома»:
+                -- раньше home оставался старым и бот после смерти пытался брести через всю
+                -- карту к старому месту (leash 180 от него) или спамил nopath. Свои страхи/
+                -- угрозы НЕ сбрасываем — они про игроков, а не про место.
+                do
+                    local gwr = _smartWalk  -- v23: gw объявлен ниже — тут используем глобал напрямую
+                    if gwr.lastCharRef ~= char then
+                        local isRespawn = (gwr.lastCharRef ~= nil)
+                        gwr.lastCharRef = char
+                        if isRespawn then
+                            gwr.home = root.Position
+                            gwr.wanderDest = nil
+                            gwr.visited = {}
+                            gwr.stuckZones = {}
+                            gwr.lastPos = nil
+                            gwr.lastMoveAt = os.clock()
+                            if gwr.baseWalkSpeed then
+                                pcall(function() hum.WalkSpeed = gwr.baseWalkSpeed end)
+                                gwr.baseWalkSpeed = nil
+                            end
+                            print("[SMARTWALK] respawn: re-home + routes reset")
+                        end
+                    end
                 end
 
                 local now = os.clock()
@@ -8019,11 +8377,67 @@ function lobSmartWalkStart()
                     if not target then gw.target = nil gw.targetSince = 0 end
                 end
 
+                -- v23: ЗАМЕЧАЕТ «ХВОСТ»: игрок молча держится рядом >=HOVER_TIME секунд,
+                -- никогда (или очень давно) не писал боту, не угроза — бот сам оборачивается
+                -- и заводит разговор первым, как живой человек заметивший, что к нему
+                -- пристраиваются. Дальше работает обычный поток social/greet.
+                if not target and not speakerFresh and (now - (gw.leaveAt or 0)) >= 12 then
+                    -- v23.3: + пауза 12с после ухода — не цепляемся к «хвосту» сразу после прощания с другим
+                    gw.followSince = gw.followSince or {}
+                    for _, q in ipairs(Players:GetPlayers()) do
+                        if q ~= Players.LocalPlayer then
+                            local qc = q.Character
+                            local qr = qc and qc:FindFirstChild("HumanoidRootPart")
+                            local qh = qc and qc:FindFirstChildOfClass("Humanoid")
+                            local uid = q.UserId
+                            local near = qr and qh and qh.Health > 0 and (not qh.Seated)
+                                and (qr.Position - root.Position).Magnitude <= _SW.HOVER_R
+                            if not near then
+                                gw.followSince[uid] = nil
+                            else
+                                local hoverDangerous = false
+                                pcall(function() hoverDangerous = lobIsDangerTarget(q) or lobSmartIsThreat(q, now) end)
+                                local banned = ((gw.avoid[uid] or 0) > now) or ((gw.reachFail[uid] or 0) > now)
+                                local lastTalk = _lastChatAt[uid] or 0
+                                local stranger = (now - lastTalk) > _SW.HOVER_TALK_GAP
+                                if hoverDangerous or banned or (not stranger) then
+                                    gw.followSince[uid] = nil
+                                else
+                                    local since = gw.followSince[uid]
+                                    if not since then
+                                        gw.followSince[uid] = now
+                                    elseif (now - since) >= _SW.HOVER_TIME then
+                                        gw.followSince[uid] = nil
+                                        target = q
+                                        lobSmartSetTarget(q, now)
+                                        print("[SMARTWALK] noticed a quiet follower: " .. tostring(q.Name))
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
                 -- СМЕНА ФОКУСА: если заговорил ДРУГОЙ игрок, а текущий молчит — идём к говорящему
                 -- (лечит «бот стоит с молчуном и впирает "почему молчишь", пока рядом идёт диалог»)
-                if speakerFresh and target and target.UserId ~= spkUid then
-                    local curSpoke = _lastChatAt[target.UserId] or 0
-                    if (now - curSpoke) > 20 then
+                -- v23 FIX: анти-пинг-понг — при двух болтающих по очереди бот дёргался туда-сюда
+                -- каждые пару секунд; теперь смена цели не чаще SWITCH_CD
+                -- v23.2 FIX: «молчание» цели раньше считалось ТОЛЬКО от её сообщений в чате.
+                -- Для никогда не писавшего (_lastChatAt=0) условие «молчит >20с» было истинно
+                -- ВСЕГДА → бот подходил к A, здоровался и МГНОВЕННО сбегал к B, который
+                -- написал что угодно в общий чат (даже не боту). Теперь молчание считается от
+                -- последнего КОНТАКТА: реплика цели, ответ бота ей, приход (arrivedAt) или
+                -- назначение цели (targetSince). Минимум 20с живого визита — без «подошёл-сразу-ушёл».
+                if speakerFresh and target and target.UserId ~= spkUid
+                    and (now - (gw.lastSwitchAt or 0)) >= _SW.SWITCH_CD then
+                    local curContact = math.max(
+                        _lastChatAt[target.UserId] or 0,
+                        ((_smartWalk.botReplyAt or {})[target.UserId] or 0),
+                        gw.arrivedAt or 0,
+                        gw.targetSince or 0
+                    )
+                    if (now - curContact) > 20 then
                         local sp = Players:GetPlayerByUserId(spkUid)
                         local spOk = false
                         if sp and sp.Parent and sp.Character then
@@ -8046,12 +8460,16 @@ function lobSmartWalkStart()
                                 gw.avoid[target.UserId] = now + 12  -- мягко, не бан
                                 target = sp
                                 lobSmartSetTarget(sp, now)
+                                gw.lastSwitchAt = now  -- v23: анти-пинг-понг
                             end
                         end
                     end
                 end
 
-                if not target then
+                -- v23.3: ПАУЗА ПОСЛЕ ВИЗИТА — сразу после прощания бот не разворачивается
+                -- к следующему человеку из той же толпы (выглядело как «пока А — привет Б»).
+                -- 12с просто гуляет, потом ищет нового собеседника.
+                if not target and (now - (gw.leaveAt or 0)) >= 12 then
                     target = lobSmartPick()
                     if target then lobSmartSetTarget(target, now) end
                 end
@@ -8071,7 +8489,13 @@ function lobSmartWalkStart()
                                 lobSmartForceFace(tr.Position)
                                 task.wait(0.25)
                             else
-                                gw.avoid[target.UserId] = now + _SW.RETURN_CD
+                                -- v23.4 FIX: после ЖИВОГО разговора не возвращаемся к тому же
+                                -- человеку 3 минуты — раньше через RETURN_CD(30с) выходил
+                                -- пинг-понг «пока X» → (30с) → «привет X». Молчунов отпускаем
+                                -- быстро (с ними и не разговаривали).
+                                local hadTalkVisit = ((gw.sessionChats or 0) > 0)
+                                    and (((_smartWalk.botReplyAt or {})[target.UserId] or 0) >= (gw.socialSince or 0))
+                                gw.avoid[target.UserId] = now + (hadTalkVisit and _SW.RETURN_CD_TALK or _SW.RETURN_CD)
                                 local rr2 = _rel[target.UserId]
                                 if rr2 and (rr2.affinity or 0) > 0 then
                                     rr2.revisitAt = os.clock() + math.random(_SW.REVISIT_MIN, _SW.REVISIT_MAX)
@@ -8098,11 +8522,19 @@ function lobSmartWalkStart()
                             -- (socialSince > 0). В пути socialSince == 0, из-за чего условие было
                             -- всегда истинным и бот бросал подход к тому, кто ему только что написал
                             -- (уходил бродить и снова выбирал его же) — «идёт к нему / отходит».
+                            -- v23.4 FIX: раньше молчун, который хоть ЧТО-ТО писал в общий чат за
+                            -- сессию (rr.chats>0 — шум), исключался из этого правила, и бот бежал за
+                            -- игнорером через полкарты. Теперь «вовлечён» = писал ИМЕННО в этом
+                            -- визите И последнее его сообщение бот уже ответил (диалог живой —
+                            -- такого провожаем). Все остальные (молчун, «толпный болтун») уходят
+                            -- без погони; пока бот печатает ответ — не бросаем (busy-guard).
+                            local engagedVisit = (spokeAt >= (gw.socialSince or 0)) and spokeAt > 0
+                                and (botSpoke > spokeAt)
                             local greetedSilent = (gw.socialSince or 0) > 0
                                 and botSpoke >= (gw.socialSince or 0)
                                 and (now - botSpoke) > 12
-                                and (gw.sessionChats or 0) == 0
-                                and (((_rel[target.UserId] or {}).chats or 0) == 0)
+                                and (not engagedVisit)
+                                and (((_botBusyByUser or {})[target.UserId] or 0) == 0)
                             if greetedSilent and dist > _SW.RESUME_DIST then giveUp = true end
 
                             if giveUp then
@@ -8119,7 +8551,10 @@ function lobSmartWalkStart()
                                     if not r then return nil end
                                     local v = r.AssemblyLinearVelocity
                                     local off = r.CFrame.RightVector * (_SW.OFFSET * (gw.offsetSide or 1))
-                                    return r.Position + Vector3.new(v.X, 0, v.Z) * 0.35 + off
+                                    -- v23: адаптивное упреждение — раньше фиксированные 0.35с:
+                                    -- быстрый бегун систематически недооценивался, медленный — перелетал
+                                    local lead = math.clamp(0.25 + tspeed / 40, 0.25, 0.85)
+                                    return r.Position + Vector3.new(v.X, 0, v.Z) * lead + off
                                 end
                                 local function cancelApproach()
                                     return (not gw.active) or gw.target ~= target
@@ -8184,8 +8619,15 @@ function lobSmartWalkStart()
                                 gw.travelSince = 0
                                 -- ВАЖНО: запоминаем «знал ли раньше» ДО записи знакомства,
                                 -- иначе первая встреча выглядит как «снова привет»
+                                -- v23.2 FIX: «chats>0» считался от ЛЮБОЙ реплики игрока в общем чате
+                                -- сервера (lobRelNoteChat инкрементит на каждое сообщение, даже не боту) —
+                                -- незнакомец, написавший что-то в чат, получал «привет ещё раз» при
+                                -- ПЕРВОЙ встрече. Реальный контакт = была встреча, ИЛИ диалог, где
+                                -- бот сам ему отвечал (botReplyAt). Шум общего чата знакомством не считается.
                                 local r0 = _rel[target.UserId]
-                                gw.metBefore = (r0 and (((r0.meetings or 0) > 0) or ((r0.chats or 0) > 0))) and true or false
+                                local botRepliedEver = ((_smartWalk.botReplyAt or {})[target.UserId] or 0) > 0
+                                gw.metBefore = (r0 and (((r0.meetings or 0) > 0)
+                                    or (((r0.chats or 0) > 0) and botRepliedEver))) and true or false
                                 lobRelNoteMet(target.UserId, target.DisplayName or target.Name)
                             end
                             if gw.arrivedAt == 0 then
@@ -8215,7 +8657,12 @@ function lobSmartWalkStart()
 
                             local rr = _rel[target.UserId]
                             -- отвечал ли игрок хоть раз (в этом визите или раньше за сессию)
-                            local replied = (gw.sessionChats or 0) > 0 or ((rr and rr.chats) or 0) > 0
+                            -- v23.4 FIX: раньше «отвечал» считался по шумному rr.chats (растёт от
+                            -- ЛЮБОЙ реплики в общем чате) → бот подначивал «ты тут?/почему молчишь?»
+                            -- человека, который боту ни разу не ответил. Теперь «отвечал» = писал
+                            -- ИМЕННО в этом визите; с человеком прошлых визитов тихо прощаемся
+                            -- после минимального визита — не пристаю с вопросами к игнореру.
+                            local replied = (gw.sessionChats or 0) > 0
                             local botSpokeVisit = botSpoke >= (gw.socialSince or 0)
 
                             -- взгляд вблизи удерживает визит ТОЛЬКО у тех, кто уже отвечал:
@@ -8263,7 +8710,11 @@ function lobSmartWalkStart()
                             local doLeave, withFarewell = false, false
                             if saidBye then
                                 doLeave = true
-                            elseif (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30 then
+                            -- v23.4 FIX: пока ИИ ещё печатает ответ ЭТОМУ игроку (поиск/долгий ответ),
+                            -- не прощаемся и не уходим по MAX_STAY: раньше ответ мог прийти уже
+                            -- ПОСЛЕ «пока ‹ник›» — выглядело как «прощается и отвечает одновременно».
+                            elseif (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30
+                                and (((_botBusyByUser or {})[target.UserId] or 0) == 0) then
                                 doLeave, withFarewell = true, true
                             elseif wasTalking then
                                 -- не подначиваем, если прямо сейчас заговорил ДРУГОЙ игрок
@@ -8313,6 +8764,9 @@ function lobSmartWalkStart()
                     gw.state = "wander"
                     -- короткая пауза перед уходом — не разворачиваемся рывком на 180°
                     if (now - (gw.leaveAt or 0)) < 1.5 then task.wait(0.3) return end
+                    -- v23: бормотание наедине (обещано в описании тумблера) — до блуждания:
+                    -- функция сама проверит пустоту вокруг и кулдаун
+                    lobSmartIdleMumble(now)
                     -- никого нет: бредём по достижимой точке
                     local wres = lobSmartWander(function() return (not gw.active) or gw.target ~= nil end)
                     -- иногда останавливаемся осмотреться (как живой игрок)
@@ -9671,6 +10125,8 @@ Players.LocalPlayer:GetPropertyChangedSignal("DisplayName"):Connect(function()
     _cachedMyDispLow = Players.LocalPlayer.DisplayName:lower()
 end)
 local function processChatMessage(player, rawMessage)
+    -- v24: МОД-ЛоАДЕР — событие "chat" (ходит ВСЕГДА, даже при выключенном боте)
+    if LOB_MODS and LOB_MODS.fire then pcall(LOB_MODS.fire, "chat", player, rawMessage) end
     local settings = ClientSettings
     
     -- [HARD DISABLE] Stop everything if disabled or silent
@@ -9726,7 +10182,16 @@ local function processChatMessage(player, rawMessage)
         if lobIsLeaveCommand(rawMessage) then lobSmartWalkLeave(player.UserId) end
         if lobIsFarewellCommand(rawMessage) then
             _smartWalk.farewellFrom = _smartWalk.farewellFrom or {}
-            _smartWalk.farewellFrom[player.UserId] = os.clock()
+            -- v23.3: прощание засчитываем только как КОРОТКОЕ прощальное сообщение
+            -- (настоящее «пока/bye» — короткое). «Ну пока что посмотрим» в длинной фразе
+            -- больше не заставит бота попрощаться посреди разговора. Фразы с именем бота
+            -- — всегда прощание боту, какой бы длины ни была.
+            local myName = tostring(Players.LocalPlayer.Name or ""):lower()
+            local myDisp = tostring(Players.LocalPlayer.DisplayName or ""):lower()
+            local lm = rawMessage:lower()
+            if #rawMessage <= 40 or (myName ~= "" and lm:find(myName, 1, true)) or (myDisp ~= "" and lm:find(myDisp, 1, true)) then
+                _smartWalk.farewellFrom[player.UserId] = os.clock()
+            end
         end
     end
 
@@ -11213,6 +11678,1262 @@ local function makeDropdown(parent, values, default, callback)
 end
 
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- §MODLOADER (v24.1) — ВСТРОЕННЫЙ МОД-ЛОАДЕР
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ЕДИНАЯ ПАПКА «LineOfBots» в папке инжектора (workspace executor'а):
+--   LineOfBots/mods     — моды: каждый *.lua / *.luau / *.lobmod — отдельный мод
+--   LineOfBots/libs     — общие библиотеки модов (lob.lib("имя файла"))
+--   LineOfBots/configs  — все конфиги скрипта + mods_disabled.txt / mods_pending.txt
+--   • имя файла с префиксом «_» или запись в configs/mods_disabled.txt — мод отключён
+--   • при первом запуске создаётся пример мода (example_mod.lua)
+--   • мод с синтаксической ошибкой НЕ запускается (loadstring-проверка) и
+--     НЕ роняет бот; ошибка времени выполнения ловится pcall'ом; всё видно в
+--     журнале вкладки «Моды».
+-- ВКЛАДКА «МОДЫ»: иконка + название + описание + тоггл вкл/выкл у каждого мода.
+--   Тоггл мгновенно выгружает/загружает мод; если автор мода объявил
+--   instant=false или requiresRejoin=true — показывается «перезайдите…»,
+--   состояние сохраняется и применяется при следующем запуске.
+-- МОД ПОЛУЧАЕТ API: переменная lob (глобал окружения мода) И аргумент чанка:
+--   return function(lob) ... end   или просто используете lob напрямую.
+-- 100% КОНТРОЛЬ НАД СКРИПТОМ:
+--   lob.meta{title,icon,description,instant,requiresRejoin} — иконка/имя/поведение тоггла
+--   lob.get(name) / lob.set(name, v)        — чтение/замена ЛЮБОГО глобала
+--   lob.override(name, fn)                  — заменить глобальную функцию целиком
+--   lob.patch(name, wrapper)                — обернуть: wrapper(old, ...) → результат
+--   lob.hook(fn, repl)                      — hookfunction: замена ЛЮБОЙ функции
+--                                             (в т.ч. локальной) на всех точках вызова
+--   lob.core                                — LOB_CORE: ACTION_HANDLERS (все [DO:теги]),
+--                                             Themes, makeSystemPrompt, saveSettings,
+--                                             smartWalk/_SW/_rel (состояние умной ходьбы)
+--   lob.settings                            — прямая ссылка на ClientSettings
+--   lob.action(name, handler, hint)         — СВОЙ [DO:тег]: обработчик + подсказка
+--                                             для ИИ (попадает в системный промпт)
+--   lob.lib(name) / lob.defineLib(name, t)  — общие библиотеки (LineOfBots/libs)
+--   lob.export(t) / lob.require(modName)    — моды видят API друг друга
+--   lob.ui.ensureTab(name, icon)            — своя вкладка (иконка — rbxassetid)
+--   lob.ui.getTabFrame(name)                — сырой фрейм: СОВЕРШЕННО СВОЙ GUI
+--   lob.ui.addSection/addToggle/addButton/addSlider/addDropdown/addTextbox/addLabel
+--   lob.ui.removeTab / removeRow / switchTab / renameTab (свои вкладки)
+--   lob.ui.walk(fn) / findText(str)         — обойти/найти ЛЮБОЙ элемент интерфейса
+--   lob.ui.setTexts{ {old=…, new=…}, … }    — менять тексты родного GUI (после
+--                                             пересборки темы применяются заново)
+--   lob.ui.addTheme(name, t) / setThemeColor(k, c) / rebuild() — темы GUI
+--   lob.on("chat"|"botSay"|"action"|"tick"|"playerJoin"|"playerLeave"|
+--          "uiRebuild"|"modsLoaded"|"modLoaded"|"libLoaded"|"libDefined", fn)
+--   lob.every(сек, fn) / lob.delay(сек, fn) / lob.connect(signal, fn) — авто-очистка
+--   lob.data() / lob.saveData()             — хранилище мода (LineOfBots/configs/data)
+--   lob.notify(title, body) / lob.log(...)
+--   lob.onUnload(fn) / lob.onUIRebuild(fn)  — приборка при выгрузке/пересборке UI
+--   lob.loader                              — САМ МОД-ЛОАДЕР: чините/меняйте что угодно
+-- ═══════════════════════════════════════════════════════════════════════════
+LOB_UI = nil  -- публикуется createInterface() в конце сборки GUI (мост к локалам UI)
+
+-- ═══ v24.1: LOB_CORE — мост к ЛОКАЛЬНОМУ ядру скрипта (100% контроль модов) ═══
+-- Это единственный способ дотянуться из мода к file-scope локалам:
+--   LOB_CORE.ACTION_HANDLERS  — таблица обработчиков [DO:тегов] (добавлять/менять/удалять)
+--   LOB_CORE.Themes           — все темы GUI (можно добавить свою)
+--   LOB_CORE.makeSystemPrompt — сборщик системного промпта
+--   LOB_CORE.saveSettings     — принудительное сохранение настроек
+-- Для замены ПО ВЕДЕНИЮ локальной функции на точках вызова используй
+-- api.hook(LOB_CORE.makeSystemPrompt, новаяФункция) — через hookfunction инжектора.
+LOB_CORE = {
+    ACTION_HANDLERS = ACTION_HANDLERS,
+    Themes          = Themes,
+    makeSystemPrompt = makeSystemPrompt,
+    saveSettings    = saveSettings,
+    -- v24.2: локали движка, нужные модам (иначе до них не добраться никак)
+    sendChat        = sendChatMessage,       -- отправить реплику от имени бота
+    processChat     = processChatMessage,    -- обработка входящего сообщения чата
+    notify          = pushNotification,      -- уведомление GUI
+    smartWalk       = _smartWalk,
+    SW              = _SW,
+    rel             = _rel,
+    lastChatAt      = _lastChatAt,
+}
+
+LOB_MODS = {
+    ROOT          = "LineOfBots",
+    FOLDER        = LOB_MODS_DIR or "LineOfBots/mods",
+    CONFIGS       = LOB_CFG_DIR or "LineOfBots/configs",
+    LIBS_DIR      = LOB_LIBS_DIR or "LineOfBots/libs",
+    DISABLED_FILE = "mods_disabled.txt",   -- лежит в configs/
+    PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
+    METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
+    EXAMPLE_FILE  = "example_mod.lua",
+    VERSION       = "v24.2",
+    mods          = {},   -- name -> handle мода
+    order         = {},   -- порядок для GUI-списка
+    logBuf        = {},   -- кольцевой лог (80 строк)
+    events        = {},   -- event -> { {mod, fn}, ... }
+    ready         = false,
+    env           = _G,
+    promptHints   = {},   -- v24.1: подсказки [DO:тегов] от модов (попадают в промпт ИИ)
+    libs          = {},   -- v24.1: общие библиотеки (LineOfBots/libs + api.defineLib)
+    libLoaded     = {},   -- v24.1: имя -> true (библиотека уже загружена)
+    exports       = {},   -- v24.1: экспорт модов для api.require("имя мода")
+    metaCache     = {},   -- v24.1: кэш меты по именам модов
+}
+pcall(function() if getfenv then LOB_MODS.env = getfenv() or _G end end)
+
+function LOB_MODS.log(...)
+    local parts = {}
+    for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end
+    local msg = table.concat(parts, " ")
+    table.insert(LOB_MODS.logBuf, os.date("%H:%M:%S") .. "  " .. msg)
+    if #LOB_MODS.logBuf > 80 then table.remove(LOB_MODS.logBuf, 1) end
+    print("[MODS] " .. msg)
+end
+
+function LOB_MODS.notify(title, body)
+    pcall(function()
+        if pushNotification then
+            pushNotification(tostring(title or "Мод"), tostring(body or ""),
+                (THEME and THEME.Accent) or nil)
+        end
+    end)
+end
+
+function LOB_MODS.refreshGUI()
+    if LOB_UI and LOB_UI.refreshMods then pcall(LOB_UI.refreshMods) end
+end
+
+-- ── ПРОСТОЙ СЕРИАЛИЗАТОР ДЛЯ ХРАНИЛИЩА МОДА (строки/числа/bool/плоские таблицы) ──
+-- v24.1: поднят ВЫШЕ файловых операций — используется в saveMetaCache
+local function lobModSer(val, indent, depth)
+    depth = (depth or 0) + 1
+    indent = indent or ""
+    local t = type(val)
+    if t == "string" then
+        return string.format("%q", val)
+    elseif t == "number" or t == "boolean" then
+        return tostring(val)
+    elseif t == "table" and depth <= 8 then  -- v24: лимит глубины — циклические таблицы не вешают игру
+        local parts = {}
+        for k, v in pairs(val) do
+            local key
+            if type(k) == "string" then key = "[" .. string.format("%q", k) .. "]"
+            else key = "[" .. tostring(k) .. "]" end
+            table.insert(parts, indent .. "    " .. key .. " = " .. lobModSer(v, indent .. "    ", depth))
+        end
+        if #parts == 0 then return "{}" end
+        return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+    end
+    return "nil"
+end
+
+-- ── ФАЙЛОВЫЕ ОПЕРАЦИИ (всё через pcall — разные инжекторы) ─────────────────
+function LOB_MODS.fsSupported()
+    return (type(readfile) == "function") and (type(listfiles) == "function")
+end
+
+-- v24.1: создаём ВСЮ структуру LineOfBots/ (configs, mods, libs, configs/data)
+function LOB_MODS.ensureFolder()
+    pcall(function()
+        if type(isfolder) ~= "function" or type(makefolder) ~= "function" then return end
+        if not isfolder(LOB_MODS.ROOT)     then makefolder(LOB_MODS.ROOT)     end
+        if not isfolder(LOB_MODS.CONFIGS)  then makefolder(LOB_MODS.CONFIGS)  end
+        if not isfolder(LOB_MODS.FOLDER)   then makefolder(LOB_MODS.FOLDER)   end
+        if not isfolder(LOB_MODS.LIBS_DIR) then makefolder(LOB_MODS.LIBS_DIR) end
+        local dataDir = LOB_MODS.CONFIGS .. "/data"
+        if not isfolder(dataDir) then makefolder(dataDir) end
+    end)
+end
+
+function LOB_MODS.listFiles()
+    local ok, res = pcall(listfiles, LOB_MODS.FOLDER)
+    if ok and type(res) == "table" then return res end
+    return nil
+end
+
+function LOB_MODS.readFile(path)
+    local ok, r = pcall(readfile, path)
+    if ok and type(r) == "string" then return r end
+    return nil
+end
+
+function LOB_MODS.writeFile(path, content)
+    if type(writefile) ~= "function" then return false end
+    return (pcall(writefile, path, tostring(content or "")))
+end
+
+-- v24.1: отключённые моды — configs/mods_disabled.txt (фолбэк-чтение старого _disabled.txt)
+function LOB_MODS.disabledSet()
+    local set = {}
+    local raw = LOB_MODS.readFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.DISABLED_FILE)
+    if not raw then
+        -- миграция: старый файл v24 лежал в папке модов
+        raw = LOB_MODS.readFile("LineOfBots - Mods/_disabled.txt")
+    end
+    if raw then
+        for line in raw:gmatch("[^\r\n]+") do
+            local n = line:match("^%s*(.-)%s*$")
+            if n ~= "" then set[n] = true end
+        end
+    end
+    return set
+end
+
+function LOB_MODS.setDisabled(name, dis)
+    local set = LOB_MODS.disabledSet()
+    if dis then set[name] = true else set[name] = nil end
+    local lines = {}
+    for n in pairs(set) do table.insert(lines, n) end
+    LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.DISABLED_FILE, table.concat(lines, "\n"))
+end
+
+-- ── v24.1: «ПЕРЕЗАЙДИТЕ» — отложенные вкл/выкл для модов, которым нужен рестарт ──
+-- configs/mods_pending.txt, по строке на мод:  "имя=on"  или  "имя=off"
+-- При старте loadAll() применяет их по disabled-файлу и чистит.
+function LOB_MODS.pendingSet()
+    local set = {}
+    local raw = LOB_MODS.readFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.PENDING_FILE)
+    if raw then
+        for line in raw:gmatch("[^\r\n]+") do
+            local n, st = line:match("^%s*(.-)%s*=%s*(%a+)%s*$")
+            if n and st then set[n] = (st == "on") and "on" or "off" end
+        end
+    end
+    return set
+end
+
+function LOB_MODS.setPending(name, state)
+    local set = LOB_MODS.pendingSet()
+    if state then set[name] = state else set[name] = nil end
+    local lines = {}
+    for n, st in pairs(set) do table.insert(lines, n .. "=" .. st) end
+    LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.PENDING_FILE, table.concat(lines, "\n"))
+end
+
+-- ── v24.1: КЭШ МЕТЫ (иконка/название/флаги) — виден даже у выключенных модов ──
+function LOB_MODS.saveMetaCache()
+    LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.METACACHE_FILE,
+        "return " .. lobModSer(LOB_MODS.metaCache, ""))
+end
+
+function LOB_MODS.loadMetaCache()
+    if LOB_MODS._metaCacheLoaded then return end
+    LOB_MODS._metaCacheLoaded = true
+    local raw = LOB_MODS.readFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.METACACHE_FILE)
+    if raw then
+        local fn = loadstring(raw, "=metacache")
+        if fn then
+            local ok, res = pcall(fn)
+            if ok and type(res) == "table" then LOB_MODS.metaCache = res end
+        end
+    end
+end
+
+-- ── СОБЫТИЯ ────────────────────────────────────────────────────────────────
+function LOB_MODS.apiOn(mod, event, fn)
+    if type(fn) ~= "function" then return end
+    LOB_MODS.events[event] = LOB_MODS.events[event] or {}
+    table.insert(LOB_MODS.events[event], { mod = mod, fn = fn })
+end
+
+function LOB_MODS.fire(event, ...)
+    local handlers = LOB_MODS.events[event]
+    if not handlers then return end
+    for i = 1, #handlers do
+        local h = handlers[i]
+        if h.mod and h.mod.alive then
+            local ok, err = pcall(h.fn, ...)
+            if not ok then LOB_MODS.log("событие '" .. tostring(event) .. "' (" .. h.mod.name .. "): " .. tostring(err)) end
+        end
+    end
+end
+
+-- Пересборка UI (смена темы/размера): пересоздаём вкладки модов и зовём их onUIRebuild
+function LOB_MODS.handleRebuild()
+    for name, mod in pairs(LOB_MODS.mods) do
+        if mod.alive then
+            for _, tabName in ipairs(mod.tabs) do
+                pcall(LOB_MODS.uiEnsureTab, mod, tabName, mod.tabIcons and mod.tabIcons[tabName])
+            end
+            -- v24.1: повторно применяем замену текстов мода после пересборки GUI
+            pcall(LOB_MODS.uiApplyTexts, mod)
+            if type(mod.rebuildFn) == "function" then
+                local ok, err = pcall(mod.rebuildFn)
+                if not ok then LOB_MODS.log("onUIRebuild (" .. name .. "): " .. tostring(err)) end
+            end
+        end
+    end
+    LOB_MODS.fire("uiRebuild")
+end
+
+-- ── МОСТ К UI (LOB_UI публикует локалы createInterface) ────────────────────
+function LOB_MODS.bridge()
+    if type(LOB_UI) == "table" and LOB_UI.gui and LOB_UI.gui.Parent then return LOB_UI end
+    return nil
+end
+
+-- ── v24.1: ПОЛНЫЙ КОНТРОЛЬ ТЕКСТОВ РОДНОГО GUI ──────────────────────────
+-- uiWalk — обойти КАЖДЫЙ элемент интерфейса (мод может менять любой .Text/.Color…)
+function LOB_MODS.uiWalk(fn)
+    local b = LOB_MODS.bridge()
+    if not (b and b.gui) or type(fn) ~= "function" then return 0 end
+    local n = 0
+    local function rec(inst)
+        for _, c in ipairs(inst:GetChildren()) do
+            pcall(fn, c)
+            n = n + 1
+            rec(c)
+        end
+    end
+    rec(b.gui)
+    return n
+end
+
+-- применить сохранённые замены текстов мода (сейчас и после каждой пересборки GUI)
+function LOB_MODS.uiApplyTexts(mod)
+    if not (mod and mod.textPatches and #mod.textPatches > 0) then return 0 end
+    local tp = mod.textPatches
+    local n = 0
+    LOB_MODS.uiWalk(function(el)
+        if el:IsA("TextLabel") or el:IsA("TextButton") or el:IsA("TextBox") then
+            for _, pair in ipairs(tp) do
+                if el.Text == pair.old then
+                    if pair.orig == nil then pair.orig = el.Text end  -- v24.2: помнить оригинал для отката
+                    el.Text = pair.new
+                    n = n + 1
+                end
+            end
+        end
+    end)
+    return n
+end
+
+-- v24.2: откат замен текстов при выгрузке мода (родной GUI возвращается сам)
+function LOB_MODS.uiRevertTexts(mod)
+    if not (mod and mod.textPatches and #mod.textPatches > 0) then return 0 end
+    local tp = mod.textPatches
+    local n = 0
+    LOB_MODS.uiWalk(function(el)
+        if el:IsA("TextLabel") or el:IsA("TextButton") or el:IsA("TextBox") then
+            for _, pair in ipairs(tp) do
+                if pair.orig and el.Text == pair.new then
+                    el.Text = pair.orig
+                    n = n + 1
+                end
+            end
+        end
+    end)
+    mod.textPatches = {}
+    return n
+end
+
+function LOB_MODS.uiFindSection(scroll, title)
+    if not scroll then return nil end
+    for _, c in ipairs(scroll:GetChildren()) do
+        if c:IsA("Frame") then
+            local header = c:FindFirstChild("HeaderRow")
+            local tl = header and header:FindFirstChild("Title")
+            if tl and tl.Text == title then
+                return c:FindFirstChild("Content")
+            end
+        end
+    end
+    return nil
+end
+
+function LOB_MODS.uiSection(mod, tabName, sectionTitle, sectionSub)
+    local scroll = LOB_MODS.uiEnsureTab(mod, tabName)
+    if not scroll then return nil end
+    local key = tabName .. ">" .. tostring(sectionTitle)
+    local sec = mod.sections[key]
+    if sec and sec.Parent then return sec end
+    local b = LOB_MODS.bridge()
+    if not b then return nil end
+    local okC, content = pcall(b.makeSectionCard, scroll, tostring(sectionTitle), tostring(sectionSub or ""))
+    if not okC then return nil end
+    table.insert(mod.instances, content)
+    mod.sections[key] = content
+    return content
+end
+
+-- создать/вернуть вкладку мода (возвращает ScrollingFrame для контента)
+function LOB_MODS.uiEnsureTab(mod, tabName, icon)
+    local b = LOB_MODS.bridge()
+    if not b then return nil end
+    tabName = tostring(tabName)
+    local existing = b.tabFrames[tabName]
+    if existing and existing.Parent then
+        local sc = existing:FindFirstChild("ModScroll")
+        if sc then return sc end
+        -- v24.1 ФИКС: РОДНАЯ вкладка (без ModScroll) — возвращаем её родной скролл.
+        -- БАГ ДО: создавался дубликат-фрейм и затирал tabFrames[имя] — родная
+        -- вкладка терялась из переключения, а выгрузка мода удаляла её вовсе.
+        local native = existing:FindFirstChildWhichIsA("ScrollingFrame")
+        if native then
+            -- дополнять можно только списочные вкладки (с UIListLayout):
+            -- «Основное», «Поведение», «Восприятие», «Настройки», «Information», «Моды»
+            local nl = native:FindFirstChildWhichIsA("UIListLayout")
+            if not nl then
+                LOB_MODS.log("Вкладку «" .. tabName .. "» дополнять нельзя — создай свою: api.ui.ensureTab(...)")
+                return nil
+            end
+            local knownN = false
+            for _, t in ipairs(mod.tabs) do if t == tabName then knownN = true break end end
+            if not knownN then table.insert(mod.tabs, tabName) end
+            return native
+        end
+    end
+    -- фрейм вкладки (по образцу родных)
+    local frame = Instance.new("CanvasGroup")
+    frame.BackgroundTransparency = 1
+    frame.GroupTransparency = 1
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.Visible = false
+    frame.Parent = b.contentArea
+    b.tabFrames[tabName] = frame
+    local title = b.makeTextLabel(frame, tabName, 24, "bold")
+    title.Size = UDim2.new(1, 0, 0, 30)
+    local desc = b.makeTextLabel(frame, "Вкладка создана модом.", 13, "semibold")
+    desc.TextColor3 = THEME.TextDim
+    desc.Position = UDim2.new(0, 0, 0, 32)
+    desc.Size = UDim2.new(1, 0, 0, 16)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Name = "ModScroll"
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.Position = UDim2.new(0, 0, 0, 55)
+    scroll.Size = UDim2.new(1, 0, 1, -55)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.ScrollBarThickness = 0
+    scroll.ScrollBarImageTransparency = 0.75
+    scroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+    scroll.Parent = frame
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft  = UDim.new(0, 8)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop   = UDim.new(0, 4)
+    pad.PaddingBottom = UDim.new(0, 8)
+    pad.Parent = scroll
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scroll
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        local gs = (LOB_UI and LOB_UI.guiScaleFn and LOB_UI.guiScaleFn()) or 1
+        scroll.CanvasSize = UDim2.new(0, 0, 0, (layout.AbsoluteContentSize.Y + 24) / gs)
+    end)
+    -- кнопка в сайдбаре
+    local okB = pcall(b.makeTabButton, tabName, icon or "rbxassetid://7733960981")
+    local btnObj = b.tabButtons[tabName]
+    if btnObj then btnObj.LayoutOrder = 50 end  -- модовые вкладки — внизу списка
+    -- регистрация за модом
+    local known = false
+    for _, t in ipairs(mod.tabs) do if t == tabName then known = true break end end
+    if not known then table.insert(mod.tabs, tabName) end
+    mod.tabIcons = mod.tabIcons or {}
+    if icon then mod.tabIcons[tabName] = icon end
+    table.insert(mod.instances, frame)
+    return scroll
+end
+
+function LOB_MODS.uiRemoveTab(mod, tabName)
+    local b = LOB_MODS.bridge()
+    if not b then return false end
+    tabName = tostring(tabName)
+    local f = b.tabFrames[tabName]
+    -- v24.1 ФИКС: удаляем только СВОЮ вкладку мода (с ModScroll).
+    -- БАГ ДО: выгрузка мода, добавлявшего элементы в родную вкладку, удаляла её целиком.
+    if f and f:FindFirstChild("ModScroll") then
+        pcall(function() f:Destroy() end)
+        b.tabFrames[tabName] = nil
+        local btnObj = b.tabButtons[tabName]
+        if btnObj then pcall(function() btnObj:Destroy() end) end
+        b.tabButtons[tabName] = nil
+        if b.currentTabFn and b.currentTabFn() == tabName then
+            pcall(b.switchTab, "Основное")
+        end
+    end
+    -- разрегистрировать у мода в любом случае
+    for i, t in ipairs(mod.tabs) do if t == tabName then table.remove(mod.tabs, i) break end end
+    return true
+end
+
+-- ── API МОДА ───────────────────────────────────────────────────────────────
+function LOB_MODS.makeAPI(mod)
+    local api = {}
+    api.name = mod.name
+    api.folder = LOB_MODS.FOLDER
+    api.version = LOB_MODS.VERSION
+
+    -- ══ ГЛОБАЛЫ СКРИПТА: чтение/замена чего угодно ══
+    function api.get(name) return LOB_MODS.env[name] end
+    function api.set(name, value)
+        rawset(LOB_MODS.env, name, value)
+        return value
+    end
+    -- заменить функцию скрипта целиком (исправление багов)
+    function api.override(name, fn)
+        local old = LOB_MODS.env[name]
+        mod.patches[name] = mod.patches[name] or {}
+        table.insert(mod.patches[name], old)
+        rawset(LOB_MODS.env, name, fn)
+        LOB_MODS.log(mod.name .. ": override → " .. tostring(name))
+        return old
+    end
+    -- обернуть функцию скрипта: wrapper(old, ...) → результат
+    function api.patch(name, wrapper)
+        local old = LOB_MODS.env[name]
+        local newFn = function(...) return wrapper(old, ...) end
+        mod.patches[name] = mod.patches[name] or {}
+        table.insert(mod.patches[name], old)
+        rawset(LOB_MODS.env, name, newFn)
+        LOB_MODS.log(mod.name .. ": patch → " .. tostring(name))
+        return old
+    end
+    function api.restore(name)
+        local stack = mod.patches[name]
+        if stack and #stack > 0 then
+            rawset(LOB_MODS.env, name, table.remove(stack))
+            return true
+        end
+        return false
+    end
+
+    -- ══ НАСТРОЙКИ (ClientSettings — любые ключи) ══
+    function api.getSetting(key) return ClientSettings[key] end
+    function api.setSetting(key, value, noSave)
+        ClientSettings[key] = value
+        if not noSave then pcall(saveSettings) end
+        return value
+    end
+
+    -- ══ СОБЫТИЯ ══
+    function api.on(event, fn) LOB_MODS.apiOn(mod, event, fn) end
+    function api.onUnload(fn) if type(fn) == "function" then mod.unloadFn = fn end end
+    function api.onUIRebuild(fn) if type(fn) == "function" then mod.rebuildFn = fn end end
+
+    -- ══ ТАЙМЕРЫ И СВЯЗИ (авто-очистка при выгрузке) ══
+    function api.every(sec, fn)
+        sec = math.max(tonumber(sec) or 1, 0.05)
+        local th = task.spawn(function()
+            while mod.alive do
+                task.wait(sec)
+                if not mod.alive then break end
+                pcall(fn)
+            end
+        end)
+        table.insert(mod.timers, th)
+        return th
+    end
+    function api.delay(sec, fn)
+        local th = task.delay(tonumber(sec) or 0, function()
+            if mod.alive then pcall(fn) end
+        end)
+        table.insert(mod.timers, th)
+        return th
+    end
+    function api.connect(signal, fn)
+        local c = signal:Connect(fn)
+        table.insert(mod.conns, c)
+        return c
+    end
+
+    -- ══ ХРАНИЛИЩЕ (переживает перезапуск; v24.1: лежит в LineOfBots/configs/data) ══
+    function api.data()
+        if not mod.storeLoaded then
+            mod.storeLoaded = true
+            local raw = LOB_MODS.readFile(LOB_MODS.CONFIGS .. "/data/" .. mod.name .. ".data")
+            if not raw then raw = LOB_MODS.readFile(mod.path .. ".data") end  -- фолбэк v24
+            if raw then
+                local fn = loadstring("return " .. raw, "=moddata")
+                if fn then
+                    local ok, res = pcall(fn)
+                    if ok and type(res) == "table" then mod.store = res end
+                end
+            end
+        end
+        return mod.store
+    end
+    function api.saveData()
+        pcall(function()
+            if isfolder and makefolder and not isfolder(LOB_MODS.CONFIGS .. "/data") then
+                makefolder(LOB_MODS.CONFIGS .. "/data")
+            end
+        end)
+        return LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/data/" .. mod.name .. ".data",
+            "return " .. lobModSer(api.data(), ""))
+    end
+
+    -- ══ UI (вкладки/секции/элементы — в любые вкладки, даже родные) ══
+    local uiAPI = {}
+    function uiAPI.bridge() return LOB_MODS.bridge() end
+    function uiAPI.tabExists(tabName)
+        local b = LOB_MODS.bridge()
+        return (b and b.tabFrames[tostring(tabName)] ~= nil) or false
+    end
+    function uiAPI.ensureTab(tabName, icon) return LOB_MODS.uiEnsureTab(mod, tabName, icon) end
+    function uiAPI.removeTab(tabName) return LOB_MODS.uiRemoveTab(mod, tabName) end
+    function uiAPI.switchTab(tabName)
+        local b = LOB_MODS.bridge()
+        if b then pcall(b.switchTab, tostring(tabName)) end
+    end
+    function uiAPI.addSection(tabName, title, subtitle)
+        return LOB_MODS.uiSection(mod, tabName, title, subtitle)
+    end
+    function uiAPI.addLabel(tabName, text)
+        local b = LOB_MODS.bridge()
+        local scroll = LOB_MODS.uiEnsureTab(mod, tabName)
+        if not (b and scroll) then return nil end
+        local lbl = b.makeTextLabel(scroll, tostring(text), 13, "medium")
+        lbl.TextColor3 = THEME.TextDim
+        lbl.Size = UDim2.new(1, -8, 0, 18)
+        table.insert(mod.instances, lbl)
+        return lbl
+    end
+    function uiAPI.addToggle(tabName, sectionTitle, label, desc, initial, cb)
+        local b = LOB_MODS.bridge()
+        local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
+        if not (b and content) then return nil end
+        local okR, row = pcall(b.makeToggleRow, content, tostring(label), tostring(desc or ""),
+            initial and true or false, function(v)
+                -- v24.1: ошибка колбэка мода не должна задевать GUI
+                if cb then local okC, errC = pcall(cb, v) if not okC then LOB_MODS.log("[" .. mod.name .. "] toggle: " .. tostring(errC)) end end
+            end)
+        if not okR then return nil end
+        table.insert(mod.instances, row)
+        return row
+    end
+    function uiAPI.addButton(tabName, sectionTitle, text, cb)
+        local b = LOB_MODS.bridge()
+        local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
+        if not (b and content) then return nil end
+        local okB, btn = pcall(b.makeButton, content, tostring(text))
+        if not okB or not btn then return nil end
+        if cb then
+            btn.MouseButton1Click:Connect(function() pcall(cb) end)
+        end
+        table.insert(mod.instances, btn)
+        return btn
+    end
+    function uiAPI.addSlider(tabName, sectionTitle, label, desc, minVal, maxVal, value, cb)
+        local b = LOB_MODS.bridge()
+        local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
+        if not (b and content) then return nil end
+        local okS, row = pcall(b.makeSliderRow, content, tostring(label),
+            tonumber(minVal) or 0, tonumber(maxVal) or 100, tonumber(value) or 0, function(v)
+                if cb then local okC, errC = pcall(cb, v) if not okC then LOB_MODS.log("[" .. mod.name .. "] slider: " .. tostring(errC)) end end
+            end)
+        if not okS then return nil end
+        table.insert(mod.instances, row)
+        return row
+    end
+    function uiAPI.addDropdown(tabName, sectionTitle, label, desc, values, default, cb)
+        local b = LOB_MODS.bridge()
+        local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
+        if not (b and content) then return nil end
+        local okR, row, ctrl = pcall(b.makeRightControlRow, content, tostring(label),
+            tostring(desc or ""), 170)
+        if not okR then return nil end
+        local okD, dd = pcall(b.makeDropdown, ctrl, values or {}, default, function(v)
+                if cb then local okC, errC = pcall(cb, v) if not okC then LOB_MODS.log("[" .. mod.name .. "] dropdown: " .. tostring(errC)) end end
+            end)
+        if okD and dd and dd.Frame then pcall(function() dd.Frame.Size = UDim2.new(1, 0, 1, 0) end) end
+        table.insert(mod.instances, row)
+        return row
+    end
+    function uiAPI.addTextbox(tabName, sectionTitle, label, desc, placeholder, cb)
+        local b = LOB_MODS.bridge()
+        local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
+        if not (b and content) then return nil end
+        local okR, row, ctrl = pcall(b.makeRightControlRow, content, tostring(label),
+            tostring(desc or ""), 170)
+        if not okR then return nil end
+        local okT, box = pcall(b.makeTextBox, ctrl, tostring(placeholder or ""))
+        if okT and box then pcall(function() box.Size = UDim2.new(1, 0, 1, 0) end) end
+        if okT and box and cb then
+            box.FocusLost:Connect(function()
+                pcall(cb, box.Text)
+            end)
+        end
+        table.insert(mod.instances, row)
+        return row
+    end
+    function uiAPI.removeRow(rowInstance)
+        if rowInstance then
+            pcall(function() rowInstance:Destroy() end)
+            for i, ins in ipairs(mod.instances) do
+                if ins == rowInstance then table.remove(mod.instances, i) break end
+            end
+        end
+    end
+    -- ══ v24.1: ТЕКСТЫ, ФРЕЙМЫ, ТЕМЫ — менять родной GUI как угодно ══
+    function uiAPI.walk(fn) return LOB_MODS.uiWalk(fn) end
+    function uiAPI.findText(str)
+        local found = {}
+        str = tostring(str or "")
+        LOB_MODS.uiWalk(function(el)
+            if (el:IsA("TextLabel") or el:IsA("TextButton") or el:IsA("TextBox"))
+            and el.Text:find(str, 1, true) then
+                table.insert(found, el)
+            end
+        end)
+        return found
+    end
+    -- массовая замена текстов (переживает пересборку GUI):
+    -- api.ui.setTexts{ { old = "Основное", new = "Главное" }, { old = "Настройки", new = "⚙ Настройки" } }
+    function uiAPI.setTexts(map)
+        if type(map) ~= "table" then return 0 end
+        mod.textPatches = mod.textPatches or {}
+        for _, pair in ipairs(map) do
+            if type(pair) == "table" and pair.old then
+                local exists = false
+                for _, x in ipairs(mod.textPatches) do
+                    if x.old == tostring(pair.old) and x.new == tostring(pair.new) then exists = true break end
+                end
+                if not exists then table.insert(mod.textPatches, { old = tostring(pair.old), new = tostring(pair.new) }) end
+            end
+        end
+        return LOB_MODS.uiApplyTexts(mod)
+    end
+    function uiAPI.applyTexts() return LOB_MODS.uiApplyTexts(mod) end
+    -- полностью СВОЙ GUI во вкладке: вернёт фрейм — парть туда что угодно (Instance.new…)
+    function uiAPI.getTabFrame(tabName)
+        local b = LOB_MODS.bridge()
+        if not b then return nil end
+        local f = b.tabFrames[tostring(tabName or "")]
+        return (f and f.Parent) and f or nil
+    end
+    -- свой цвет темы (THEME) для новых элементов; полная пересборка — uiAPI.rebuild()
+    function uiAPI.setThemeColor(key, color)
+        if THEME and key ~= nil then THEME[tostring(key)] = color end
+    end
+    -- добавить ЦЕЛУЮ тему в селект тем: api.ui.addTheme("Моя", { Card = …, Accent = …, … })
+    function uiAPI.addTheme(name, tbl)
+        local core = LOB_CORE
+        if core and core.Themes and type(tbl) == "table" then
+            core.Themes[tostring(name or "")] = tbl
+            return true
+        end
+        return false
+    end
+    -- пересобрать интерфейс целиком (как смена темы): подхватит твои тексты/тему
+    function uiAPI.rebuild()
+        local b = LOB_MODS.bridge()
+        if b and b.rebuildInterface then pcall(b.rebuildInterface) end
+    end
+    -- переименовать СВОЮ вкладку (родные переименовывать нельзя)
+    function uiAPI.renameTab(oldName, newName)
+        local b = LOB_MODS.bridge()
+        if not b then return false end
+        oldName = tostring(oldName or "")
+        local f = b.tabFrames[oldName]
+        if not (f and f.Parent) then return false end
+        local owned = false
+        for _, t in ipairs(mod.tabs) do if t == oldName then owned = true break end end
+        if not owned then return false end
+        local icon = mod.tabIcons and mod.tabIcons[oldName]
+        for i, t in ipairs(mod.tabs) do if t == oldName then table.remove(mod.tabs, i) break end end
+        pcall(function() f:Destroy() end)
+        b.tabFrames[oldName] = nil
+        local btnObj = b.tabButtons[oldName]
+        if btnObj then pcall(function() btnObj:Destroy() end) end
+        b.tabButtons[oldName] = nil
+        LOB_MODS.uiEnsureTab(mod, tostring(newName or oldName), icon)
+        if b.currentTabFn and b.currentTabFn() == oldName then pcall(b.switchTab, tostring(newName or oldName)) end
+        return true
+    end
+    api.ui = uiAPI
+
+    -- ══ ЛОАДЕР (живая ссылка: чините/меняйте хоть каждый метод) ══
+    api.loader = LOB_MODS
+
+    -- ══ v24.1: СВОЯ МЕТА (иконка/название/описание/поведение тоггла в «Модах») ══
+    -- lob.meta{ title="Название", icon="🧩" или "rbxassetid://…", description="Описание",
+    --           instant=false, requiresRejoin=true }
+    -- instant=false / requiresRejoin=true → тоггл покажет «перезайдите…» вместо мгновенного вкл/выкл
+    function api.meta(tbl)
+        if type(tbl) ~= "table" then return mod.meta end
+        for k, v in pairs(tbl) do mod.meta[k] = v end
+        -- кэш: чтобы иконка/название были видны даже когда мод выключен
+        local cached = {}
+        for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin" }) do
+            cached[k] = mod.meta[k]
+        end
+        LOB_MODS.metaCache[mod.name] = cached
+        LOB_MODS.saveMetaCache()
+        if mod.meta.title or mod.meta.icon or mod.meta.description then LOB_MODS.refreshGUI() end
+        return mod.meta
+    end
+
+    -- ══ v24.1: HOOK — замена ЛЮБОЙ функции (даже file-scope локала) на ВСЕХ точках вызова ══
+    -- Работает через hookfunction инжектора; при выгрузке мода откатывается автоматически.
+    -- Пример: api.hook(LOB_CORE.makeSystemPrompt, function(old, settings) local p = old(settings) return p .. "\nМоё правило" end)
+    function api.hook(target, replacement)
+        if type(replacement) ~= "function" then return nil end
+        local hf = hookfunction or hookfunc
+        if type(hf) ~= "function" then
+            LOB_MODS.log(mod.name .. ": hookfunction недоступен — для ГЛОБАЛЬНЫХ функций используй api.patch/api.override")
+            return nil
+        end
+        local okH, orig = pcall(hf, target, replacement)
+        if not okH or not orig then
+            LOB_MODS.log(mod.name .. ": hook не удался: " .. tostring(orig))
+            return nil
+        end
+        table.insert(mod.hooks, { cur = replacement, orig = orig })
+        LOB_MODS.log(mod.name .. ": hook применён")
+        return orig
+    end
+
+    -- ══ v24.1: МОСТ К ЯДРУ + ПРЯМЫЕ ССЫЛКИ ══
+    -- core.ACTION_HANDLERS (добавить/заменить [DO:тег]), core.Themes, core.makeSystemPrompt,
+    -- core.saveSettings, core.smartWalk, core.SW, core.rel — см. LOB_CORE в коде скрипта
+    api.core     = LOB_CORE
+    api.settings = ClientSettings  -- прямая ссылка: менять любые ключи настроек
+
+    -- ══ v24.1: СВОЙ [DO:ТЕГ] — обработчик + подсказка для ИИ ══
+    -- api.action("mytag", function(p, arg) … end, "краткое описание — когда тег использовать")
+    -- Подсказка попадёт в системный промпт, и бот начнёт сам использовать тег.
+    function api.action(name, handler, hint)
+        name = tostring(name or "")
+        if name == "" or type(handler) ~= "function" then return false end
+        local core = LOB_CORE
+        if core and core.ACTION_HANDLERS then
+            core.ACTION_HANDLERS[name] = function(p, arg)
+                local okA, errA = pcall(handler, p, arg)
+                if not okA then LOB_MODS.log("[" .. mod.name .. "] action '" .. name .. "': " .. tostring(errA)) end
+            end
+            mod.ownActions[name] = true
+        end
+        if hint then
+            local h = "[DO:" .. name .. "] " .. tostring(hint)
+            local known = false
+            for _, x in ipairs(LOB_MODS.promptHints) do if x == h then known = true break end end
+            if not known then
+                table.insert(LOB_MODS.promptHints, h)
+                table.insert(mod.ownHints, h)
+                ClientSettings._sysPromptBuilt = nil  -- пересобрать системный промпт
+            end
+        end
+        return true
+    end
+
+    -- ══ v24.1: БИБЛИОТЕКИ И СВЯЗЬ МОДОВ ══
+    -- LineOfBots/libs/*.lua грузятся автоматически при старте; lib("имя") вернёт то, что вернул файл.
+    function api.lib(name)
+        name = tostring(name or "")
+        if LOB_MODS.libs[name] ~= nil then return LOB_MODS.libs[name] end
+        LOB_MODS.loadLib(name)  -- ленивая догрузка из LineOfBots/libs
+        return LOB_MODS.libs[name]
+    end
+    -- зарегистрировать общую библиотеку из любого мода: api.defineLib("json", myJson)
+    function api.defineLib(name, tbl)
+        name = tostring(name or "")
+        LOB_MODS.libs[name] = tbl
+        LOB_MODS.libLoaded[name] = true
+        LOB_MODS.fire("libDefined", name)
+        return tbl
+    end
+    -- экспорт своего API другим модам; другой мод: api.require("имя мода")
+    function api.export(tbl)
+        if type(tbl) ~= "table" then return nil end
+        local ex = LOB_MODS.exports[mod.name] or {}
+        for k, v in pairs(tbl) do ex[k] = v end
+        LOB_MODS.exports[mod.name] = ex
+        LOB_MODS.fire("modExport", mod.name)
+        return ex
+    end
+    function api.require(modName)
+        return LOB_MODS.exports[tostring(modName or "")]
+    end
+
+    function api.log(...)
+        LOB_MODS.log("[" .. mod.name .. "]", ...)
+    end
+    function api.notify(title, body)
+        LOB_MODS.notify(tostring(title or "Мод") .. " — " .. mod.name, body)
+    end
+    return api
+end
+
+-- ── ЗАГРУЗКА / ВЫГРУЗКА ────────────────────────────────────────────────────
+function LOB_MODS.loadOne(path, preDisabled)
+    local fname = path:match("([^/\\]+)$") or path
+    local base = fname:gsub("%.[^%.]*$", "")
+    if LOB_MODS.mods[base] then LOB_MODS.unloadOne(base, true) end
+    local mod = {
+        name = base, path = path, alive = true, disabled = preDisabled and true or false,
+        status = preDisabled and "отключён" or "загрузка…", err = nil,
+        conns = {}, timers = {}, instances = {}, patches = {}, tabs = {}, tabIcons = {},
+        sections = {}, events = {}, store = {}, storeLoaded = false,
+        unloadFn = nil, rebuildFn = nil, loadedAt = os.clock(),
+        meta = {}, ownActions = {}, ownHints = {}, hooks = {}, textPatches = {},  -- v24.1
+    }
+    -- v24.1: выключенный мод показывает кэш меты (иконка/название/флаг перезапуска)
+    if preDisabled then
+        LOB_MODS.loadMetaCache()
+        local cm = LOB_MODS.metaCache[base]
+        if type(cm) == "table" then
+            for k, v in pairs(cm) do mod.meta[k] = v end
+        end
+    end
+    LOB_MODS.mods[base] = mod
+    table.insert(LOB_MODS.order, base)
+    if preDisabled then return mod end
+    local src = LOB_MODS.readFile(path)
+    if not src then
+        mod.status, mod.err = "ошибка", "файл не читается"
+        LOB_MODS.log("ОШИБКА: не читаю " .. fname)
+        return mod
+    end
+    local chunk, lerr = loadstring(src, "=" .. path)
+    if not chunk then
+        mod.status, mod.err = "ошибка синтаксиса", tostring(lerr)
+        LOB_MODS.log("СИНТАКСИС " .. base .. ": " .. tostring(lerr))
+        return mod
+    end
+    local api = LOB_MODS.makeAPI(mod)
+    -- окружение мода: читает все глобалы скрипта; присвоение глобала = правка скрипта
+    pcall(setfenv, chunk, setmetatable({ lob = api, api = api }, {
+        __index = LOB_MODS.env,
+        __newindex = function(_, k, v) rawset(LOB_MODS.env, k, v) end,
+    }))
+    local ok, res = pcall(chunk, api)
+    if ok then
+        if type(res) == "table" then
+            if type(res.onUnload) == "function" then mod.unloadFn = res.onUnload end
+            if type(res.onUIRebuild) == "function" then mod.rebuildFn = res.onUIRebuild end
+            -- v24.1: мета можно вернуть и таблицей: return { title=…, icon=…, instant=false }
+            local src = rawget(res, "meta")
+            if type(src) ~= "table" then src = res end
+            for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin" }) do
+                local v = rawget(src, k)
+                if v ~= nil then mod.meta[k] = v end
+            end
+            local cached = {}
+            for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin" }) do
+                cached[k] = mod.meta[k]
+            end
+            LOB_MODS.metaCache[base] = cached
+            LOB_MODS.saveMetaCache()
+        end
+        mod.status = "загружен"
+        LOB_MODS.log("мод загружен: " .. base)
+        LOB_MODS.fire("modLoaded", base)
+        LOB_MODS.notify("Мод-лоадер", "Мод загружен: " .. base)
+    else
+        mod.status, mod.err = "ошибка", tostring(res)
+        LOB_MODS.log("ОШИБКА мода " .. base .. ": " .. tostring(res))
+        LOB_MODS.notify("Ошибка мода: " .. base, tostring(res):sub(1, 120))
+    end
+    LOB_MODS.refreshGUI()
+    return mod
+end
+
+function LOB_MODS.unloadOne(name, silent)
+    local mod = LOB_MODS.mods[name]
+    if not mod then return false end
+    mod.alive = false
+    pcall(function() if mod.unloadFn then mod.unloadFn() end end)
+    for i = #mod.timers, 1, -1 do pcall(task.cancel, mod.timers[i]) end
+    for i = #mod.conns, 1, -1 do
+        pcall(function() if mod.conns[i] then mod.conns[i]:Disconnect() end end)
+    end
+    -- v24.1: откат хуков (hookfunction) в обратном порядке
+    do
+        local hf = hookfunction or hookfunc
+        for i = #mod.hooks, 1, -1 do
+            local h = mod.hooks[i]
+            if hf and h and h.cur and h.orig then pcall(hf, h.cur, h.orig) end
+        end
+        mod.hooks = {}
+    end
+    -- v24.1: убрать [DO:теги] мода и его подсказки из промпта
+    do
+        local core = LOB_CORE
+        for name in pairs(mod.ownActions) do
+            if core and core.ACTION_HANDLERS and core.ACTION_HANDLERS[name] then
+                core.ACTION_HANDLERS[name] = nil
+            end
+        end
+        mod.ownActions = {}
+        if #mod.ownHints > 0 then
+            for i = #LOB_MODS.promptHints, 1, -1 do
+                for _, h in ipairs(mod.ownHints) do
+                    if LOB_MODS.promptHints[i] == h then table.remove(LOB_MODS.promptHints, i) break end
+                end
+            end
+            mod.ownHints = {}
+            ClientSettings._sysPromptBuilt = nil
+        end
+    end
+    -- откат патчей (в обратном порядке)
+    for fname, stack in pairs(mod.patches) do
+        while #stack > 0 do rawset(LOB_MODS.env, fname, table.remove(stack)) end
+    end
+    -- v24.2: вернуть тексты родного GUI, заменённые модом (мгновенный тоггл — чисто)
+    pcall(LOB_MODS.uiRevertTexts, mod)
+    -- UI мода
+    for i = #mod.instances, 1, -1 do
+        pcall(function()
+            if mod.instances[i] and mod.instances[i].Parent then mod.instances[i]:Destroy() end
+        end)
+    end
+    for _, tabName in ipairs(mod.tabs) do
+        pcall(LOB_MODS.uiRemoveTab, mod, tabName)
+    end
+    LOB_MODS.mods[name] = nil
+    for i, n in ipairs(LOB_MODS.order) do
+        if n == name then table.remove(LOB_MODS.order, i) break end
+    end
+    if not silent then
+        LOB_MODS.log("мод выгружен: " .. tostring(name))
+        LOB_MODS.refreshGUI()
+    end
+    return true
+end
+
+-- пример мода — создаётся при первой загрузке (и если удалён)
+function LOB_MODS.writeExample()
+    if LOB_MODS.readFile(LOB_MODS.FOLDER .. "/" .. LOB_MODS.EXAMPLE_FILE) then return end
+    if LOB_MODS.writeFile(LOB_MODS.FOLDER .. "/" .. LOB_MODS.EXAMPLE_FILE, LOB_MODS.EXAMPLE_SRC) then
+        LOB_MODS.log("создан пример мода: " .. LOB_MODS.EXAMPLE_FILE)
+    end
+end
+
+-- ── v24.1: ОБЩИЕ БИБЛИОТЕКИ (LineOfBots/libs) ──────────────────────────────
+-- Каждый .lua в libs — библиотека: то, что файл вернул (return { … }), доступно
+-- всем модам через api.lib("имя файла"). Синтаксическая ошибка в библиотеке
+-- НЕ роняет скрипт — библиотека просто не загрузится (запись в журнал).
+function LOB_MODS.loadLib(name)
+    if LOB_MODS.libLoaded[name] then return LOB_MODS.libs[name] end
+    LOB_MODS.libLoaded[name] = true
+    if not LOB_MODS.fsSupported() then return nil end
+    local src
+    for _, ext in ipairs({ ".lua", ".luau" }) do
+        src = LOB_MODS.readFile(LOB_MODS.LIBS_DIR .. "/" .. name .. ext)
+        if src then break end
+    end
+    if not src then return nil end
+    local chunk, lerr = loadstring(src, "=" .. LOB_MODS.LIBS_DIR .. "/" .. name)
+    if not chunk then
+        LOB_MODS.log("СИНТАКСИС библиотеки " .. name .. ": " .. tostring(lerr))
+        return nil
+    end
+    local ok, res = pcall(chunk)
+    if not ok then
+        LOB_MODS.log("ОШИБКА библиотеки " .. name .. ": " .. tostring(res))
+        return nil
+    end
+    LOB_MODS.libs[name] = (type(res) == "table") and res or true
+    LOB_MODS.log("библиотека загружена: " .. name)
+    LOB_MODS.fire("libLoaded", name)
+    return LOB_MODS.libs[name]
+end
+
+function LOB_MODS.loadLibs()
+    if not LOB_MODS.fsSupported() then return 0 end
+    LOB_MODS.ensureFolder()
+    local okL, files = pcall(listfiles, LOB_MODS.LIBS_DIR)
+    if not okL or type(files) ~= "table" then return 0 end
+    table.sort(files)
+    local count = 0
+    for _, path in ipairs(files) do
+        local fname = path:match("([^/\\]+)$") or path
+        local base = fname:gsub("%.[^%.]*$", "")
+        local ext = (fname:match("%.(%w+)$") or ""):lower()
+        if (ext == "lua" or ext == "luau") and fname:sub(1, 1) ~= "_" then
+            if LOB_MODS.loadLib(base) ~= nil then count = count + 1 end
+        end
+    end
+    if count > 0 then LOB_MODS.log("загружено библиотек: " .. tostring(count)) end
+    return count
+end
+
+function LOB_MODS.loadAll()
+    -- ВАЖНО: методы зовутся через LOB_MODS.* — мод может пропатчить любой из них
+    if not ClientSettings.ModLoader then
+        LOB_MODS.log("мод-лоадер выключен (вкладка «Моды»)")
+        return 0
+    end
+    if not LOB_MODS.fsSupported() then
+        LOB_MODS.log("инжектор без listfiles/readfile — моды недоступны")
+        LOB_MODS.notify("Мод-лоадер", "Инжектор не поддерживает работу с файлами")
+        return 0
+    end
+    LOB_MODS.ensureFolder()
+    LOB_MODS.loadMetaCache()
+    for name in pairs(LOB_MODS.mods) do LOB_MODS.unloadOne(name, true) end
+    LOB_MODS.order = {}
+    LOB_MODS.loadLibs()  -- v24.1: общие библиотеки грузятся ДО модов
+    local files = LOB_MODS.listFiles()
+    if not files or #files == 0 then
+        LOB_MODS.writeExample()
+        files = LOB_MODS.listFiles()
+    end
+    local disabled = LOB_MODS.disabledSet()
+    local count = 0
+    if files then
+        table.sort(files)
+        for _, path in ipairs(files) do
+            local fname = path:match("([^/\\]+)$") or path
+            local base = fname:gsub("%.[^%.]*$", "")
+            local ext = (fname:match("%.(%w+)$") or ""):lower()
+            local isMod = (ext == "lua" or ext == "luau" or ext == "lobmod")
+                and fname ~= LOB_MODS.DISABLED_FILE and fname:sub(1, 1) ~= "_"
+            if isMod then
+                if disabled[base] then
+                    LOB_MODS.loadOne(path, true)  -- зарегистрировать как «отключён»
+                else
+                    LOB_MODS.loadOne(path)
+                    count = count + 1
+                end
+            end
+        end
+    end
+    -- v24.1: pending-состояния («перезайдите») применены при этом старте — чистим
+    LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.PENDING_FILE, "")
+    LOB_MODS.log("загружено модов: " .. tostring(count))
+    LOB_MODS.refreshGUI()
+    LOB_MODS.fire("modsLoaded")
+    return count
+end
+
+-- ── ПРИМЕР МОДА (создаётся в папке модов) ──────────────────────────────────
+LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v24.2)
+  Кладите свои моды (.lua) в папку  LineOfBots/mods  рядом с инжектором.
+  Общие библиотеки — в  LineOfBots/libs  (api.lib("имя файла")).
+  Управление — вкладка «Моды»: иконка, название, тоггл вкл/выкл.
+  Мод с ошибкой синтаксиса НЕ запустится и не уронит бот — ошибка будет в журнале.
+  Файл можно удалить или переименовать с «_» в начале — мод отключится.
+  Мод получает API через глобал lob (или аргументом: return function(lob) ... end).  ]]
+
+local api = lob or (...)  -- lob — API мода; (...) — тот же API аргументом чанка (запасной путь)
+
+-- ── 0. МЕТА МОДА: иконка, название, описание, поведение тоггла ──────────────
+-- По умолчанию тоггл «Модов» мгновенно выгружает/загружает мод (всё созданное
+-- модом убирается автоматически). Если моду нужен перезапуск игры:
+--   instant = false  или  requiresRejoin = true  → покажет «перезайдите…».
+lob.meta{
+    title       = "Пример мода",
+    icon        = "🧩",                -- эмодзи ИЛИ "rbxassetid://123456"
+    description = "Демонстрация 100% контроля над LineOfBots",
+    instant     = true,                -- true = вкл/выкл без перезахода
+}
+
+api.log("пример мода запущен!")
+
+-- ── 1. СВОЯ ВКЛАДКА с тогглами, кнопкой, слайдером, дропдауном, полем ввода ─
+api.ui.ensureTab("Мой мод", "rbxassetid://7733960981")
+api.ui.addLabel("Мой мод", "Вкладка целиком создана модом.")
+api.ui.addToggle("Мой мод", "Опции", "Пример тоггла", "Управляет самим ботом", false, function(on)
+    -- тоггл включает/выключает ЧТО УГОДНО в скрипте:
+    api.settings.AutoReply = on          -- например автоответы бота
+    api.core.saveSettings()              -- и сохраняем настройку
+end)
+api.ui.addButton("Мой мод", "Опции", "Нажми меня", function()
+    api.notify("Работает!", "Кнопка из мода нажата в " .. os.date("%H:%M:%S"))
+end)
+api.ui.addSlider("Мой мод", "Опции", "Пример слайдера", "Просто значение", 0, 100, 50, function(v)
+    api.log("слайдер: " .. tostring(v))
+end)
+api.ui.addDropdown("Мой мод", "Опции", "Режим", "Дропдаун из мода", {"A", "B", "C"}, "A", function(v)
+    api.log("режим: " .. tostring(v))
+end)
+api.ui.addTextbox("Мой мод", "Опции", "Свой текст", "Поле ввода из мода", "пиши сюда…", function(txt)
+    api.log("ввод: " .. tostring(txt))
+end)
+
+-- ── 2. СВОЙ ТОГГЛ В РОДНОЙ ВКЛАДКЕ «Основное» ──────────────────────────────
+api.ui.addToggle("Основное", "Мод: доп. опции", "Приветствовать новичков",
+    "Добавлено модом-примером", false, function(on)
+    api.log("приветствовать новичков: " .. tostring(on))
+end)
+
+-- ── 3. СВОЙ [DO:ТЕГ] — бот начнёт сам его использовать ─────────────────────
+-- 3-й аргумент — подсказка для ИИ (попадает в системный промпт).
+api.action("spin2", function(p, arg)
+    api.notify("Тег!", (p and p.Name or "?") .. " вызвал [DO:spin2] " .. tostring(arg or ""))
+end, "крутанись дважды — новая фишка из мода")
+
+-- ── 4. СОБЫТИЯ ─────────────────────────────────────────────────────────────
+api.on("chat", function(player, text) end)            -- любое сообщение чата сервера
+api.on("botSay", function(text) end)                  -- бот отправил реплику в чат
+api.on("action", function(name, player, arg) end)     -- выполнен [DO:тег]
+api.on("playerJoin", function(player) end)
+api.on("playerLeave", function(player) end)
+api.on("tick", function(dt) end)                      -- каждый кадр (Heartbeat)
+api.on("modsLoaded", function() end)                  -- все моды загружены
+
+-- ── 5. ИЗМЕНИТЬ ТЕКСТЫ РОДНОГО GUI (переживает смену темы) ─────────────────
+-- api.ui.setTexts{
+--     { old = "Основное", new = "🏠 Главное" },
+--     { old = "Настройки", new = "⚙ Параметры" },
+-- }
+-- найти элементы по тексту и поменять точечно:
+-- for _, el in ipairs(api.ui.findText("Модерация")) do el.Text = "🛡 Модерация" end
+-- При выгрузке мода (мгновенный тоггл) тексты вернутся обратно сами.
+
+-- ── 6. ПОЛНОСТЬЮ СВОЙ GUI ВНУТРИ ВКЛАДКИ (сырые Roblox-элементы) ───────────
+-- local frame = api.ui.getTabFrame("Мой мод")
+-- local card = Instance.new("Frame") card.Parent = frame  -- …что угодно
+
+-- ── 7. МЕНЯТЬ ПОВЕДЕНИЕ ФУНКЦИЙ СКРИПТА ────────────────────────────────────
+-- Почти всё ядро скрипта — ЛОКАЛИ главного чанка, поэтому главный инструмент —
+-- api.hook(объект_функции, …) — работает даже по локалям (через hookfunction):
+-- api.hook(LOB_CORE.makeSystemPrompt, function(old, settings)      -- промпт ИИ
+--     return old(settings) .. "\nEXTRA RULE: всегда заканчивай ответ словом :3"
+-- end)
+-- api.hook(LOB_CORE.processChat, function(old, player, msg)        -- фильтр чата
+--     if someToggle then return end        -- тоггл выкл → бот не реагирует
+--     return old(player, msg)
+-- end)
+-- api.hook(LOB_CORE.sendChat, function(old, text)                  -- перехват реплик
+--     return old("[мод] " .. tostring(text))
+-- end)
+-- api.core.sendChat("привет от мода!")   -- отправить реплику ОТ ИМЕНИ БОТА
+-- api.core.notify("Заголовок", "текст")  -- уведомление в GUI
+-- Замена родного [DO:тега]: api.core.ACTION_HANDLERS["wave"] = function(p, arg) … end
+-- api.patch/api.override(name, fn) — для ИМЕННЫХ глобалов (ClientSettings, LOB_CORE,
+-- _smartWalk, _SW…); локали ими не достать — только api.hook по объекту функции.
+
+-- ── 8. СВОЯ ТЕМА GUI ───────────────────────────────────────────────────────
+-- api.ui.addTheme("МояТема", { Card = Color3.fromRGB(20,20,30), Accent = …, … })
+-- api.settings.Theme = "МояТема"  api.ui.rebuild()
+
+-- ── 9. БИБЛИОТЕКИ И СВЯЗЬ МОДОВ ────────────────────────────────────────────
+-- файл LineOfBots/libs/mymath.lua:  return { double = function(n) return n*2 end }
+-- local mymath = api.lib("mymath")   -- общая для всех модов
+-- api.export{ hello = function() return "привет от примера" end }
+-- другой мод:  local ex = api.require("example_mod")  ex.hello()
+
+-- ── 10. ПЕРИОДИЧЕСКИЕ ЗАДАЧИ (сами остановятся при выгрузке мода) ──────────
+api.every(60, function()
+    -- api.log("минута прошла")
+end)
+
+-- ── 11. ПРИБОРКА ПРИ ВЫГРУЗКЕ (мгновенный тоггл «Модов» это зовёт сам) ─────
+api.onUnload(function()
+    api.log("пример мода выгружен — всё созданное им удалено автоматически")
+end)
+]==]
+
+-- ── ИНИЦИАЛИЗАЦИЯ ЛОАДЕРА (вызывается в самом конце файла) ─────────────────
+function LOB_MODS.init()
+    if LOB_MODS.ready then return end
+    LOB_MODS.ready = true
+    -- события движка
+    pcall(function()
+        LOB_MODS._tickConn = RunService.Heartbeat:Connect(function(dt)
+            if LOB_MODS.events["tick"] then LOB_MODS.fire("tick", dt) end
+        end)
+    end)
+    pcall(function()
+        Players.PlayerAdded:Connect(function(plr) LOB_MODS.fire("playerJoin", plr) end)
+        Players.PlayerRemoving:Connect(function(plr) LOB_MODS.fire("playerLeave", plr) end)
+    end)
+    task.spawn(function()
+        task.wait(0.6)  -- дать интерфейсу доустановиться
+        LOB_MODS.log("мод-лоадер " .. LOB_MODS.VERSION .. " запущен, папка: " .. LOB_MODS.FOLDER)
+        LOB_MODS.loadAll()  -- v24.1: loadAll сам зовёт fire("modsLoaded") в конце
+    end)
+end
+
 -- Main UI Creation Wrapper
 -- §UI_CREATE
 local function createInterface()
@@ -11452,7 +13173,7 @@ titleDivider.Parent = sidebar
 local tabContainer = Instance.new("Frame")
 tabContainer.BackgroundTransparency = 1
 tabContainer.Position = UDim2.new(0, 6, 0, 70)
-tabContainer.Size = UDim2.new(1, -12, 0, 248)
+tabContainer.Size = UDim2.new(1, -12, 0, 252)  -- v24: 248→252 (7 кнопок × 36px)
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
@@ -11729,6 +13450,10 @@ local function switchTab(name)
         mod3_needsRebuild = false
         mod3_rebuild()
     end
+    -- v24: вкладка «Моды» — обновляем список при открытии
+    if name == "Моды" and LOB_UI and LOB_UI.refreshMods then
+        pcall(LOB_UI.refreshMods)
+    end
 
     -- Close any open dropdowns when switching tabs
     for _, c in ipairs(gui:GetChildren()) do
@@ -11835,7 +13560,7 @@ end
 local function makeTabButton(name, iconId)
     local btn = Instance.new("TextButton")
     btn.Text = ""
-    btn.Size = UDim2.new(1, 0, 0, 38)
+    btn.Size = UDim2.new(1, 0, 0, 32)  -- v24: 38→32 — 7 кнопок (с «Моды») влезают даже в окно 450px
     btn.BackgroundTransparency = 1
     btn.BackgroundColor3 = THEME.SidebarSelected
     btn.ClipsDescendants = true
@@ -11847,8 +13572,8 @@ local function makeTabButton(name, iconId)
     strip.Name = "AccentStrip"
     strip.BackgroundColor3 = Color3.fromRGB(225, 215, 255)
     strip.BorderSizePixel = 0
-    strip.Size = UDim2.new(0, 4, 0, 26)
-    strip.Position = UDim2.new(0, 4, 0.5, -13)
+    strip.Size = UDim2.new(0, 4, 0, 22)
+    strip.Position = UDim2.new(0, 4, 0.5, -11)
     strip.Visible = false
     strip.Parent = btn
     makeCorner(strip, 2)
@@ -11937,6 +13662,28 @@ end
             emojiLbl.TextYAlignment = Enum.TextYAlignment.Center
             emojiLbl.ZIndex = ic.ZIndex
             emojiLbl.Parent = cc
+        end
+    end
+
+    -- v24: вкладка «Моды» — встроенный мод-лоадер
+    do
+        local modsTabBtn = makeTabButton("Моды", "rbxassetid://7733960981")
+        local mcc = modsTabBtn:FindFirstChild("ContentContainer")
+        local mic = mcc and mcc:FindFirstChild("Icon")
+        if mic then
+            mic.Image = ""
+            mic.BackgroundTransparency = 1
+            local memoji = Instance.new("TextLabel")
+            memoji.Size = UDim2.new(0, 20, 0, 20)
+            memoji.Position = UDim2.new(0, 16, 0.5, -10)
+            memoji.BackgroundTransparency = 1
+            memoji.Text = "🧩"
+            memoji.TextSize = 16
+            memoji.Font = Enum.Font.GothamBold
+            memoji.TextXAlignment = Enum.TextXAlignment.Center
+            memoji.TextYAlignment = Enum.TextYAlignment.Center
+            memoji.ZIndex = mic.ZIndex
+            memoji.Parent = mcc
         end
     end
     
@@ -12863,7 +14610,7 @@ makeToggleRow(
 makeToggleRow(
     automation,
     "🚶 Умная ходьба (бета)",
-    "Бот ведёт себя как живой и заводит знакомства: ищет собеседника, подходит (обходит стены, перепрыгивает, не толпится, догоняет), здоровается. Чем больше общается — тем ближе считает игрока: узнаёт при новой встрече (не как впервые) и периодически сам возвращается к знакомым. Если общавшийся игрок замолчал — мягко спрашивает «ты тут? почему молчишь?» и только потом «ладно, я пойду». Не бросает активного игрока. Без игроков гуляет недалеко от старта и иногда бормочет.",
+    "Бот ведёт себя как живой и заводит знакомства: ищет собеседника, подходит (обходит стены, перепрыгивает, не толпится, догоняет), здоровается. Чем больше общается — тем ближе считает игрока: узнаёт при новой встрече (не как впервые) и периодически сам возвращается к знакомым. Если общавшийся игрок замолчал — мягко спрашивает «ты тут? почему молчишь?» и только потом «ладно, я пойду». Не бросает активного игрока. v23: замечает молчаливых «хвостов» — кто тихо держится рядом, сам поворачивается и заговаривает первым; гуляет с умом — тянется к недавним собеседникам и компаниям; после респавна не бежит через всю карту к старому месту; больше не подходит к тем, кто только что сказал «уйди»; при застревании не прыгает бесконечно; ИИ может отправить бота гулять тегом [DO:wander] (тег и подсказка о нём для ИИ работают только при включённой умной ходьбе). Без игроков гуляет недалеко от старта и иногда бормочет.",
     ClientSettings.SmartWalk == true,
     function(state)
         ClientSettings.SmartWalk = state
@@ -17465,6 +19212,274 @@ task.defer(function()
     updateTabIndicator(currentTab, true)
 end)
 
+-- ═══ v24: ВКЛАДКА «МОДЫ» — содержимое + мост LOB_UI для мод-лоадера ═══
+do
+    local modsFrame = Instance.new("CanvasGroup")
+    modsFrame.BackgroundTransparency = 1
+    modsFrame.GroupTransparency = 1
+    modsFrame.Size = UDim2.new(1, 0, 1, 0)
+    modsFrame.Visible = false
+    modsFrame.Parent = contentArea
+    tabFrames["Моды"] = modsFrame
+
+    local modsTitle = makeTextLabel(modsFrame, "Моды", 24, "bold")
+    modsTitle.Size = UDim2.new(1, 0, 0, 30)
+    local modsDesc = makeTextLabel(modsFrame, "Мод-лоадер v24.1: папка «LineOfBots» в папке инжектора (mods, libs, configs).", 13, "semibold")
+    modsDesc.TextColor3 = THEME.TextDim
+    modsDesc.Position = UDim2.new(0, 0, 0, 32)
+    modsDesc.Size = UDim2.new(1, 0, 0, 16)
+
+    local modsScroll = Instance.new("ScrollingFrame")
+    modsScroll.Name = "ModsScroll"
+    modsScroll.BackgroundTransparency = 1
+    modsScroll.BorderSizePixel = 0
+    modsScroll.Position = UDim2.new(0, 0, 0, 55)
+    modsScroll.Size = UDim2.new(1, 0, 1, -55)
+    modsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    modsScroll.ScrollBarThickness = 0
+    modsScroll.ScrollBarImageTransparency = 0.75
+    modsScroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+    modsScroll.Parent = modsFrame
+
+    local modsScrollPad = Instance.new("UIPadding")
+    modsScrollPad.PaddingLeft  = UDim.new(0, 8)
+    modsScrollPad.PaddingRight = UDim.new(0, 12)
+    modsScrollPad.PaddingTop   = UDim.new(0, 4)
+    modsScrollPad.PaddingBottom = UDim.new(0, 8)
+    modsScrollPad.Parent = modsScroll
+
+    local modsLayout = Instance.new("UIListLayout")
+    modsLayout.Padding = UDim.new(0, 8)
+    modsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    modsLayout.Parent = modsScroll
+    modsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        modsScroll.CanvasSize = UDim2.new(0, 0, 0, (modsLayout.AbsoluteContentSize.Y + 24) / guiScale)
+    end)
+
+    -- ── Секция «Мод-лоадер» ──
+    local mlSection = makeSectionCard(modsScroll, "Мод-лоадер", "Загрузка модов из папки инжектора")
+    local modsPathLbl = makeTextLabel(mlSection, "Моды: LineOfBots/mods (*.lua) • Библиотеки: LineOfBots/libs • Конфиги: LineOfBots/configs", 11, "medium")
+    modsPathLbl.TextColor3 = THEME.TextDim
+    modsPathLbl.Size = UDim2.new(1, -20, 0, 16)
+    modsPathLbl.Position = UDim2.new(0, 12, 0, 0)
+    modsPathLbl.LayoutOrder = 1
+
+    makeToggleRow(mlSection, "Мод-лоадер включён", "Загружать моды при запуске скрипта", ClientSettings.ModLoader ~= false, function(on)
+        ClientSettings.ModLoader = on
+        pcall(saveSettings)
+    end).LayoutOrder = 2
+
+    local modsReloadBtn = makeButton(mlSection, "🔄 Перезагрузить все моды")
+    modsReloadBtn.LayoutOrder = 3
+    modsReloadBtn.MouseButton1Click:Connect(function()
+        if not ClientSettings.ModLoader then
+            pushNotification("Мод-лоадер", "Сначала включи мод-лоадер тогглом выше.", THEME.Accent)
+            return
+        end
+        task.spawn(function()
+            local n = LOB_MODS.loadAll()
+            pushNotification("Мод-лоадер", "Перезагрузка завершена. Модов: " .. tostring(n), THEME.Accent)
+        end)
+    end)
+
+    local modsExampleBtn = makeButton(mlSection, "📝 Создать пример мода")
+    modsExampleBtn.LayoutOrder = 4
+    modsExampleBtn.MouseButton1Click:Connect(function()
+        task.spawn(function()
+            LOB_MODS.ensureFolder()
+            LOB_MODS.writeExample()
+            pushNotification("Мод-лоадер", "Пример: " .. LOB_MODS.FOLDER .. "/" .. LOB_MODS.EXAMPLE_FILE, THEME.Accent)
+        end)
+    end)
+
+    -- ── Секция «Загруженные моды» (динамический список) ──
+    local listSection = makeSectionCard(modsScroll, "Загруженные моды", "Иконка • название • тоггл вкл/выкл")
+    local listHost = Instance.new("Frame")
+    listHost.BackgroundTransparency = 1
+    listHost.Size = UDim2.new(1, 0, 0, 0)
+    listHost.AutomaticSize = Enum.AutomaticSize.Y
+    listHost.LayoutOrder = 1
+    listHost.Parent = listSection
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Padding = UDim.new(0, 5)
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Parent = listHost
+
+    -- ── v24.1: Секция «Журнал» — последние события/ошибки модов ──
+    local logSection = makeSectionCard(modsScroll, "Журнал модов", "Ошибки синтаксиса не запускают мод и не роняют бот")
+    local logHost = Instance.new("Frame")
+    logHost.BackgroundTransparency = 1
+    logHost.Size = UDim2.new(1, 0, 0, 0)
+    logHost.AutomaticSize = Enum.AutomaticSize.Y
+    logHost.Parent = logSection
+    local logText = makeTextLabel(logHost, "Пока пусто.", 10, "medium")
+    logText.Size = UDim2.new(1, -20, 0, 60)
+    logText.Position = UDim2.new(0, 10, 0, 0)
+    logText.TextColor3 = THEME.TextDim
+    logText.TextXAlignment = Enum.TextXAlignment.Left
+    logText.TextYAlignment = Enum.TextYAlignment.Top
+    logText.TextWrapped = true
+    local logClearBtn = makeButton(logHost, "Очистить журнал")
+    logClearBtn.Size = UDim2.new(1, -20, 0, 30)
+    logClearBtn.Position = UDim2.new(0, 10, 0, 66)
+    logClearBtn.MouseButton1Click:Connect(function()
+        if LOB_MODS and LOB_MODS.logBuf then LOB_MODS.logBuf = {} end
+        if LOB_UI_REFRESH_MODLOG then LOB_UI_REFRESH_MODLOG() end
+    end)
+    LOB_UI_REFRESH_MODLOG = function()
+        pcall(function()
+            local buf = (LOB_MODS and LOB_MODS.logBuf) or {}
+            local lines = {}
+            for i = math.max(1, #buf - 11), #buf do table.insert(lines, buf[i]) end
+            logText.Text = (#lines > 0) and table.concat(lines, "\n") or "Пока пусто."
+            logText.Size = UDim2.new(1, -20, 0, math.max(46, 13 * #lines + 14))
+            logClearBtn.Position = UDim2.new(0, 10, 0, math.max(52, 13 * #lines + 20))
+        end)
+    end
+
+    -- v24: функция обновления списка (публикуется в LOB_UI; зовётся лоадером)
+    LOB_UI_REFRESH_MODS = function()
+        pcall(function()
+            for _, c in ipairs(listHost:GetChildren()) do
+                if not c:IsA("UIListLayout") then c:Destroy() end
+            end
+            if LOB_UI_REFRESH_MODLOG then LOB_UI_REFRESH_MODLOG() end
+            if not (LOB_MODS and LOB_MODS.mods) then return end
+            local pendingSet = LOB_MODS.pendingSet and LOB_MODS.pendingSet() or {}
+            -- мгновенный ли у мода вкл/выкл (иначе — «перезайдите…»)
+            local function needsRejoin(m)
+                local mt = m.meta or {}
+                return (mt.requiresRejoin == true) or (mt.instant == false)
+            end
+            local count = 0
+            for _, name in ipairs(LOB_MODS.order) do
+                local m = LOB_MODS.mods[name]
+                if m then
+                    count = count + 1
+                    local meta = m.meta or {}
+                    local running = (not m.disabled) and (m.status == "загружен")
+                    local pending = pendingSet[name]
+                    -- заголовок: мета-название + эмодзи-иконка (если не rbxasset)
+                    local title = tostring(meta.title or name)
+                    local icon = meta.icon
+                    if type(icon) == "string" and icon ~= ""
+                    and not (icon:match("^rbxasset") or icon:match("^http")) then
+                        title = icon .. " " .. title
+                    end
+                    -- статус/подсказка
+                    local statusText
+                    if pending == "off" then
+                        statusText = "перезайдите, чтобы можно было его отключить (сейчас ещё работает)"
+                    elseif pending == "on" then
+                        statusText = "перезайдите, чтобы можно было его включить"
+                    elseif m.status == "загружен" then
+                        statusText = "включён" .. (meta.description and (" — " .. tostring(meta.description)) or "")
+                    elseif m.status == "отключён" then
+                        statusText = "выключен" .. (meta.description and (" — " .. tostring(meta.description)) or "")
+                    else
+                        statusText = tostring(m.status or "?")
+                        if m.err and m.err ~= "" then
+                            statusText = statusText .. ": " .. tostring(m.err):sub(1, 80)
+                        end
+                    end
+                    -- строка мода: иконка + название + тоггл
+                    local ctrl = makeToggleRow(listHost, title, statusText, running, function(on)
+                        task.spawn(function()
+                            local okT, errT = pcall(function()
+                                if on then
+                                    LOB_MODS.setDisabled(name, false)
+                                    if m.meta and m.meta.requiresRejoin == true and m.status == "отключён" then
+                                        -- автор мода требует перезапуск для активации
+                                        LOB_MODS.setPending(name, "on")
+                                        LOB_MODS.notify("Мод-лоадер", name .. ": перезайдите, чтобы мод включился")
+                                    else
+                                        LOB_MODS.setPending(name, nil)
+                                        LOB_MODS.loadOne(m.path)  -- мгновенное включение
+                                    end
+                                else
+                                    LOB_MODS.setDisabled(name, true)
+                                    if needsRejoin(m) then
+                                        -- мгновенно выгрузить нельзя — после перезахода мод не загрузится
+                                        LOB_MODS.setPending(name, "off")
+                                        LOB_MODS.notify("Мод-лоадер", name .. ": перезайдите, чтобы мод отключился")
+                                    else
+                                        LOB_MODS.setPending(name, nil)
+                                        if LOB_MODS.mods[name] and LOB_MODS.mods[name].status ~= "отключён" then
+                                            LOB_MODS.unloadOne(name)  -- мгновенная выгрузка
+                                        end
+                                        LOB_MODS.loadOne(m.path, true)  -- заглушка «отключён» (сохраняет мету)
+                                    end
+                                end
+                                LOB_MODS.refreshGUI()
+                            end)
+                            if not okT then LOB_MODS.log("тоггл мода " .. name .. ": " .. tostring(errT)) end
+                        end)
+                    end)
+                    -- v24.1: rbxasset-иконка — вставляем картинку в строку перед заголовком
+                    if type(icon) == "string" and (icon:match("^rbxasset") or icon:match("^http")) then
+                        local rowInst = nil
+                        for _, c in ipairs(listHost:GetChildren()) do
+                            if c:IsA("Frame") then rowInst = c end
+                        end
+                        if rowInst then
+                            local lbl = rowInst:FindFirstChild("Label")
+                            local hasDesc = rowInst:FindFirstChild("Description") ~= nil
+                            local img = Instance.new("ImageLabel")
+                            img.BackgroundTransparency = 1
+                            img.Size = UDim2.new(0, 18, 0, 18)
+                            img.Image = icon
+                            img.Parent = rowInst
+                            if hasDesc then
+                                img.Position = UDim2.new(0, 40, 0, 8)
+                            else
+                                img.AnchorPoint = Vector2.new(0, 0.5)
+                                img.Position = UDim2.new(0, 40, 0.5, 0)
+                            end
+                            if lbl then
+                                lbl.Position = UDim2.new(0, 64, lbl.Position.Y.Scale, lbl.Position.Y.Offset)
+                                lbl.Size = UDim2.new(1, -132, 0, 18)
+                            end
+                        end
+                    end
+                end
+            end
+            if count == 0 then
+                local empty = makeTextLabel(listHost, "Модов нет. Кинь .lua файлы в папку «LineOfBots/mods» (в папке инжектора).", 12, "medium")
+                empty.TextColor3 = THEME.TextDim
+                empty.Size = UDim2.new(1, -8, 0, 20)
+            end
+        end)
+    end
+end
+
+-- v24: ПУБЛИКАЦИЯ МОСТА LOB_UI — локальный UI наружу для модов (100% контроль)
+LOB_UI = {
+    gui = gui,
+    contentArea = contentArea,
+    tabFrames = tabFrames,
+    tabButtons = tabButtons,
+    switchTab = switchTab,
+    makeTabButton = makeTabButton,
+    currentTabFn = function() return currentTab end,
+    makeSectionCard = makeSectionCard,
+    makeToggleRow = makeToggleRow,
+    makeSliderRow = makeSliderRow,
+    makeRightControlRow = makeRightControlRow,
+    makeKeybindRow = makeKeybindRow,
+    makeDropdown = makeDropdown,
+    makeButton = makeButton,
+    makeTextBox = makeTextBox,
+    makeTextLabel = makeTextLabel,
+    makeScrollingTextBox = makeScrollingTextBox,
+    refreshMods = LOB_UI_REFRESH_MODS,
+    guiScaleFn = function() return guiScale end,
+    -- v24.1: полная пересборка интерфейса (как смена темы) — для модов
+    rebuildInterface = function() pcall(createInterface) end,
+}
+LOB_UI_REFRESH_MODS = nil  -- дальше только через LOB_UI.refreshMods
+-- v24: сообщить мод-лоадеру о новой сборке UI (перезагрузить вкладки модов)
+if LOB_MODS and LOB_MODS.handleRebuild then pcall(LOB_MODS.handleRebuild) end
+
 -- Initialize
     -- Reorder Tabs (Settings at bottom)
     local tabOrder = {
@@ -17475,13 +19490,14 @@ end)
         ["Настройки"] = 5,
         ["Чат с ИИ"] = 6,
         ["Information"] = 7,
+        ["Моды"] = 8,
     }
     
     for name, btn in pairs(tabButtons) do
         if tabOrder[name] then
             btn.LayoutOrder = tabOrder[name]
         else
-            btn.LayoutOrder = 8
+            btn.LayoutOrder = 9  -- v24: 8 занят вкладкой «Моды»; модовые вкладки идут после
         end
     end
 
@@ -17530,3 +19546,6 @@ print(string.format("[LineOfBots] viewport=%.0fx%.0f touch=%s keyboard=%s",
     tostring(game:GetService("UserInputService").KeyboardEnabled)))
 
 createInterface()
+
+-- v24: ЗАПУСК МОД-ЛОАДЕРА — после сборки интерфейса (моды могут сразу строить UI)
+if LOB_MODS and LOB_MODS.init then pcall(LOB_MODS.init) end
