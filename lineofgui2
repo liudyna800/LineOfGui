@@ -2724,6 +2724,14 @@ local function makeSystemPrompt(settings)
             .. table.concat(LOB_MODS.promptHints, "; "))
     end
 
+    -- v24.5: способности модов (api.ability) — легальное расширение HONESTY ABOUT ABILITIES.
+    -- Мод больше не спорит с промптом изнутри подсказки: ядро САМО сообщает модели,
+    -- что для перечисленных действий запрет «You CANNOT» не действует.
+    if LOB_MODS and LOB_MODS.abilities and #LOB_MODS.abilities > 0 then
+        table.insert(parts, "MOD ABILITIES (extra abilities granted by mods — for EXACTLY these actions the 'You CANNOT' list above does NOT apply, everything else still does): "
+            .. table.concat(LOB_MODS.abilities, "; "))
+    end
+
     return table.concat(parts, "\n\n")
 end
 
@@ -9902,6 +9910,24 @@ function runChatQueue(userId)
                 _botBusyByUser[userId] = math.max(0, (_botBusyByUser[userId] or 1) - 1)
                 if not ok then
                     print("[LOB] handleQueuedChat error: " .. tostring(err2))
+                    -- v24.5 (запрос P0-2 из отчёта ИИ-моддера): ошибка конвейера доходит
+                    -- до пользователя и журнала модов — больше не «немой бот».
+                    pcall(function()
+                        local _hookMods = {}
+                        for _mn, _m in pairs(LOB_MODS and LOB_MODS.mods or {}) do
+                            if _m.alive and _m.hooks and #_m.hooks > 0 then table.insert(_hookMods, _mn) end
+                        end
+                        LOB_MODS.log("[КОНВЕЙЕР] ошибка обработки реплики: " .. tostring(err2)
+                            .. ((#_hookMods > 0) and ("; моды с хуками: " .. table.concat(_hookMods, ", ")) or ""))
+                        if os.clock() - (_lastConvErrNotify or 0) > 30 then
+                            _lastConvErrNotify = os.clock()
+                            if #_hookMods > 0 then
+                                LOB_MODS.notify("Ошибка бота", "Сбой ответа — проверь моды: " .. table.concat(_hookMods, ", "))
+                            else
+                                LOB_MODS.notify("Ошибка бота", "Сбой ответа, реплика пропущена (подробности в журнале модов)")
+                            end
+                        end
+                    end)
                 end
                 if q.head <= q.tail then task.wait(0.05) end
             end
@@ -11746,6 +11772,9 @@ end
 --   lob.every(сек, fn) / lob.delay(сек, fn) / lob.connect(signal, fn) — авто-очистка
 --   lob.data() / lob.saveData()             — хранилище мода (LineOfBots/configs/data)
 --   lob.notify(title, body) / lob.log(...)
+--   lob.hint(text) / lob.removeHint(text)     — подсказки в промпт ИИ (v24.5, официально)
+--   lob.ability(name, desc) / lob.say(text)   — способности бота + реплики в чат (v24.5)
+--   lob.version                               — версия кита для проверки совместимости (v24.5)
 --   lob.onUnload(fn) / lob.onUIRebuild(fn)  — приборка при выгрузке/пересборке UI
 --   lob.loader                              — САМ МОД-ЛОАДЕР: чините/меняйте что угодно
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -11783,7 +11812,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.4",  -- v24.4: фикс nil-ошибок старта (LOB_STATE префиксы + mod2.* после упаковки v24.3)
+    VERSION       = "v24.5",  -- v24.5: fail-safe хуки (api.hook), ошибки конвейера в UI + api.hint/api.ability/api.say/api.version — по отчёту ИИ-моддера от 08.11.2026
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -11791,6 +11820,7 @@ LOB_MODS = {
     ready         = false,
     env           = _G,
     promptHints   = {},   -- v24.1: подсказки [DO:тегов] от модов (попадают в промпт ИИ)
+    abilities     = {},   -- v24.5: способности модов (api.ability) — расширяют блок HONESTY ABOUT ABILITIES
     libs          = {},   -- v24.1: общие библиотеки (LineOfBots/libs + api.defineLib)
     libLoaded     = {},   -- v24.1: имя -> true (библиотека уже загружена)
     exports       = {},   -- v24.1: экспорт модов для api.require("имя мода")
@@ -12492,13 +12522,49 @@ function LOB_MODS.makeAPI(mod)
             LOB_MODS.log(mod.name .. ": hookfunction недоступен — для ГЛОБАЛЬНЫХ функций используй api.patch/api.override")
             return nil
         end
-        local okH, orig = pcall(hf, target, replacement)
+        -- v24.5 FAIL-SAFE (запрос P0-1 из отчёта ИИ-моддера, 08.11.2026):
+        -- раньше replacement ставился в hookfunction КАК ЕСТЬ — любая ошибка внутри него
+        -- падала на сборке системного промпта и тихо гасилась pcall'ом очереди → «бот замолчал».
+        -- Теперь replacement вызывается через обёртку: ошибка пишется в журнал С ИМЕНЕМ МОДА,
+        -- хук автоматически снимается, вызов прозрачно уходит в оригинал — ядро не страдает.
+        -- Конвенция документации §6.8 теперь работает ПО-НАСТОЯЩЕМУ: replacement(оригинал, ...аргументы).
+        -- Совместимость: если документированный вызов упал, пробуется старый replacement(...аргументы).
+        local safeReplacement
+        local origRef = nil
+        safeReplacement = function(...)
+            local args = table.pack(...)
+            if origRef then
+                -- 1) документированная конвенция: первый аргумент — оригинал
+                local okR, res = pcall(function()
+                    return table.pack(replacement(origRef, table.unpack(args, 1, args.n)))
+                end)
+                if okR then return table.unpack(res, 1, res.n) end
+                -- 2) старая (сырая) конвенция без оригинала — совместимость со старыми модами
+                local okL, resL = pcall(function()
+                    return table.pack(replacement(table.unpack(args, 1, args.n)))
+                end)
+                if okL then return table.unpack(resL, 1, resL.n) end
+                -- 3) обе попытки упали → журнал + уведомление + автоснятие хука + оригинал
+                LOB_MODS.log("[" .. mod.name .. "] hook ERROR (хук снят, работает оригинал): " .. tostring(resL))
+                pcall(function()
+                    if LOB_MODS.notify then LOB_MODS.notify("Мод: " .. mod.name, "Ошибка в api.hook — хук снят, бот работает как без мода") end
+                end)
+                pcall(hf, safeReplacement, origRef)  -- авто-откат: target снова ведёт себя как оригинал
+                return origRef(table.unpack(args, 1, args.n))
+            end
+            -- origRef ещё не присвоен (hookfunction не вернулся) — крайне редкий путь
+            local okE, resE = pcall(replacement, table.unpack(args, 1, args.n))
+            if not okE then return nil end
+            return resE
+        end
+        local okH, orig = pcall(hf, target, safeReplacement)
         if not okH or not orig then
             LOB_MODS.log(mod.name .. ": hook не удался: " .. tostring(orig))
             return nil
         end
-        table.insert(mod.hooks, { cur = replacement, orig = orig })
-        LOB_MODS.log(mod.name .. ": hook применён")
+        origRef = orig
+        table.insert(mod.hooks, { cur = safeReplacement, orig = orig })
+        LOB_MODS.log(mod.name .. ": hook применён (fail-safe v24.5)")
         return orig
     end
 
@@ -12534,6 +12600,75 @@ function LOB_MODS.makeAPI(mod)
         end
         return true
     end
+
+    -- ══ v24.5: ОФИЦИАЛЬНЫЙ КАНАЛ ПОДСКАЗОК ПРОМПТА (запрос P1 из отчёта ИИ-моддера) ══
+    -- api.hint("текст") — строка попадёт в блок MOD ACTIONS системного промпта (та же
+    -- таблица, что используют подсказки api.action). При выгрузке мода убирается сама.
+    -- НЕ хукай makeSystemPrompt ради дописать текст — это штатный способ.
+    function api.hint(text)
+        text = tostring(text or "")
+        if text == "" then return false end
+        for _, x in ipairs(LOB_MODS.promptHints) do if x == text then return true end end
+        table.insert(LOB_MODS.promptHints, text)
+        table.insert(mod.ownHints, text)
+        ClientSettings._sysPromptBuilt = nil  -- пересобрать системный промпт
+        return true
+    end
+    function api.removeHint(text)
+        text = tostring(text or "")
+        for i = #LOB_MODS.promptHints, 1, -1 do
+            if LOB_MODS.promptHints[i] == text then
+                table.remove(LOB_MODS.promptHints, i)
+                ClientSettings._sysPromptBuilt = nil
+                return true
+            end
+        end
+        return false
+    end
+
+    -- ══ v24.5: МОДОВЫЕ СПОСОБНОСТИ — api.ability(name, description) (запрос P1) ══
+    -- Легально расширяет блок HONESTY ABOUT ABILITIES (тот самый «You CANNOT ... fight/
+    -- teleport/change the game»): ядро само сообщает модели, что для этих действий запрет
+    -- не действует. При выгрузке мода способность убирается автоматически.
+    function api.ability(name, description)
+        name = tostring(name or "")
+        if name == "" then return false end
+        local entry = name .. (description ~= "" and (" — " .. tostring(description)) or "")
+        for _, x in ipairs(LOB_MODS.abilities) do if x == entry then return true end end
+        table.insert(LOB_MODS.abilities, entry)
+        table.insert(mod.ownAbilities, entry)
+        ClientSettings._sysPromptBuilt = nil
+        return true
+    end
+    function api.removeAbility(name)
+        name = tostring(name or "")
+        for i = #LOB_MODS.abilities, 1, -1 do
+            if LOB_MODS.abilities[i] == name or LOB_MODS.abilities[i]:sub(1, #name) == name then
+                table.remove(LOB_MODS.abilities, i)
+                ClientSettings._sysPromptBuilt = nil
+                return true
+            end
+        end
+        return false
+    end
+
+    -- ══ v24.5: СКАЗАТЬ В ЧАТ ОТ ЛИЦА БОТА (запрос P1: официальный api.say) ══
+    -- Мод «не нашёл игрока X» теперь сообщает это в чат штатно, с pcall и журналом,
+    -- вместо чтения 12500 строк исходника в поисках локали sendChatMessage.
+    function api.say(text)
+        if type(text) ~= "string" or text == "" then return false end
+        local sc = LOB_CORE and LOB_CORE.sendChat
+        if type(sc) ~= "function" then
+            LOB_MODS.log("[" .. mod.name .. "] say: sendChat недоступен")
+            return false
+        end
+        local okS, errS = pcall(sc, text)
+        if not okS then LOB_MODS.log("[" .. mod.name .. "] say: " .. tostring(errS)) end
+        return okS
+    end
+
+    -- ══ v24.5: ВЕРСИЯ КИТА (запрос P1: мод проверяет совместимость) ══
+    api.version = LOB_MODS.VERSION
 
     -- ══ v24.1: БИБЛИОТЕКИ И СВЯЗЬ МОДОВ ══
     -- LineOfBots/libs/*.lua грузятся автоматически при старте; lib("имя") вернёт то, что вернул файл.
@@ -12584,7 +12719,7 @@ function LOB_MODS.loadOne(path, preDisabled)
         conns = {}, timers = {}, instances = {}, patches = {}, tabs = {}, tabIcons = {},
         sections = {}, events = {}, store = {}, storeLoaded = false,
         unloadFn = nil, rebuildFn = nil, loadedAt = os.clock(),
-        meta = {}, ownActions = {}, ownHints = {}, hooks = {}, textPatches = {},  -- v24.1
+        meta = {}, ownActions = {}, ownHints = {}, ownAbilities = {}, hooks = {}, textPatches = {},  -- v24.1 + ownAbilities v24.5
     }
     -- v24.1: выключенный мод показывает кэш меты (иконка/название/флаг перезапуска)
     if preDisabled then
@@ -12681,6 +12816,16 @@ function LOB_MODS.unloadOne(name, silent)
                 end
             end
             mod.ownHints = {}
+            ClientSettings._sysPromptBuilt = nil
+        end
+        -- v24.5: убрать способности мода из промпта
+        if mod.ownAbilities and #mod.ownAbilities > 0 then
+            for i = #LOB_MODS.abilities, 1, -1 do
+                for _, a in ipairs(mod.ownAbilities) do
+                    if LOB_MODS.abilities[i] == a then table.remove(LOB_MODS.abilities, i) break end
+                end
+            end
+            mod.ownAbilities = {}
             ClientSettings._sysPromptBuilt = nil
         end
     end
@@ -18868,7 +19013,9 @@ local function ctDoSend()
     local settings = ClientSettings
     task.spawn(function()
         -- Строим payload — историю берём только если память включена
-        local apiMsgs = {{ role = "system", content = makeSystemPrompt(settings) }}
+        -- v24.5: pcall вокруг сборщика промпта — ошибка мода больше не вешает «печатает…» навсегда
+        local _okSP, _sysRes = pcall(makeSystemPrompt, settings)
+        local apiMsgs = {{ role = "system", content = _okSP and _sysRes or ("SYSTEM PROMPT ERROR (см. журнал модов): " .. tostring(_sysRes)) }}
         if settings.MemoryEnabled then
             local maxPairs = math.max(1, math.min(50, tonumber(settings.MaxHistory) or MAX_HISTORY))
             local maxItems = maxPairs * 2
@@ -19272,7 +19419,7 @@ do
 
     local modsTitle = makeTextLabel(modsFrame, "Моды", 24, "bold")
     modsTitle.Size = UDim2.new(1, 0, 0, 30)
-    local modsDesc = makeTextLabel(modsFrame, "Мод-лоадер v24.1: папка «LineOfBots» в папке инжектора (mods, libs, configs).", 13, "semibold")
+    local modsDesc = makeTextLabel(modsFrame, "Мод-лоадер v24.5: папка «LineOfBots» в папке инжектора (mods, libs, configs).", 13, "semibold")
     modsDesc.TextColor3 = THEME.TextDim
     modsDesc.Position = UDim2.new(0, 0, 0, 32)
     modsDesc.Size = UDim2.new(1, 0, 0, 16)
