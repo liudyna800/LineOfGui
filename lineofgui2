@@ -13192,10 +13192,20 @@ titleDivider.BackgroundTransparency = THEME.StrokeTransparency
 titleDivider.BorderSizePixel = 0
 titleDivider.Parent = sidebar
 
-local tabContainer = Instance.new("Frame")
+-- v24.3 fix: ScrollingFrame вместо Frame — когда вкладок больше 7 (моды добавляют свои
+-- вкладки через Mod API, LayoutOrder=50), список скроллится тонким скроллбаром
+-- и физически НЕ МОЖЕТ наехать на статус-блок «СОСТОЯНИЕ» (ScrollingFrame всегда клипует)
+local tabContainer = Instance.new("ScrollingFrame")  -- было: Frame (v24.3 fix)
 tabContainer.BackgroundTransparency = 1
 tabContainer.Position = UDim2.new(0, 6, 0, 70)
-tabContainer.Size = UDim2.new(1, -12, 0, 252)  -- v24: 248→252 (7 кнопок × 36px)
+tabContainer.Size = UDim2.new(1, -12, 0, 252)  -- v24: 248→252 (7 кнопок × 36px); точная высота пересчитывается ниже, под статус-блок
+tabContainer.BorderSizePixel = 0
+tabContainer.ScrollingDirection = Enum.ScrollingDirection.Y  -- скролл только по вертикали
+tabContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y      -- канвас растёт сам при добавлении модовых вкладок
+tabContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+tabContainer.ScrollBarThickness = 2                          -- тонкий скроллбар в стиле UI
+tabContainer.ScrollBarImageTransparency = 0.35
+tabContainer.ScrollBarImageColor3 = THEME.Accent
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
@@ -13215,6 +13225,15 @@ sidebarStatus.ClipsDescendants = true
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 18)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
+
+-- v24.3 fix: сжимаем контейнер вкладок так, чтобы он заканчивался НАД статус-блоком.
+-- Статус-блок: высота 116, отступ от низа 10 → его верх на winH-126.
+-- Контейнер вкладок: top=70 → доступно (winH-126) - 70 - 8(зазор) пикселей.
+do
+    local _ssTop = winH - 10 - 116
+    local _ssAvail = _ssTop - 70 - 8
+    tabContainer.Size = UDim2.new(1, -12, 0, math.max(120, _ssAvail))
+end
 
 local ssPad = Instance.new("UIPadding")
 ssPad.PaddingTop    = UDim.new(0, 7)
