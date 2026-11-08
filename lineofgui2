@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v20 Beta 2  —  ОГЛАВЛЕНИЕ / FILE MAP             ║
+-- ║         LINEOFBOTS v24.6  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -221,7 +221,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v24.4 LOADED")
+print("LOB VERSION: v24.6 LOADED")  -- v24.6: синхронизировано с LOB_MODS.VERSION (было v24.4)
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -13429,7 +13429,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v21", 10, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.6 · Kit 2", 10, "semibold")  -- v24.6: синхронизировано (было «v21»); Kit 2 = номер версии Modding Kit
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
