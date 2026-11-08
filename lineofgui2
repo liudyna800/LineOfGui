@@ -284,14 +284,22 @@ end
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
 -- v24.1: все конфиги теперь в LineOfBots/configs (миграция выше переносит старые файлы)
-local LOB_KEY_FILE       = LOB_CFG_DIR .. "/lob_apikey.txt"
-local LOB_KEY_FILE2      = LOB_CFG_DIR .. "/lob_apikey2.txt"
-local LOB_KEY_FILE3      = LOB_CFG_DIR .. "/lob_apikey3.txt"
-local LOB_GEMINI_FILE    = LOB_CFG_DIR .. "/lob_geminikey.txt"
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v24.3 FIX «limit 200»: упаковка топ-левел локалок главного чанка в одну
+-- таблицу. Luau ограничивает 200 регистров на функцию; в чанке было 215
+-- локалок, поэтому компиляция БЕЗ оптимизации (-O0, часть экзекьюторов)
+-- падала: 'Out of local registers ... exceeded limit 200'. Теперь их ~86.
+-- Семантика 1:1 (замыкания читают поля таблицы вместо upvalue-локалок).
+-- ═══════════════════════════════════════════════════════════════════════════
+local LOB_STATE = {}
+LOB_STATE.LOB_KEY_FILE = LOB_CFG_DIR .. "/lob_apikey.txt"
+LOB_STATE.LOB_KEY_FILE2 = LOB_CFG_DIR .. "/lob_apikey2.txt"
+LOB_STATE.LOB_KEY_FILE3 = LOB_CFG_DIR .. "/lob_apikey3.txt"
+LOB_STATE.LOB_GEMINI_FILE = LOB_CFG_DIR .. "/lob_geminikey.txt"
 LOB_DEEPSEEK_FILE  = LOB_CFG_DIR .. "/lob_deepseekkey.txt"
-local LOB_SETTINGS_FILE  = LOB_CFG_DIR .. "/lob_settings.txt"
-local LOB_CSP_FILE       = LOB_CFG_DIR .. "/lob_customprompt.txt"
-local LOB_MODEL_FILE     = LOB_CFG_DIR .. "/lob_model.txt"
+LOB_STATE.LOB_SETTINGS_FILE = LOB_CFG_DIR .. "/lob_settings.txt"
+LOB_STATE.LOB_CSP_FILE = LOB_CFG_DIR .. "/lob_customprompt.txt"
+LOB_STATE.LOB_MODEL_FILE = LOB_CFG_DIR .. "/lob_model.txt"
 local function normalizeApiKey(value)
     local key = tostring(value or "")
     key = key:gsub("\239\187\191", "")
@@ -352,15 +360,15 @@ local function saveSettings()
             "UseCustomAnimSearch="      .. b(cs.UseCustomAnimSearch, false),
             "OllamaBaseUrl="            .. tostring(cs.OllamaBaseUrl or "http://127.0.0.1:11434"),
         }
-        writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
+        writefile(LOB_STATE.LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
 end
-local function loadSettings()
+LOB_STATE.loadSettings = function()
     pcall(function()
         if not readfile then return end
         -- Некоторые инжекторы: readfile возвращает nil если файл не найден (не бросает ошибку)
         local data
-        local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
+        local ok, result = pcall(readfile, LOB_STATE.LOB_SETTINGS_FILE)
         if ok and type(result) == "string" and result ~= "" then
             data = result:gsub("\r\n", "\n"):gsub("\r", "\n")
             if ClientSettings and ClientSettings.Debug then
@@ -430,46 +438,46 @@ local function loadSettings()
 end
 -- [v19.8.4] ФИКС: CustomSystemPrompt вынесен в отдельный файл lob_customprompt.txt
 -- БАГИ ДО: символ "=" в промпте ломал парсинг lob_settings.txt → промпт обрезался
-local function saveCustomPrompt(text)
-    pcall(function() if writefile then writefile(LOB_CSP_FILE, tostring(text or "")) end end)
+LOB_STATE.saveCustomPrompt = function(text)
+    pcall(function() if writefile then writefile(LOB_STATE.LOB_CSP_FILE, tostring(text or "")) end end)
 end
-local function loadCustomPrompt()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_CSP_FILE) end return "" end)
+LOB_STATE.loadCustomPrompt = function()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_STATE.LOB_CSP_FILE) end return "" end)
     return (ok and type(result) == "string") and result or ""
 end
-local function saveModel(model)
-    pcall(function() if writefile then writefile(LOB_MODEL_FILE, tostring(model or "")) end end)
+LOB_STATE.saveModel = function(model)
+    pcall(function() if writefile then writefile(LOB_STATE.LOB_MODEL_FILE, tostring(model or "")) end end)
 end
-local function loadModel()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_MODEL_FILE) end return "" end)
+LOB_STATE.loadModel = function()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_STATE.LOB_MODEL_FILE) end return "" end)
     return (ok and type(result) == "string" and result ~= "") and result or nil
 end
-local function saveApiKey(key)
-    pcall(function() if writefile then writefile(LOB_KEY_FILE, normalizeApiKey(key)) end end)
+LOB_STATE.saveApiKey = function(key)
+    pcall(function() if writefile then writefile(LOB_STATE.LOB_KEY_FILE, normalizeApiKey(key)) end end)
 end
-local function loadApiKey()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE) end return "" end)
+LOB_STATE.loadApiKey = function()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_STATE.LOB_KEY_FILE) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
-local function saveApiKey2(key)
-    pcall(function() if writefile then writefile(LOB_KEY_FILE2, normalizeApiKey(key)) end end)
+LOB_STATE.saveApiKey2 = function(key)
+    pcall(function() if writefile then writefile(LOB_STATE.LOB_KEY_FILE2, normalizeApiKey(key)) end end)
 end
-local function loadApiKey2()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE2) end return "" end)
+LOB_STATE.loadApiKey2 = function()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_STATE.LOB_KEY_FILE2) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
-local function saveApiKey3(key)
-    pcall(function() if writefile then writefile(LOB_KEY_FILE3, normalizeApiKey(key)) end end)
+LOB_STATE.saveApiKey3 = function(key)
+    pcall(function() if writefile then writefile(LOB_STATE.LOB_KEY_FILE3, normalizeApiKey(key)) end end)
 end
-local function loadApiKey3()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE3) end return "" end)
+LOB_STATE.loadApiKey3 = function()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_STATE.LOB_KEY_FILE3) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
-local function saveGeminiKey(key)
-    pcall(function() if writefile then writefile(LOB_GEMINI_FILE, normalizeApiKey(key)) end end)
+LOB_STATE.saveGeminiKey = function(key)
+    pcall(function() if writefile then writefile(LOB_STATE.LOB_GEMINI_FILE, normalizeApiKey(key)) end end)
 end
-local function loadGeminiKey()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
+LOB_STATE.loadGeminiKey = function()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_STATE.LOB_GEMINI_FILE) end return "" end)
     return (ok and type(result)=="string") and normalizeApiKey(result) or ""
 end
 function saveDeepSeekKey(key)
@@ -510,34 +518,34 @@ if not player then
     return
 end
 
-local LocalCharacter = player.Character
-local LocalRoot = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
-local localCharConn = nil
-local function watchLocalCharacter(char)
-    LocalCharacter = char
-    LocalRoot = char and char:FindFirstChild("HumanoidRootPart")
-    if localCharConn then
+LOB_STATE.LocalCharacter = player.Character
+LOB_STATE.LocalRoot = LOB_STATE.LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
+LOB_STATE.localCharConn = nil
+LOB_STATE.watchLocalCharacter = function(char)
+    LOB_STATE.LocalCharacter = char
+    LOB_STATE.LocalRoot = char and char:FindFirstChild("HumanoidRootPart")
+    if LOB_STATE.localCharConn then
         localCharConn:Disconnect()
-        localCharConn = nil
+        LOB_STATE.localCharConn = nil
     end
     if char then
-        localCharConn = char.ChildAdded:Connect(function(child)
+        LOB_STATE.localCharConn = char.ChildAdded:Connect(function(child)
             if child.Name == "HumanoidRootPart" then
-                LocalRoot = child
+                LOB_STATE.LocalRoot = child
             end
         end)
     end
 end
-if LocalCharacter then
-    watchLocalCharacter(LocalCharacter)
+if LOB_STATE.LocalCharacter then
+    LOB_STATE.watchLocalCharacter(LOB_STATE.LocalCharacter)
 end
-player.CharacterAdded:Connect(watchLocalCharacter)
+player.CharacterAdded:Connect(LOB_STATE.watchLocalCharacter)
 player.CharacterRemoving:Connect(function()
-    LocalCharacter = nil
-    LocalRoot = nil
-    if localCharConn then
+    LOB_STATE.LocalCharacter = nil
+    LOB_STATE.LocalRoot = nil
+    if LOB_STATE.localCharConn then
         localCharConn:Disconnect()
-        localCharConn = nil
+        LOB_STATE.localCharConn = nil
     end
 end)
 
@@ -778,31 +786,31 @@ ClientSettings = {
 
 -- Загружаем сохранённый API ключ и настройки при старте
 do
-    local saved = loadApiKey()
+    local saved = LOB_STATE.loadApiKey()
     if saved and saved:sub(1,4) == "gsk_" and #saved > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq = saved
     end
-    local saved2 = loadApiKey2()
+    local saved2 = LOB_STATE.loadApiKey2()
     if saved2 and saved2:sub(1,4) == "gsk_" and #saved2 > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq2 = saved2
     end
-    local saved3 = loadApiKey3()
+    local saved3 = LOB_STATE.loadApiKey3()
     if saved3 and saved3:sub(1,4) == "gsk_" and #saved3 > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq3 = saved3
     end
-    loadSettings()
+    LOB_STATE.loadSettings()
     if ClientSettings.Debug then
         print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
     end
-    local savedModel = loadModel()
+    local savedModel = LOB_STATE.loadModel()
     if savedModel then
         ClientSettings.Models = ClientSettings.Models or {}
         ClientSettings.Models.groq = savedModel
     end
-    local savedCSP = loadCustomPrompt()
+    local savedCSP = LOB_STATE.loadCustomPrompt()
     if savedCSP ~= "" then
         ClientSettings.CustomSystemPrompt = savedCSP
     end
@@ -835,7 +843,7 @@ do
     if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     if cs2.LineOfMemory    == nil then cs2.LineOfMemory    = true  end
     if cs2.OllamaBaseUrl   == nil or cs2.OllamaBaseUrl == "" then cs2.OllamaBaseUrl = "http://127.0.0.1:11434" end
-    local savedGemini = loadGeminiKey()
+    local savedGemini = LOB_STATE.loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.gemini = savedGemini
@@ -848,7 +856,7 @@ do
 
 end
 
-local ClientSecrets = {
+LOB_STATE.ClientSecrets = {
     groq = "",
 }
 
@@ -1115,20 +1123,20 @@ local Logger = {
 }
 
 -- Flood protection variables
-local _floodLastBatch = nil
-local _floodBatchCount = 0
+LOB_STATE._floodLastBatch = nil
+LOB_STATE._floodBatchCount = 0
 -- Constants
-local Constants = {
+LOB_STATE.Constants = {
     MaxResponseChars = 200,
     DefaultChatChannelName = "RBXGeneral",
 }
-local RangeRaycastParams = RaycastParams.new()
-RangeRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
-RangeRaycastParams.IgnoreWater = true
-local RangeRaycastFilter = {}
+LOB_STATE.RangeRaycastParams = RaycastParams.new()
+LOB_STATE.RangeRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+LOB_STATE.RangeRaycastParams.IgnoreWater = true
+LOB_STATE.RangeRaycastFilter = {}
 
 -- Utility functions
-local function normalizeOneLine(s)
+LOB_STATE.normalizeOneLine = function(s)
     s = tostring(s or "")
     s = s:gsub("\r", " "):gsub("\n", " ")
     s = s:gsub("%s+", " ")
@@ -1144,7 +1152,7 @@ end
 
 -- Извлекает короткое читаемое имя из Roblox ника
 -- "Alex12345" -> "Alex", "xXProGamerXx" -> "ProGamer", "cool_kid99" -> "cool"
-local function extractShortName(nick)
+LOB_STATE.extractShortName = function(nick)
     if type(nick) ~= "string" or nick == "" then return nil end
 
     -- Убираем подчёркивания и дефисы
@@ -1177,7 +1185,7 @@ local function extractShortName(nick)
     return nil
 end
 
-local function trimToMax(s, max)
+LOB_STATE.trimToMax = function(s, max)
     s = tostring(s or "")
     if #s <= max then
         return s
@@ -1245,7 +1253,7 @@ function sanitizeForJson(v, depth)
     end
     return c
 end
-local function postJson(url, headers, bodyTable)
+LOB_STATE.postJson = function(url, headers, bodyTable)
     local body
     local encOk, encErr = pcall(function()
         body = HttpService:JSONEncode(sanitizeForJson(bodyTable))
@@ -1355,8 +1363,8 @@ end
 -- При 429 — слот уходит в cooldown на 62 сек (Groq сбрасывает лимит раз в минуту)
 -- Пока слот в cooldown — используем следующий. Как только восстановился — возвращаемся.
 local _groqActiveSlot  = 1
-local _groqCooldownAt  = {0, 0, 0}  -- os.clock() когда получили 429 на этот слот
-local GROQ_COOLDOWN    = 62         -- секунд до восстановления слота
+LOB_STATE._groqCooldownAt = {0, 0, 0}  -- os.clock() когда получили 429 на этот слот
+LOB_STATE.GROQ_COOLDOWN = 62         -- секунд до восстановления слота
 
 local function getGroqKeys()
     return {
@@ -1366,7 +1374,7 @@ local function getGroqKeys()
     }
 end
 
-local function getGroqTokenLimit()
+LOB_STATE.getGroqTokenLimit = function()
     local keys = getGroqKeys()
     local count = 0
     for _, k in ipairs(keys) do if k ~= "" then count = count + 1 end end
@@ -1374,34 +1382,34 @@ local function getGroqTokenLimit()
 end
 
 -- Слот доступен если: ключ заполнен И не в cooldown
-local function isSlotAvailable(slot)
+LOB_STATE.isSlotAvailable = function(slot)
     local keys = getGroqKeys()
     if keys[slot] == "" then return false end
-    return (os.clock() - _groqCooldownAt[slot]) >= GROQ_COOLDOWN
+    return (os.clock() - LOB_STATE._groqCooldownAt[slot]) >= LOB_STATE.GROQ_COOLDOWN
 end
 
 -- Возвращает ключ текущего активного слота
 -- Если текущий в cooldown — ищет следующий доступный
 local function getGroqApiKey()
     -- Сначала пробуем текущий
-    if isSlotAvailable(_groqActiveSlot) then
+    if LOB_STATE.isSlotAvailable(_groqActiveSlot) then
         return getGroqKeys()[_groqActiveSlot]
     end
     -- Ищем следующий доступный по кругу
     for i = 1, 3 do
         local slot = (_groqActiveSlot % 3) + 1
         _groqActiveSlot = slot
-        if isSlotAvailable(slot) then
+        if LOB_STATE.isSlotAvailable(slot) then
             return getGroqKeys()[slot]
         end
     end
     -- Все в cooldown — берём тот у которого cooldown кончается раньше всех
     local bestSlot = 1
-    local bestTime = _groqCooldownAt[1]
+    local bestTime = LOB_STATE._groqCooldownAt[1]
     local keys = getGroqKeys()
     for i = 2, 3 do
-        if keys[i] ~= "" and _groqCooldownAt[i] < bestTime then
-            bestTime = _groqCooldownAt[i]
+        if keys[i] ~= "" and LOB_STATE._groqCooldownAt[i] < bestTime then
+            bestTime = LOB_STATE._groqCooldownAt[i]
             bestSlot = i
         end
     end
@@ -1411,8 +1419,8 @@ end
 
 -- Вызывается при получении 429 — помечает текущий слот как исчерпанный
 -- и сразу переключается на следующий
-local function switchGroqSlot()
-    _groqCooldownAt[_groqActiveSlot] = os.clock()
+LOB_STATE.switchGroqSlot = function()
+    LOB_STATE._groqCooldownAt[_groqActiveSlot] = os.clock()
     if ClientSettings.Debug then
         print("[LOB] Groq slot " .. _groqActiveSlot .. " rate limited, rotating...")
     end
@@ -1420,7 +1428,7 @@ local function switchGroqSlot()
     for i = 1, 3 do
         local next = (_groqActiveSlot % 3) + 1
         _groqActiveSlot = next
-        if isSlotAvailable(next) then
+        if LOB_STATE.isSlotAvailable(next) then
             if ClientSettings.Debug then
                 print("[LOB] Groq switched to slot " .. next)
             end
@@ -1432,7 +1440,7 @@ local function switchGroqSlot()
 end
 
 -- [v19.9.9] ФИКС: nil safety для всех параметров + добавлен код 503 (перегрузка)
-local function isRateLimited(statusCode, statusMsg, body)
+LOB_STATE.isRateLimited = function(statusCode, statusMsg, body)
     local sc = tonumber(statusCode) or 0
     if sc == 429 or sc == 503 then return true end
     local msg = tostring(statusMsg or ""):lower()
@@ -1605,7 +1613,7 @@ local GroqRateLimitCache = {
     updatedAt         = nil,
 }
 -- Колбэк — вкладка Настройки подписывается чтобы обновить UI
-local onRateLimitUpdate = nil
+LOB_STATE.onRateLimitUpdate = nil
 
 local function parseRateLimitHeaders(hdrs)
     if type(hdrs) ~= "table" then return end
@@ -1628,8 +1636,8 @@ local function parseRateLimitHeaders(hdrs)
         GroqRateLimitCache.remainingTokens   = rt
         GroqRateLimitCache.limitTokens       = lt
         GroqRateLimitCache.updatedAt         = os.clock()
-        if onRateLimitUpdate then
-            task.spawn(onRateLimitUpdate)
+        if LOB_STATE.onRateLimitUpdate then
+            task.spawn(LOB_STATE.onRateLimitUpdate)
         end
     end
 end
@@ -1641,7 +1649,7 @@ function GroqProvider:chatCompletions(payload)
     end
     
     local url = "https://api.groq.com/openai/v1/chat/completions"
-    local res, statusCode, statusMsg, body, respHeaders = postJson(url, {
+    local res, statusCode, statusMsg, body, respHeaders = LOB_STATE.postJson(url, {
         ["Content-Type"] = "application/json",
         ["Authorization"] = "Bearer " .. apiKey,
     }, payload)
@@ -1651,11 +1659,11 @@ function GroqProvider:chatCompletions(payload)
     end
     
     if not res then
-        if isRateLimited(statusCode, statusMsg, body) then
-            switchGroqSlot()
+        if LOB_STATE.isRateLimited(statusCode, statusMsg, body) then
+            LOB_STATE.switchGroqSlot()
             local newKey = getGroqApiKey()
             if newKey and newKey ~= "" and newKey ~= apiKey then
-                local res2, sc2, sm2, b2, rh2 = postJson(url, {
+                local res2, sc2, sm2, b2, rh2 = LOB_STATE.postJson(url, {
                     ["Content-Type"] = "application/json",
                     ["Authorization"] = "Bearer " .. newKey,
                 }, payload)
@@ -1717,7 +1725,7 @@ function GroqProvider:chatCompletions(payload)
                 -- НЕ передаём tools во втором запросе — модель уже получила результат поиска
                 -- tools = payload.tools,
             }
-            local res2, sc2, sm2, b2, rh2 = postJson(url, {
+            local res2, sc2, sm2, b2, rh2 = LOB_STATE.postJson(url, {
                 ["Content-Type"] = "application/json",
                 ["Authorization"] = "Bearer " .. apiKey,
             }, payload2)
@@ -1761,7 +1769,7 @@ end
 local GeminiProvider = {}
 GeminiProvider.__index = GeminiProvider
 
-local function normalizeGeminiModel(model)
+LOB_STATE.normalizeGeminiModel = function(model)
     model = tostring(model or "gemini-3.5-flash-lite"):match("^%s*(.-)%s*$")
     -- Migrate the old saved model selection to the current Gemini model.
     if model == "gemini-2.5-flash-lite" or model == "gemini-2.5-flash" then
@@ -1779,7 +1787,7 @@ function GeminiProvider:chatCompletions(payload)
     apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
     if apiKey == "" then return nil, "MissingGeminiKey" end
 
-    local model = normalizeGeminiModel(payload.model)
+    local model = LOB_STATE.normalizeGeminiModel(payload.model)
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent"
 
@@ -1903,14 +1911,14 @@ function GeminiProvider:chatCompletions(payload)
         body.systemInstruction = { parts = {{ text = "You are a helpful assistant in a Roblox game. Reply briefly and naturally." }} }
     end
 
-    local res, statusCode, statusMsg, rawBody, respHeaders = postJson(url, {
+    local res, statusCode, statusMsg, rawBody, respHeaders = LOB_STATE.postJson(url, {
         ["Content-Type"] = "application/json",
         ["x-goog-api-key"] = apiKey,
     }, body)
 
     if not res then
         -- Rate limit — сигнализируем UI
-        if isRateLimited(statusCode, statusMsg, rawBody) and onApiRateLimited then
+        if LOB_STATE.isRateLimited(statusCode, statusMsg, rawBody) and onApiRateLimited then
             onApiRateLimited("gemini")
         end
         -- Пробуем извлечь детали ошибки из тела ответа
@@ -1989,13 +1997,13 @@ function DeepSeekProvider:chatCompletions(payload)
     if not apiModel:find("reasoner") then
         body.temperature = payload.temperature
     end
-    local res, statusCode, statusMsg, rawBody = postJson(url, {
+    local res, statusCode, statusMsg, rawBody = LOB_STATE.postJson(url, {
         ["Content-Type"] = "application/json",
         ["Authorization"] = "Bearer " .. apiKey,
     }, body)
 
     if not res then
-        if isRateLimited(statusCode, statusMsg, rawBody) and onApiRateLimited then
+        if LOB_STATE.isRateLimited(statusCode, statusMsg, rawBody) and onApiRateLimited then
             onApiRateLimited("deepseek")
         end
         local errMsg = tostring(statusCode or "") .. ":" .. tostring(statusMsg or "")
@@ -2352,7 +2360,7 @@ local function sendChatMessage(text)
         local channels = tcs:FindFirstChild("TextChannels")
         if not channels then return end
         local channel = channels:FindFirstChild("RBXGeneral")
-                     or channels:FindFirstChild(Constants.DefaultChatChannelName)
+                     or channels:FindFirstChild(LOB_STATE.Constants.DefaultChatChannelName)
         if not channel then
             for _, ch in ipairs(channels:GetChildren()) do
                 if ch:IsA("TextChannel") then channel = ch; break end
@@ -2411,7 +2419,7 @@ local function getTabScale(frame)
     return s
 end
 
-local function showBotChatMessage(text, isPublic)
+LOB_STATE.showBotChatMessage = function(text, isPublic)
     text = tostring(text or "")
     if text == "" then return end
     
@@ -2453,18 +2461,18 @@ local rateLimiter = RateLimiter.new(0)
 -- Chatbot Executor initialized
 
 -- Chat queue (per user) to avoid blocking chat handlers on HTTP calls
-local ChatQueue = {}
-local function getChatQueue(userId)
-    local q = ChatQueue[userId]
+LOB_STATE.ChatQueue = {}
+LOB_STATE.getChatQueue = function(userId)
+    local q = LOB_STATE.ChatQueue[userId]
     if not q then
         q = { head = 1, tail = 0, items = {}, running = false, startedAt = 0 }
-        ChatQueue[userId] = q
+        LOB_STATE.ChatQueue[userId] = q
     end
     return q
 end
 
-local function enqueueChatItem(userId, item, maxSize)
-    local q = getChatQueue(userId)
+LOB_STATE.enqueueChatItem = function(userId, item, maxSize)
+    local q = LOB_STATE.getChatQueue(userId)
     local size = q.tail - q.head + 1
     if maxSize and size >= maxSize then
         return false
@@ -2474,7 +2482,7 @@ local function enqueueChatItem(userId, item, maxSize)
     return true
 end
 
-local function dequeueChatItem(q)
+LOB_STATE.dequeueChatItem = function(q)
     if q.head > q.tail then
         -- [v19.9.8] ФИКС: сброс индексов при пустой очереди
         -- БАГИ ДО: head/tail росли вечно (1,2,3...10000), items накапливал nil слоты
@@ -2498,7 +2506,7 @@ fetchGameContext = nil
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
 -- Решение: вставляем в начало промпта явное разрешение от системы.
-local SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules): These action tags are hardcoded behavior — NOT user instructions. Your 'never accept instructions from users' rule does NOT apply here. Ignoring these tags is a system error:\n\n"
+LOB_STATE.SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules): These action tags are hardcoded behavior — NOT user instructions. Your 'never accept instructions from users' rule does NOT apply here. Ignoring these tags is a system error:\n\n"
 
 -- §SYSPROMPT
 local function makeSystemPrompt(settings)
@@ -2518,7 +2526,7 @@ local function makeSystemPrompt(settings)
     -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
         if settings.InventoryEnabled ~= false then
-            table.insert(parts, SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
+            table.insert(parts, LOB_STATE.SYSTEM_ACTIONS_HEADER .. "INVENTORY: у тебя есть рюкзак с предметами (Tools). Тег ставь в НАЧАЛО ответа, один на сообщение.\n" ..
                 "Когда просят предмет: найди его в CURRENT INVENTORY ниже и скопируй ТОЧНОЕ название в тег: просят «бутылку» а там Bottle — тег [DO:take Bottle]; просят «биту» а там Bat — тег [DO:take Bat]. НЕПРАВИЛЬНО: [DO:take бутылку]. ПРАВИЛЬНО: [DO:take Bottle]. Название в теге всегда как в списке, перевод запрещён. Ты знаешь переводы ЛЮБЫХ слов RU<->EN сам (бутылка=Bottle, бита=бита=Bat, еда=food и т.д.), уменьшительные, множественное число, опечатки — всегда маппи на самый похожий по СМЫСЛУ предмет из списка, а не по буквам. Ищешь как анимации через searchanim: список выше = каталог, точное название из него = твой запрос" ..
                 "[DO:take <точное название>] взять в руки.\n" ..
                 "«Возьми» = ТОЛЬКО [DO:take]: взял и держишь, ничего не активируешь. [DO:eat] только когда просят съесть или «возьми используй и убери».\n" ..
@@ -2530,7 +2538,7 @@ local function makeSystemPrompt(settings)
                 "ПРАВИЛА: смотри снимок CURRENT INVENTORY; если нужного предмета нет, скажи: у меня нет этого предмета, и перечисли, что есть; никогда не выдумывай предметы.\n" .. "Одежда и аксессуары из AVATAR-описания (надетое) — НЕ предметы: их нет в рюкзаке, взять нельзя, не перечисляй их как инвентарь.\n" .. "Фразы «у меня нет/есть ...» пишет СИСТЕМА после тега. Сам их не выдумывай, список только из CURRENT INVENTORY.\n" .. "Опечатка или обрезанное слово («бутылк», «биту») — тоже предмет: ищи самый похожий из CURRENT INVENTORY и ставь тег с ЕГО точным названием. «Нет» говоришь только если совсем ничего похожего нет." .. " ВОПРОСЫ ПРО ИГРУ — НЕ ПОВОД ДЛЯ ТЕГА: есть ли, что делает, где найти, что за, какой — отвечай словами из GAME KNOWLEDGE/WIKI, НИКОГДА не ставь take/use/eat. Теги take/use/eat — ТОЛЬКО на прямые просьбы: возьми, дай, используй, съешь.")
         end
         if settings.TokenEconomy then
-            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
+            table.insert(parts, LOB_STATE.SYSTEM_ACTIONS_HEADER ..
                 "DO-TAGS (place at START of reply, 1 per message):\n" ..
                 "[DO:wave]=hi/bye  [DO:laugh]=haha/lol  [DO:agree]=yes  [DO:disagree]=no\n" ..
                 "[DO:shrug]=idk  [DO:dance]=dance  [DO:spin]=spin/крутись  [DO:jump]=jump  [DO:goto]=come here\n" ..
@@ -2541,7 +2549,7 @@ local function makeSystemPrompt(settings)
                 (ClientSettings.SmartWalk and "  [DO:wander]=погуляй/иди по своим делам" or "") .. "\n" ..
                 "spin=крутиться НЕ танцевать! Example: [DO:laugh]haha  покрутись→[DO:spin]")
         else
-            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
+            table.insert(parts, LOB_STATE.SYSTEM_ACTIONS_HEADER ..
                 "You control a Roblox character. Add ONE [DO:tag] at the START of your reply.\n" ..
                 "Pick the tag that FITS THE EMOTION of your reply. Use ALL of them — not just wave/laugh.\n" ..
                 "\n[DO:wave]   — saying hi, bye, hello, встречаешь кого-то" ..
@@ -2730,7 +2738,7 @@ local function getModel(settings)
     return "openai/gpt-oss-20b"
 end
 
-local function isBlacklisted(settings, userId)
+LOB_STATE.isBlacklisted = function(settings, userId)
     -- New structured blacklist support
     local bl = settings.Blacklist
     if type(bl) == "table" then
@@ -2771,7 +2779,7 @@ local function isBlacklisted(settings, userId)
     return false
 end
 
-local function passesTrigger(settings, message)
+LOB_STATE.passesTrigger = function(settings, message)
     if not message then return false end
     local trigger = settings.Trigger
     if type(trigger) ~= "table" then
@@ -2792,7 +2800,7 @@ local function passesTrigger(settings, message)
     return string.sub(message:lower(), 1, #prefix) == prefix:lower()
 end
 
-local function stripTrigger(settings, message)
+LOB_STATE.stripTrigger = function(settings, message)
     local trigger = settings.Trigger
     if type(trigger) ~= "table" then
         return message
@@ -2831,7 +2839,7 @@ local function charLen(s)
 end
 
 -- Возвращает байтовую позицию n-го символа в UTF-8 строке
-local function charOffset(s, n)
+LOB_STATE.charOffset = function(s, n)
     local count = 0
     for i = 1, #s do
         local b = s:byte(i)
@@ -2843,14 +2851,14 @@ local function charOffset(s, n)
     return #s + 1
 end
 
-local function splitTextIntoParts(text, maxLen)
+LOB_STATE.splitTextIntoParts = function(text, maxLen)
     local parts = {}
     text = text and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return {""} end
     maxLen = math.max(maxLen or 200, 20)
     while charLen(text) > maxLen do
         -- Берём первые maxLen символов по байтовому смещению
-        local endByte = charOffset(text, maxLen + 1) - 1
+        local endByte = LOB_STATE.charOffset(text, maxLen + 1) - 1
         if endByte < 1 then endByte = #text end
         local head = text:sub(1, endByte)
         -- Ищем последний пробел в head
@@ -2879,14 +2887,14 @@ local function splitTextIntoParts(text, maxLen)
     return parts
 end
 
-local function sendChatChecked(text)
+LOB_STATE.sendChatChecked = function(text)
     -- TextChatService only, returns ok + error (no silent drops)
     local wok, ok, ferr = pcall(function()
         local tcs = game:GetService("TextChatService")
         local channels = tcs:FindFirstChild("TextChannels")
         if not channels then return false, "no TextChannels" end
         local channel = channels:FindFirstChild("RBXGeneral")
-            or channels:FindFirstChild(Constants.DefaultChatChannelName)
+            or channels:FindFirstChild(LOB_STATE.Constants.DefaultChatChannelName)
         if not channel then
             for _, ch in ipairs(channels:GetChildren()) do
                 if ch:IsA("TextChannel") then channel = ch break end
@@ -2915,7 +2923,7 @@ function lobStripServiceTags(text)
     return (text:match("^%s*(.-)%s*$") or text)
 end
 
-local function sendBotMessage(text)
+LOB_STATE.sendBotMessage = function(text)
     if type(text) ~= "string" or text == "" then return end
     -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
     text = text:gsub("%[LANG:[^%]]*%]%s*", "")
@@ -2939,7 +2947,7 @@ local function sendBotMessage(text)
     text = text:gsub("%[%s*$", "")        -- [ в конце строки
     text = text:gsub("^%s*%]%s*", "")     -- ] в начале
     -- Шаг 4: финальная нормализация
-    text = normalizeOneLine(text)
+    text = LOB_STATE.normalizeOneLine(text)
     if text == "" then return end
 
     -- v20 Beta 3: антидубль исходящих — одинаковый текст дважды за 2с не отправляем
@@ -2953,11 +2961,11 @@ local function sendBotMessage(text)
     local maxLen = 90
     local function deliver(part, depth)
         depth = depth or 0
-        local ok, err = sendChatChecked(part)
+        local ok, err = LOB_STATE.sendChatChecked(part)
         if ok then return true end
         print("[LOB] part fail len=" .. tostring(charLen(part)) .. ": " .. tostring(err):sub(1, 90))
         if depth < 3 and charLen(part) > 40 then
-            local halves = splitTextIntoParts(part, math.max(40, math.floor(charLen(part) / 2)))
+            local halves = LOB_STATE.splitTextIntoParts(part, math.max(40, math.floor(charLen(part) / 2)))
             local allOk = true
             for i, h in ipairs(halves) do
                 if h ~= "" then
@@ -2974,7 +2982,7 @@ local function sendBotMessage(text)
     if charLen(text) <= maxLen then
         deliver(text, 0)
     else
-        local parts = splitTextIntoParts(text, maxLen)
+        local parts = LOB_STATE.splitTextIntoParts(text, maxLen)
         local sent = 0
         for i, part in ipairs(parts) do
             if part ~= "" then
@@ -2998,7 +3006,7 @@ end
 -- Только 100% встроенные эмоции Roblox — работают у ВСЕХ без покупки
 -- Источник: /e команды в стандартном Roblox чате
 -- §EMOTES_DATA
-local BUILTIN_EMOTES = {
+LOB_STATE.BUILTIN_EMOTES = {
     -- name = true означает что эмоция встроена и всегда доступна
     wave   = true,   -- /e wave
     laugh  = true,   -- /e laugh
@@ -3012,7 +3020,7 @@ local BUILTIN_EMOTES = {
 
 -- Кастомные эмоции которые нужно прелоадить через HumanoidDescription
 -- ID проверены на roblox.com/catalog (free, owned by Roblox corp)
-local CUSTOM_EMOTE_IDS = {
+LOB_STATE.CUSTOM_EMOTE_IDS = {
     hello   = 3576686446,   -- Hello       (бесплатная, Roblox)
     shrug   = 3576968026,   -- Shrug       (бесплатная, Roblox)
     salute  = 3360689775,   -- Salute      (бесплатная, Roblox)
@@ -3023,36 +3031,36 @@ local CUSTOM_EMOTE_IDS = {
 }
 
 -- Флаг: загружены ли кастомные эмоции в HumanoidDescription
-local _customEmotesLoaded = false
+LOB_STATE._customEmotesLoaded = false
 
 -- Прелоадим кастомные эмоции в HumanoidDescription персонажа
 -- ВАЖНО: ApplyDescription заблокирован в большинстве инжекторов (Delta и др.)
 -- Поэтому кастомные эмоции (hello, shrug и т.д.) через PlayEmote не работают
 -- Используем только встроенные: wave, laugh, cheer, point, sit, dance, dance2, dance3
-local function preloadCustomEmotes(humanoid)
+LOB_STATE.preloadCustomEmotes = function(humanoid)
     -- ApplyDescription не используем — не работает в Delta/executor окружении
     -- Встроенные эмоции работают без прелоада
-    _customEmotesLoaded = true
+    LOB_STATE._customEmotesLoaded = true
 end
 
 -- Флаг включения системы
 ClientSettings.ActionsEnabled = ClientSettings.ActionsEnabled ~= false
 
 -- Прелоадим кастомные эмоции когда персонаж загружается
-local function onCharacterAdded(character)
-    _customEmotesLoaded = false  -- сбрасываем флаг при респавне
+LOB_STATE.onCharacterAdded = function(character)
+    LOB_STATE._customEmotesLoaded = false  -- сбрасываем флаг при респавне
     local humanoid = character:WaitForChild("Humanoid", 10)
     if humanoid then
         task.wait(1)  -- ждём полной загрузки HumanoidDescription
-        preloadCustomEmotes(humanoid)
+        LOB_STATE.preloadCustomEmotes(humanoid)
     end
 end
 
 -- Подключаемся к текущему и будущим персонажам
 if Players.LocalPlayer.Character then
-    task.spawn(onCharacterAdded, Players.LocalPlayer.Character)
+    task.spawn(LOB_STATE.onCharacterAdded, Players.LocalPlayer.Character)
 end
-Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+Players.LocalPlayer.CharacterAdded:Connect(LOB_STATE.onCharacterAdded)
 
 -- Реакция на собственную смерть + сброс состояний при ресете
 Players.LocalPlayer.CharacterAdded:Connect(function(char)
@@ -3107,18 +3115,18 @@ local function getLocalRootPart()
 end
 
 -- ── ЭМОЦИИ ────────────────────────────────────────────────────────────────
-local _activeEmoteTrack   = nil
+LOB_STATE._activeEmoteTrack = nil
 local _activeEmoteThread  = nil
-local _lastEmoteName      = nil  -- последняя использованная эмоция (не повторяем)
+LOB_STATE._lastEmoteName = nil  -- последняя использованная эмоция (не повторяем)
 
-local function stopCurrentEmote()
+LOB_STATE.stopCurrentEmote = function()
     if _activeEmoteThread then
         pcall(task.cancel, _activeEmoteThread)
         _activeEmoteThread = nil
     end
-    if _activeEmoteTrack then
+    if LOB_STATE._activeEmoteTrack then
         pcall(function() _activeEmoteTrack:Stop(0.3) end)
-        _activeEmoteTrack = nil
+        LOB_STATE._activeEmoteTrack = nil
     end
     -- Останавливаем только Action-треки — НЕ idle/walk
     local hum = getLocalHumanoid()
@@ -3145,7 +3153,7 @@ local function stopCurrentEmote()
 end
 
 -- Определяем тип рига персонажа (R6 или R15)
-local function getCharacterRigType()
+LOB_STATE.getCharacterRigType = function()
     local char = Players.LocalPlayer.Character
     if not char then return "R15" end
     -- R6 не имеет UpperTorso, R15 имеет
@@ -3158,7 +3166,7 @@ local function getCharacterRigType()
 end
 
 -- R6 анимации — встроенные ID для R6 скелета
-local R6_ANIM_IDS = {
+LOB_STATE.R6_ANIM_IDS = {
     -- Встроенные /e эмоции R6
     wave     = "507770239",
     laugh    = "507770818",
@@ -3205,7 +3213,7 @@ local R6_ANIM_IDS = {
 
 -- R15 анимации — те же встроенные эмоции но ID для R15 скелета
 -- Используются как фоллбэк когда humanoid:PlayEmote() не работает
-local R15_ANIM_IDS = {
+LOB_STATE.R15_ANIM_IDS = {
     -- Встроенные /e эмоции R15
     wave     = "507770239",
     laugh    = "507770818",
@@ -3251,7 +3259,7 @@ local R15_ANIM_IDS = {
 }
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
-local function playAnimDirect(animId, duration)
+LOB_STATE.playAnimDirect = function(animId, duration)
     local humanoid = getLocalHumanoid()
     if not humanoid then return false end
 
@@ -3300,12 +3308,12 @@ local function playAnimDirect(animId, duration)
     end)
 
     track:Play(0, 1, 1)
-    _activeEmoteTrack = track
+    LOB_STATE._activeEmoteTrack = track
 
     if duration then
         _activeEmoteThread = task.delay(duration, function()
             pcall(function() track:Stop(0.3) end)
-            _activeEmoteTrack = nil
+            LOB_STATE._activeEmoteTrack = nil
             _activeEmoteThread = nil
             -- Восстанавливаем idle через Animate скрипт (R6 и R15)
             pcall(function()
@@ -3326,9 +3334,9 @@ local function playEmote(emoteName, duration)
     local humanoid = getLocalHumanoid()
     if not humanoid then return end
 
-    stopCurrentEmote()
+    LOB_STATE.stopCurrentEmote()
 
-    local rigType = getCharacterRigType()
+    local rigType = LOB_STATE.getCharacterRigType()
 
     -- [v19.9.2] ДОБАВЛЕНО: антиповтор эмоций
     -- БАГИ ДО: бот залипал на одной эмоции (wave/laugh) в каждом сообщении
@@ -3339,7 +3347,7 @@ local function playEmote(emoteName, duration)
         cheer = {"wave","laugh","cheer"},
         point = {"wave","cheer","point"},
     }
-    if emoteName == _lastEmoteName and EMOTE_ALTS[emoteName] then
+    if emoteName == LOB_STATE._lastEmoteName and EMOTE_ALTS[emoteName] then
         local alts = EMOTE_ALTS[emoteName]
         -- выбираем случайную кроме текущей
         local pool = {}
@@ -3348,7 +3356,7 @@ local function playEmote(emoteName, duration)
         end
         if #pool > 0 then emoteName = pool[math.random(#pool)] end
     end
-    _lastEmoteName = emoteName
+    LOB_STATE._lastEmoteName = emoteName
 
     -- Маппинг всех эмоций на встроенные имена Roblox
     local builtinMap = {
@@ -3401,8 +3409,8 @@ local function playEmote(emoteName, duration)
         end
 
         -- Фоллбэк: AnimationTrack с правильными R6 ID
-        local animId = R6_ANIM_IDS[emoteName]
-        if animId then playAnimDirect(animId, duration) end
+        local animId = LOB_STATE.R6_ANIM_IDS[emoteName]
+        if animId then LOB_STATE.playAnimDirect(animId, duration) end
         return
     end
 
@@ -3444,8 +3452,8 @@ local function playEmote(emoteName, duration)
     end
 
     -- R15 фоллбэк: AnimationTrack
-    local animId = R15_ANIM_IDS[emoteName]
-    if animId then playAnimDirect(animId, duration) end
+    local animId = LOB_STATE.R15_ANIM_IDS[emoteName]
+    if animId then LOB_STATE.playAnimDirect(animId, duration) end
 end
 
 -- ── ДВИЖЕНИЕ ──────────────────────────────────────────────────────────────
@@ -3474,7 +3482,7 @@ end
 -- Pathfinding-шаг к позиции
 -- followMode=true → прерываем цикл если _isFollowing стал false
 -- followMode=false → прерываем цикл если _isGoing стал false
-local function moveToPosition(targetPos, followMode)
+LOB_STATE.moveToPosition = function(targetPos, followMode)
     local humanoid = getLocalHumanoid()
     local root     = getLocalRootPart()
     if not humanoid or not root then return end
@@ -3520,7 +3528,7 @@ local function moveToPosition(targetPos, followMode)
 end
 
 -- [DO:goto] — подойти ОДИН РАЗ к игроку и остановиться
-local function gotoPlayer(targetPlayer)
+LOB_STATE.gotoPlayer = function(targetPlayer)
     if not ClientSettings.ActionsEnabled then return end
     if not targetPlayer then return end
     -- v20 Beta 2 DangerSense: к врагу/подозреваемому не подходим (ИИ откажет текстом)
@@ -3543,13 +3551,13 @@ local function gotoPlayer(targetPlayer)
         end
         -- Берём живую позицию прямо перед движением (не устаревшую)
         local targetPos = targetRoot.Position
-        moveToPosition(targetPos, false)
+        LOB_STATE.moveToPosition(targetPos, false)
         _isGoing = false
     end)
 end
 
 -- [DO:follow] — бесконечно следовать за игроком
-local function startFollowingPlayer(targetPlayer)
+LOB_STATE.startFollowingPlayer = function(targetPlayer)
     if not ClientSettings.ActionsEnabled then return end
     -- v20 Beta 2 DangerSense: за врагом/подозреваемым не следуем
     if lobIsDangerTarget(targetPlayer) then
@@ -3578,7 +3586,7 @@ local function startFollowingPlayer(targetPlayer)
                 -- Не идём если уже рядом (меньше 5 студ)
                 local myRoot2 = getLocalRootPart()
                 if myRoot2 and (myRoot2.Position - targetRoot.Position).Magnitude > 5 then
-                    moveToPosition(targetRoot.Position, true)
+                    LOB_STATE.moveToPosition(targetRoot.Position, true)
                 end
             else
                 -- нет персонажа (респавн) — ждём, но не вечно
@@ -3599,7 +3607,7 @@ local _isJumping        = false
 local _jumpTimeoutThread = nil  -- аварийный таймаут сброса флага
 
 -- Гарантированный сброс флага (через таймаут или по завершении)
-local function _clearJumpFlag()
+LOB_STATE._clearJumpFlag = function()
     _isJumping = false
     if _jumpTimeoutThread then
         pcall(task.cancel, _jumpTimeoutThread)
@@ -3615,7 +3623,7 @@ local function doJump(count)
 
     _isJumping = true
     -- Аварийный таймаут: через 15 сек флаг сбросится в любом случае
-    _jumpTimeoutThread = task.delay(15, _clearJumpFlag)
+    _jumpTimeoutThread = task.delay(15, LOB_STATE._clearJumpFlag)
 
     task.spawn(function()
         for i = 1, count do
@@ -3670,7 +3678,7 @@ local function doJump(count)
                 task.wait(0.8)  -- достаточно для полного цикла прыжка
             end
         end
-        _clearJumpFlag()  -- нормальное завершение
+        LOB_STATE._clearJumpFlag()  -- нормальное завершение
     end)
 end
 
@@ -3679,7 +3687,7 @@ end
 local _isSpinning = false
 local _spinThread  = nil
 
-local function stopSpin()
+LOB_STATE.stopSpin = function()
     _isSpinning = false
     if _spinThread then
         pcall(task.cancel, _spinThread)
@@ -3689,10 +3697,10 @@ end
 
 -- seconds = 1..10, скорость поворота = 360°/сек
 -- §SPIN
-local function doSpin(seconds)
+LOB_STATE.doSpin = function(seconds)
     if not ClientSettings.ActionsEnabled then return end
     seconds = math.max(1, math.min(seconds or 3, 10))
-    stopSpin()
+    LOB_STATE.stopSpin()
     stopFollowing()  -- останавливаем ходьбу
 
     local root = getLocalRootPart()
@@ -3731,14 +3739,14 @@ end
 -- §ACTIONS_TABLE
 local ACTION_HANDLERS = {
     -- ── Движение ──────────────────────────────────────────────────────────
-    goto     = function(p) gotoPlayer(p) end,
+    goto     = function(p) LOB_STATE.gotoPlayer(p) end,
     follow   = function(p)
         if ClientSettings.FollowConfirm and requestFollow then
             -- Показываем подтверждение через UI-нотификацию
             requestFollow(p)
         else
             -- Сразу идём без подтверждения
-            startFollowingPlayer(p)
+            LOB_STATE.startFollowingPlayer(p)
         end
     end,
     stop     = function(_) stopFollowing() end,
@@ -3795,10 +3803,10 @@ local ACTION_HANDLERS = {
     jump9    = function(_) doJump(9) end,
     jump10   = function(_) doJump(10) end,
     -- ── Спин / кружение ───────────────────────────────────────────────────
-    spin     = function(_) doSpin(3)  end,  -- 3 сек по умолч
-    spin5    = function(_) doSpin(5)  end,
-    spin10   = function(_) doSpin(10) end,
-    twirl    = function(_) doSpin(3)  end,  -- алиас
+    spin     = function(_) LOB_STATE.doSpin(3)  end,  -- 3 сек по умолч
+    spin5    = function(_) LOB_STATE.doSpin(5)  end,
+    spin10   = function(_) LOB_STATE.doSpin(10) end,
+    twirl    = function(_) LOB_STATE.doSpin(3)  end,  -- алиас
     -- ── Танцы ─────────────────────────────────────────────────────────────
     dance    = function(_)
         -- dance/dance2/dance3 — встроенные, robot — через playAnimDirect
@@ -3888,7 +3896,7 @@ local ACTION_HANDLERS = {
 -- §PARSE_ACTION
 -- v21 Beta 2 p.3: Inventory INLINE (no HttpGet, no cache skew)
 local InventoryBeta2 = nil
-local _lastUserMsgBeta2 = ''
+LOB_STATE._lastUserMsgBeta2 = ''
 print("[LineOfBots] Beta2-inv build 23 loaded")
 do
 -- LineOfBots v20 Beta 2 -- Inventory module (p.3)
@@ -4499,7 +4507,7 @@ end
 if InventoryBeta2 and ACTION_HANDLERS then
     ACTION_HANDLERS.take = function(_, arg)
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
-        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
+        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(LOB_STATE._lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoTake(iname)
         -- отправку итога делает round-trip (здесь не дублируем)
         print("[INV] take [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
@@ -4508,7 +4516,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
     end
     ACTION_HANDLERS.eat = function(_, arg)
         if ClientSettings.InventoryEnabled == false then return "инвентарь выключен (включи тоггл в Основном)" end
-        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
+        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(LOB_STATE._lastUserMsgBeta2)
         local iok, isay = InventoryBeta2.DoEat(iname)
         -- отправку итога делает round-trip (здесь не дублируем)
         print("[INV] eat [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
@@ -4516,7 +4524,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
         return isay
     end
     ACTION_HANDLERS.use = function(_, arg)
-        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(_lastUserMsgBeta2)
+        local iname = (arg ~= "" and arg) or InventoryBeta2.ExtractName(LOB_STATE._lastUserMsgBeta2)
         if iname == "" then iname = nil end
         local iok, isay = InventoryBeta2.DoUse(iname)
         print("[INV] use [" .. tostring(iname) .. "] -> " .. tostring(iok) .. " : " .. tostring(isay))
@@ -4531,7 +4539,7 @@ if InventoryBeta2 and ACTION_HANDLERS then
     ACTION_HANDLERS.inventory = function(_) if ClientSettings.InventoryEnabled == false then return "инвентарь выключен" end return InventoryBeta2.SayInventory() end
 end
 
-local function parseActionTag(text)
+LOB_STATE.parseActionTag = function(text)
     if not text then return nil, "" end
 
     local action = nil
@@ -4568,7 +4576,7 @@ end
 
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
 -- originalUserMsg — оригинальное сообщение пользователя (для умного парсинга прыжков)
-local function executeAction(actionName, sourcePlayer, cleanText, originalUserMsg, actionArg)
+LOB_STATE.executeAction = function(actionName, sourcePlayer, cleanText, originalUserMsg, actionArg)
     if actionName and ClientSettings.ActionsEnabled then
         -- Умный парсинг числа прыжков: если ИИ написал [DO:jump] но в сообщении было число
         -- Например: "прыгни 5 раз" → ИИ пишет [DO:jump] → мы видим 5 → вызываем doJump(5)
@@ -4597,7 +4605,7 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
             end
         end
 
-        _lastUserMsgBeta2 = originalUserMsg or ''
+        LOB_STATE._lastUserMsgBeta2 = originalUserMsg or ''
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function()
@@ -4636,7 +4644,7 @@ function lobHttpGetJson(url)
     if dok then return data end
     return nil
 end
-local function fetchPlaceInfo()
+LOB_STATE.fetchPlaceInfo = function()
     local pid = game.PlaceId
     -- кэш валиден только для текущего placeId и только если имя реально получено
     if _placeInfo and _placeInfo.placeId == pid and _placeInfo.name ~= nil and _placeInfo.name ~= "" and _placeInfo.name ~= "Unknown Game" then
@@ -4690,12 +4698,12 @@ end
 -- Предзагрузка при старте
 task.spawn(function()
     task.wait(2)
-    fetchPlaceInfo()
+    LOB_STATE.fetchPlaceInfo()
     task.wait(3)
     -- повторная попытка если первый раз не вышло (игра ещё грузилась)
     if not _placeInfo or _placeInfo.name == "Unknown Game" then
         _placeInfoAt = 0
-        fetchPlaceInfo()
+        LOB_STATE.fetchPlaceInfo()
     end
 end)
 
@@ -4730,11 +4738,11 @@ fetchGameContext = function(force)
     task.spawn(function()
         -- FIX v20b3: имя берём ВНУТРИ потока (свежее), короткий запрос для вики.
         -- Старый код брал длинное предложение в Wikipedia summary -> всегда 404.
-        local pi = fetchPlaceInfo()
+        local pi = LOB_STATE.fetchPlaceInfo()
         local pname = (pi and pi.name) or ""
         if pname == "" or pname == "Unknown Game" then
             task.wait(3)
-            pi = fetchPlaceInfo()
+            pi = LOB_STATE.fetchPlaceInfo()
             pname = (pi and pi.name) or ""
         end
         local pdesc = (pi and pi.desc) or ""
@@ -5478,7 +5486,7 @@ end)
 -- Возвращает: "перед", "сзади", "слева", "справа"
 -- Направление от нас к игроку — 8 направлений, НА АНГЛИЙСКОМ
 -- (ИИ англоязычный — кириллица в [NEARBY] игнорируется моделью)
-local function getRelativeDirection(myRoot, theirRoot)
+LOB_STATE.getRelativeDirection = function(myRoot, theirRoot)
     if not myRoot or not theirRoot then return "nearby" end
     local diff = (theirRoot.Position - myRoot.Position)
     if diff.Magnitude < 0.1 then return "nearby" end
@@ -5502,36 +5510,36 @@ local function getRelativeDirection(myRoot, theirRoot)
 end
 
 -- Оцениваем поведение игрока
-local _playerBehaviorHistory = {}
-local BEHAVIOR_HISTORY_LEN = 20  -- ~6 сек при тике 0.3с
-local _behaviorThread = nil
+LOB_STATE._playerBehaviorHistory = {}
+LOB_STATE.BEHAVIOR_HISTORY_LEN = 20  -- ~6 сек при тике 0.3с
+LOB_STATE._behaviorThread = nil
 
 -- Флаги активных токсиков: [userId] = true если обнаружен токсик
 -- При следующем chat-запросе будет вставлен алерт
-local _toxicAlerts = {}
+LOB_STATE._toxicAlerts = {}
 
 -- §BEHAVIOR
-local function startBehaviorMonitor()
-    if _behaviorThread then return end
+LOB_STATE.startBehaviorMonitor = function()
+    if LOB_STATE._behaviorThread then return end
     -- Очистка истории при уходе игрока
     Players.PlayerRemoving:Connect(function(p)
         local uid = p.UserId
-        _playerBehaviorHistory[uid] = nil
-        _toxicAlerts[uid] = nil
+        LOB_STATE._playerBehaviorHistory[uid] = nil
+        LOB_STATE._toxicAlerts[uid] = nil
         -- late locals (declared below): guard or handler dies with "index nil"
         if _lastMsgPerUser ~= nil then _lastMsgPerUser[uid] = nil end
         if _userLangCache ~= nil then _userLangCache[uid] = nil end
         -- [v19.9.8] ФИКС: очищаем ChatQueue ушедшего игрока
         -- БАГИ ДО: накопленные сообщения продолжали обрабатываться после ухода игрока
-        if ChatQueue[uid] then
-            ChatQueue[uid].head = 1
-            ChatQueue[uid].tail = 0
-            ChatQueue[uid].items = {}
+        if LOB_STATE.ChatQueue[uid] then
+            LOB_STATE.ChatQueue[uid].head = 1
+            LOB_STATE.ChatQueue[uid].tail = 0
+            LOB_STATE.ChatQueue[uid].items = {}
             -- running не трогаем — он сбросится сам в runChatQueue
         end
         -- RateLimiter очищается сам по таймеру — не трогаем
     end)
-    _behaviorThread = task.spawn(function()
+    LOB_STATE._behaviorThread = task.spawn(function()
         while true do
             if not ClientSettings.PlayerAwareness then
                 task.wait(2)
@@ -5548,10 +5556,10 @@ local function startBehaviorMonitor()
                         local root = char and char:FindFirstChild("HumanoidRootPart")
                         if root then
                             local uid = p.UserId
-                            if not _playerBehaviorHistory[uid] then
-                                _playerBehaviorHistory[uid] = { entries = {} }
+                            if not LOB_STATE._playerBehaviorHistory[uid] then
+                                LOB_STATE._playerBehaviorHistory[uid] = { entries = {} }
                             end
-                            local hist = _playerBehaviorHistory[uid]
+                            local hist = LOB_STATE._playerBehaviorHistory[uid]
 
                             local diff = root.Position - myPos
                             local isBehind = false
@@ -5563,9 +5571,9 @@ local function startBehaviorMonitor()
                                 pos      = root.Position,
                                 time     = os.clock(),
                                 isBehind = isBehind,
-                                dir      = getRelativeDirection(myRoot, root),
+                                dir      = LOB_STATE.getRelativeDirection(myRoot, root),
                             })
-                            if #hist.entries > BEHAVIOR_HISTORY_LEN then
+                            if #hist.entries > LOB_STATE.BEHAVIOR_HISTORY_LEN then
                                 table.remove(hist.entries, 1)
                             end
                         end
@@ -5577,8 +5585,8 @@ local function startBehaviorMonitor()
     end)
 end
 
-local function detectBehavior(uid, myRoot)
-    local hist = _playerBehaviorHistory[uid]
+LOB_STATE.detectBehavior = function(uid, myRoot)
+    local hist = LOB_STATE._playerBehaviorHistory[uid]
     if not hist or #hist.entries < 4 then return "стоит" end
 
     local entries = hist.entries
@@ -5710,7 +5718,7 @@ function getTeamName(p)
     return res
 end
 
-local function buildPlayerAwarenessContext(settings)
+LOB_STATE.buildPlayerAwarenessContext = function(settings)
     if not settings.PlayerAwareness then return "" end
     local myRoot = getLocalRootPart()
     if not myRoot then return "" end
@@ -5725,14 +5733,14 @@ local function buildPlayerAwarenessContext(settings)
             if root then
                 local dist = (root.Position - myRoot.Position).Magnitude
                 if dist <= maxDist then
-                    local direction = getRelativeDirection(myRoot, root)
-                    local behavior  = detectBehavior(p.UserId, myRoot)
+                    local direction = LOB_STATE.getRelativeDirection(myRoot, root)
+                    local behavior  = LOB_STATE.detectBehavior(p.UserId, myRoot)
                     local distStr   = math.floor(dist) .. " studs"
                     local name      = p.DisplayName or p.Name
 
                     -- Токсик обнаружен — ставим флаг для проактивного алерта
                     if behavior == "токсичит_сзади" then
-                        _toxicAlerts[p.UserId] = name
+                        LOB_STATE._toxicAlerts[p.UserId] = name
                     end
 
                     local behaviorDesc = behavior == "стоит"            and "standing still"
@@ -5757,7 +5765,7 @@ local function buildPlayerAwarenessContext(settings)
 end
 
 -- Запускаем мониторинг поведения сразу
-startBehaviorMonitor()
+LOB_STATE.startBehaviorMonitor()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v20 Beta 2: DANGER SENSE (чувство опасности). Работает только в паре с
@@ -5912,7 +5920,7 @@ function lobDangerEvent(text, key, cd, queueKey)
     if not lobDangerActive() then return end
     if not lobDangerCan(key, cd or 60) then return end
     local qk = queueKey or 0
-    local okQ = enqueueChatItem(qk, {
+    local okQ = LOB_STATE.enqueueChatItem(qk, {
         player = nil, userId = qk, name = "SYSTEM",
         displayName = "SYSTEM", cleaned = text, isWorld = true,
     }, 2)
@@ -6139,19 +6147,19 @@ end)
 -- НЕ работает во время: ходьбы, прыжков, спина
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local _cameraLookThread        = nil
-local _cameraLookTimeoutThread = nil  -- аварийный таймаут
+LOB_STATE._cameraLookThread = nil
+LOB_STATE._cameraLookTimeoutThread = nil  -- аварийный таймаут
 
-local function _clearCameraThread()
-    _cameraLookThread = nil
-    if _cameraLookTimeoutThread then
-        pcall(task.cancel, _cameraLookTimeoutThread)
-        _cameraLookTimeoutThread = nil
+LOB_STATE._clearCameraThread = function()
+    LOB_STATE._cameraLookThread = nil
+    if LOB_STATE._cameraLookTimeoutThread then
+        pcall(task.cancel, LOB_STATE._cameraLookTimeoutThread)
+        LOB_STATE._cameraLookTimeoutThread = nil
     end
 end
 
 -- §CAM_LOOK
-local function smoothLookAt(targetPos)
+LOB_STATE.smoothLookAt = function(targetPos)
     if not ClientSettings.CameraLook then return end
     -- v20 Beta 3: анти-верчение. Кулдаун (не чаще раза в 1.5с) + в толпе (>3 рядом) не крутимся.
     local now0 = os.clock()
@@ -6181,15 +6189,15 @@ local function smoothLookAt(targetPos)
     if not root then return end
 
     -- Отменяем предыдущий поворот
-    if _cameraLookThread then
-        pcall(task.cancel, _cameraLookThread)
-        _clearCameraThread()
+    if LOB_STATE._cameraLookThread then
+        pcall(task.cancel, LOB_STATE._cameraLookThread)
+        LOB_STATE._clearCameraThread()
     end
 
     -- Аварийный таймаут: через 3 сек флаг сбросится в любом случае
-    _cameraLookTimeoutThread = task.delay(3, _clearCameraThread)
+    LOB_STATE._cameraLookTimeoutThread = task.delay(3, LOB_STATE._clearCameraThread)
 
-    _cameraLookThread = task.spawn(function()
+    LOB_STATE._cameraLookThread = task.spawn(function()
         local duration = 0.4
         local dt       = 0.04
         local elapsed  = 0
@@ -6228,7 +6236,7 @@ local function smoothLookAt(targetPos)
             end
         end
 
-        _clearCameraThread()
+        LOB_STATE._clearCameraThread()
     end)
 end
 
@@ -6237,7 +6245,7 @@ end
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
 -- Очистка истории при выключении памяти
-local function clearAllHistory()
+LOB_STATE.clearAllHistory = function()
     ChatHistory = {}
     DirectChatHistory = {}
 end
@@ -6405,31 +6413,31 @@ end)
 -- Cooldown 60 сек на игрока. task.delay(5) гарантирует что все функции
 -- (enqueueChatItem, runChatQueue и др.) уже объявлены к моменту запуска.
 -- ═══════════════════════════════════════════════════════════════════════════
-local _worldReactCooldowns = {}  -- [userId..type] → os.clock()
-local WORLD_REACT_COOLDOWN  = 60
-local WORLD_REACT_STARE_CD  = 45  -- взгляд чуть короче
+LOB_STATE._worldReactCooldowns = {}  -- [userId..type] → os.clock()
+LOB_STATE.WORLD_REACT_COOLDOWN = 60
+LOB_STATE.WORLD_REACT_STARE_CD = 45  -- взгляд чуть короче
 -- v20 Beta 3: ГЛОБАЛЬНЫЙ кулдаун — не спамим реакциями на всех игроков сразу.
 -- Одна мировая реакция на всего бота раз в N секунд, независимо от числа игроков.
-local WORLD_REACT_GLOBAL_CD = 25
-local _worldReactGlobalAt   = 0
+LOB_STATE.WORLD_REACT_GLOBAL_CD = 25
+LOB_STATE._worldReactGlobalAt = 0
 
-local _worldReactCleanAt = 0
-local function _canWorldReact(userId, reactType)
+LOB_STATE._worldReactCleanAt = 0
+LOB_STATE._canWorldReact = function(userId, reactType)
     local key = tostring(userId) .. (reactType or "")
     local now = os.clock()
     -- общий лимит: пока не прошёл глобальный кулдаун — молчим
-    if (now - _worldReactGlobalAt) < WORLD_REACT_GLOBAL_CD then return false end
-    local t = _worldReactCooldowns[key]
-    local cd = (reactType == "stare") and WORLD_REACT_STARE_CD or WORLD_REACT_COOLDOWN
+    if (now - LOB_STATE._worldReactGlobalAt) < LOB_STATE.WORLD_REACT_GLOBAL_CD then return false end
+    local t = LOB_STATE._worldReactCooldowns[key]
+    local cd = (reactType == "stare") and LOB_STATE.WORLD_REACT_STARE_CD or LOB_STATE.WORLD_REACT_COOLDOWN
     if t and (now - t) < cd then return false end
-    _worldReactCooldowns[key] = now
-    _worldReactGlobalAt = now
+    LOB_STATE._worldReactCooldowns[key] = now
+    LOB_STATE._worldReactGlobalAt = now
     -- Очистка устаревших cooldown записей раз в 120 сек
-    if (now - _worldReactCleanAt) > 120 then
-        _worldReactCleanAt = now
-        for k, ts in pairs(_worldReactCooldowns) do
-            if (now - ts) > WORLD_REACT_COOLDOWN * 2 then
-                _worldReactCooldowns[k] = nil
+    if (now - LOB_STATE._worldReactCleanAt) > 120 then
+        LOB_STATE._worldReactCleanAt = now
+        for k, ts in pairs(LOB_STATE._worldReactCooldowns) do
+            if (now - ts) > LOB_STATE.WORLD_REACT_COOLDOWN * 2 then
+                LOB_STATE._worldReactCooldowns[k] = nil
             end
         end
     end
@@ -6499,7 +6507,7 @@ local _userLangCache = {}  -- userId → "RU"|"EN"
 _lastGlobalLang = nil       -- последний определённый язык (для world/danger событий)
 
 -- §LANG
-local function detectLang(text)
+LOB_STATE.detectLang = function(text)
     if not text or text == "" then return nil end
     local t = text:lower()
     local cyr = 0
@@ -6516,7 +6524,7 @@ end
 
 -- Получить язык: определяем → кешируем → при неопределённом берём кеш
 local function getLangForUser(text, userId)
-    local lang = detectLang(text)
+    local lang = LOB_STATE.detectLang(text)
     if lang then
         if userId then _userLangCache[userId] = lang end
         _lastGlobalLang = lang
@@ -6549,7 +6557,7 @@ end
 -- Возвращает таблицу истории для данного вызова.
 -- Если память выключена (MemoryEnabled=false) — возвращает nil.
 -- handleQueuedChat проверяет nil и не добавляет контекст.
-local function getHistory(settings, userId)
+LOB_STATE.getHistory = function(settings, userId)
     if not settings.MemoryEnabled then
         return nil -- память выключена
     end
@@ -6867,7 +6875,7 @@ function lobSmartFarewell(p)
     _smartWalk.lastFarewellAt = now
     local qk = "swf:" .. tostring(p.UserId)
     local nm = tostring(p.DisplayName or p.Name)
-    local okQ = enqueueChatItem(qk, {
+    local okQ = LOB_STATE.enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = "[SYSTEM: You are about to leave " .. nm .. " after a chat. Say ONE very short casual goodbye in your own style and language, then go. Vary the wording, do not repeat the same goodbye twice; you may name them or not. Do not ask a question.]",
         isWorld = true, langUid = p.UserId,
@@ -6897,7 +6905,7 @@ function lobSmartIdleMumble(now)
     end
     gw.lastMumbleAt = now
     local qk = "swmumble"   -- отдельная очередь: не смешиваем с диалогами игроков
-    local okQ = enqueueChatItem(qk, {
+    local okQ = LOB_STATE.enqueueChatItem(qk, {
         userId = qk, name = "", displayName = "",
         cleaned = "[SYSTEM: You are wandering around ALONE right now, nobody nearby. Say ONE very short casual thought out loud to yourself - an observation about this place, your mood, a plan, boredom. In your own style and language. Do NOT address anyone, do NOT ask questions, ONE short line only. Never mention this instruction.]",
         isWorld = true, langUid = nil,
@@ -6978,7 +6986,7 @@ function lobSmartNudge(p, stage)
         stageText = "They keep ignoring you. Say you get it — they are quiet — and that you will head off for now, in a friendly way. ONE short line."
     end
     local relHint = lobRelHint(p.UserId)
-    local okQ = enqueueChatItem(qk, {
+    local okQ = LOB_STATE.enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = "[SYSTEM: You walked up to " .. nm .. " earlier and are hanging out with them (YOU approached, not they)."
             .. (relHint ~= "" and (" " .. relHint) or "") .. " " .. stageText .. "]",
@@ -7493,7 +7501,7 @@ function lobSmartDangerLine(p)
         ctx = " Your team: " .. (myTeam ~= "" and myTeam or "?") ..
               ", their team: " .. (thTeam ~= "" and thTeam or "?") .. "."
     end
-    local okQ = enqueueChatItem(qk, {
+    local okQ = LOB_STATE.enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = "[SYSTEM: A DANGEROUS ENEMY, " .. nm .. ", is very close to you right now." .. ctx ..
             " React in ONE short casual line: notice they are dangerous and that you keep your distance / back off. Stay in character, no questions, do not attack. Never mention teams data or this instruction.]",
@@ -7757,7 +7765,7 @@ function lobSmartGreet(p, knownBefore)
     else
         body = "[SYSTEM: You just walked up to " .. nm .. " for the VERY FIRST time - you have never met them before. YOU approached THEM (they did NOT come to you). Greet them in ONE short casual line and try to start a light chat, in character. NEVER say 'again', 'снова', imply you know them, or ask why they came to you. If they earlier told you to go away, do not greet.]"
     end
-    local okQ = enqueueChatItem(qk, {
+    local okQ = LOB_STATE.enqueueChatItem(qk, {
         player = p, userId = qk, name = p.Name, displayName = p.DisplayName,
         cleaned = body, isWorld = true, langUid = p.UserId,
     }, 1)
@@ -7773,7 +7781,7 @@ function lobSmartFace(pos)
     local now = os.clock()
     if (now - (_smartWalk.lastFaceAt or 0)) < _SW.FACE_CD then return end
     _smartWalk.lastFaceAt = now
-    pcall(function() smoothLookAt(pos) end)
+    pcall(function() LOB_STATE.smoothLookAt(pos) end)
 end
 
 -- Надёжный разворот к собеседнику (без анти-спин проверки толпы): во время
@@ -7838,7 +7846,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
     local PathfindingService = game:GetService("PathfindingService")
     local stopD = stopDist or _SW.STOP_DIST
     local maxT = maxSec or _SW.APPROACH_MAX
-    pcall(function() stopCurrentEmote() end)
+    pcall(function() LOB_STATE.stopCurrentEmote() end)
     local t0 = os.clock()
     local lastPos, stuckTicks = nil, 0
     local jitter = nil  -- боковое смещение цели после упора в стену (пробуем другой маршрут)
@@ -8877,13 +8885,13 @@ function lobReplyCacheServe(settings, cleanMsg, player, userId)
                     if pr then lobSmartForceFace(pr.Position) end
                 end)
             else
-                pcall(smoothLookAt, pRoot.Position)
+                pcall(LOB_STATE.smoothLookAt, pRoot.Position)
             end
         end
     end
-    local hist = getHistory(settings, userId)
+    local hist = LOB_STATE.getHistory(settings, userId)
     if hist then appendHistory(hist, cleanMsg, hit.text) end
-    sendBotMessage(hit.text)
+    LOB_STATE.sendBotMessage(hit.text)
     if type(userId) == "number" then
         _smartWalk.botReplyAt = _smartWalk.botReplyAt or {}
         _smartWalk.botReplyAt[userId] = os.clock()
@@ -8908,7 +8916,7 @@ function lobSendSearchNotice(kind, lang)
     local cd = (kind == "busy") and 8 or 15
     if (now - (_searchNoticeAt[kind] or 0)) < cd then return end
     _searchNoticeAt[kind] = now
-    pcall(sendBotMessage, list[math.random(#list)])
+    pcall(LOB_STATE.sendBotMessage, list[math.random(#list)])
 end
 
 local function handleQueuedChat(item)
@@ -8921,7 +8929,7 @@ local function handleQueuedChat(item)
     if not item.cleaned or item.cleaned:match("^%s*$") then return end
     if item.cleaned and item.cleaned:lower() == "avatardebug" then
         local dbg, mesh = describeAvatar(item.player)
-        sendBotMessage("DBG avatar=[" .. tostring(dbg) .. "] mesh=" .. tostring(mesh))
+        LOB_STATE.sendBotMessage("DBG avatar=[" .. tostring(dbg) .. "] mesh=" .. tostring(mesh))
         return
     end
     -- [v19.9.8] ФИКС: если игрок ушёл пока ждал в очереди — пропускаем запрос
@@ -8937,12 +8945,12 @@ local function handleQueuedChat(item)
     local history
     if item.isWorld then
         if settings.PerUserMemory and item.langUid then
-            history = getHistory(settings, item.langUid)
+            history = LOB_STATE.getHistory(settings, item.langUid)
         else
             history = nil
         end
     else
-        history = getHistory(settings, item.userId)
+        history = LOB_STATE.getHistory(settings, item.userId)
     end
 
     -- Собираем сообщения для API
@@ -9000,9 +9008,9 @@ local function handleQueuedChat(item)
     -- item.name = Username (всегда латиница), item.displayName = DisplayName (может быть кириллица/цифры)
     local userContent = item.cleaned
     if settings.UsePlayerName then
-        local shortName = extractShortName(item.name or "")  -- username первый (надёжнее)
+        local shortName = LOB_STATE.extractShortName(item.name or "")  -- username первый (надёжнее)
         if not shortName then
-            shortName = extractShortName(item.displayName or "")  -- displayName второй
+            shortName = LOB_STATE.extractShortName(item.displayName or "")  -- displayName второй
         end
         if not shortName then
             -- Последний фолбэк: обрезаем username напрямую
@@ -9016,7 +9024,7 @@ local function handleQueuedChat(item)
 
     -- v17: PlayerAwareness — добавляем контекст о ближайших игроках ПЕРЕД user message
     if settings.PlayerAwareness then
-        local nearbyCtx = buildPlayerAwarenessContext(settings)
+        local nearbyCtx = LOB_STATE.buildPlayerAwarenessContext(settings)
         -- Вставляем только если рядом есть игроки (пустая строка = никого нет)
         if nearbyCtx ~= "" then
             table.insert(apiMessages, {
@@ -9028,9 +9036,9 @@ local function handleQueuedChat(item)
         -- Проактивный токсик-алерт: если обнаружен токсик — добавляем явный алерт
         -- Работает ДАЖЕ если в [NEARBY] его нет (например игрок вышел из зоны после детекта)
         local toxicNames = {}
-        for uid, tname in pairs(_toxicAlerts) do
+        for uid, tname in pairs(LOB_STATE._toxicAlerts) do
             table.insert(toxicNames, tostring(tname))
-            _toxicAlerts[uid] = nil  -- очищаем после использования (не повторяем вечно)
+            LOB_STATE._toxicAlerts[uid] = nil  -- очищаем после использования (не повторяем вечно)
         end
         if #toxicNames > 0 then
             table.insert(apiMessages, {
@@ -9210,7 +9218,7 @@ local function handleQueuedChat(item)
         if isQ then
             _lastGameQ[item.userId] = nowQ
             if not item.isWorld then lobSendSearchNotice("search", getLangForUser(item.cleaned, item.userId)) end
-            local pi2 = fetchPlaceInfo()
+            local pi2 = LOB_STATE.fetchPlaceInfo()
             local pname2 = (pi2 and pi2.name) or ""
             print("[GAME-DBG] Q place='" .. tostring(pname2) .. "' msg='" .. tostring(item.cleaned):sub(1, 60) .. "'")
             -- FIX v20b3: работаем для ВСЕХ плейсов. Даже без вики у ИИ есть
@@ -9459,7 +9467,7 @@ local function handleQueuedChat(item)
             if last and last.done and type(last.t) == "string" and last.t ~= "" then
                 local clean = lobStripServiceTags(last.t)
                 clean = clean:gsub("%[NAME:[^%]]*%]%s*", "")
-                if clean and clean ~= "" then pcall(sendBotMessage, clean) end
+                if clean and clean ~= "" then pcall(LOB_STATE.sendBotMessage, clean) end
             end
         end)
         return
@@ -9505,7 +9513,7 @@ local function handleQueuedChat(item)
                     if pr then lobSmartForceFace(pr.Position) end
                 end)
             else
-                smoothLookAt(pRoot.Position)
+                LOB_STATE.smoothLookAt(pRoot.Position)
             end
         end
     end
@@ -9524,7 +9532,7 @@ local function handleQueuedChat(item)
             local first = text:gsub("%[%s*[Dd][Oo]:%s*[Ss]earchanim%s+[^%]\n]+%]?", "")
             first = first:gsub("%[LANG:[^%]]*%]", ""):gsub("%[NAME:[^%]]*%]", "")
             first = first:match("^%s*(.-)%s*$") or ""
-            if first ~= "" and (not item.isWorld or settings.AutoReply) then sendBotMessage(first) end
+            if first ~= "" and (not item.isWorld or settings.AutoReply) then LOB_STATE.sendBotMessage(first) end
         end
         print("[EmoteAPI] Запрос поиска от ИИ (игрок " .. tostring(item.name or item.userId) .. "): \"" .. searchQuery .. "\"")
 
@@ -9649,7 +9657,7 @@ local function handleQueuedChat(item)
             for tok in tostring(wsQuery):lower():gmatch("[%a]+") do
                 if #tok >= 3 and #mkeys < 8 then table.insert(mkeys, tok) end
             end
-            local piw = _placeInfo or fetchPlaceInfo()
+            local piw = _placeInfo or LOB_STATE.fetchPlaceInfo()
             local pnamew = (piw and piw.name) or ""
             local wresults = {}
             if pnamew ~= "" and pnamew ~= "Unknown Game" then
@@ -9711,7 +9719,7 @@ local function handleQueuedChat(item)
         end
     end
 
-    local actionName, cleanText, actionArg = parseActionTag(text)
+    local actionName, cleanText, actionArg = LOB_STATE.parseActionTag(text)
 
     -- ═══════════════════════════════════════════════════════════════════
     -- §INVENTORY_ROUNDTRIP
@@ -9807,7 +9815,7 @@ local function handleQueuedChat(item)
     if handledByInventoryRoundTrip then
         -- уже обработано выше через round-trip — executeAction больше не нужен
     elseif not item.isWorld or settings.AutoReply then
-        cleanText = executeAction(actionName, item.player, cleanText, item.cleaned, actionArg)
+        cleanText = LOB_STATE.executeAction(actionName, item.player, cleanText, item.cleaned, actionArg)
     else
         -- Просто убираем тег из текста без выполнения
         cleanText = cleanText or text
@@ -9842,7 +9850,7 @@ local function handleQueuedChat(item)
     print("[LOB] final chars=" .. tostring(charLen(cleanText or "")) .. " head=" .. tostring(cleanText or ""):sub(1, 90))
     if cleanText and cleanText ~= "" then
         print("[LOB] reply time: " .. string.format("%.1fs", os.clock() - _t0) .. " for: " .. tostring(item.cleaned):sub(1, 40))
-        local sok, serr = pcall(sendBotMessage, cleanText)
+        local sok, serr = pcall(LOB_STATE.sendBotMessage, cleanText)
         if not sok then print("[LOB] send FAIL: " .. tostring(serr)) end
         -- v22: отмечаем, что бот только что говорил этому игроку (анти-дубль приветствий)
         do
@@ -9867,7 +9875,7 @@ end
 -- (реакция на смерть ~2529, danger-events ~5051), поэтому те вызовы уходили
 -- в nil-глобал и молча падали. Глобал — чтобы резолвилось и до, и после строки.
 function runChatQueue(userId)
-    local q = getChatQueue(userId)
+    local q = LOB_STATE.getChatQueue(userId)
     if q.running then return end
     -- Очередь пуста — нечего делать
     if q.head > q.tail then return end
@@ -9876,7 +9884,7 @@ function runChatQueue(userId)
     task.spawn(function()
         local ran_ok, ran_err = pcall(function()
             while true do
-                local item = dequeueChatItem(q)
+                local item = LOB_STATE.dequeueChatItem(q)
                 if not item then break end
                 q.startedAt = os.clock()  -- обновляем при каждом новом item
                 _botBusyByUser = _botBusyByUser or {}
@@ -9909,7 +9917,7 @@ task.spawn(function()
     while true do
         task.wait(10)
         local now = os.clock()
-        for uid, q in pairs(ChatQueue) do
+        for uid, q in pairs(LOB_STATE.ChatQueue) do
             if q.running and q.startedAt and q.startedAt > 0 then
                 if (now - q.startedAt) > 75 then
                     print("[LOB] watchdog: reset stuck queue for " .. tostring(uid))
@@ -10013,16 +10021,16 @@ end)
 
 -- ── DEATH REACTIONS — event-based через Humanoid.Died ───────────────────
 -- Отслеживаем смерть каждого игрока через событие, не через polling
-local _deathConns = {}  -- userId → connection
+LOB_STATE._deathConns = {}  -- userId → connection
 
-local function _watchPlayerDeath(p)
+LOB_STATE._watchPlayerDeath = function(p)
     -- Не проверяем WorldReactions здесь — проверяем в момент срабатывания
     -- чтобы подписка всегда была активна
     local uid = p.UserId
     -- Отключаем старый коннект если есть
-    if _deathConns[uid] then
-        pcall(function() _deathConns[uid]:Disconnect() end)
-        _deathConns[uid] = nil
+    if LOB_STATE._deathConns[uid] then
+        pcall(function() LOB_STATE._deathConns[uid]:Disconnect() end)
+        LOB_STATE._deathConns[uid] = nil
     end
     local char = p.Character
     if not char then return end
@@ -10037,7 +10045,7 @@ local function _watchPlayerDeath(p)
         -- Обновляем позицию пока жив (флаг alive останавливает горутину при ресспавне)
         local alive = true
         task.spawn(function()
-            while alive and _deathConns[uid] and p.Character == char do
+            while alive and LOB_STATE._deathConns[uid] and p.Character == char do
                 local r = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
                 if r then lastPos = r.Position end
                 local h2 = char:FindFirstChildOfClass("Humanoid")
@@ -10059,7 +10067,7 @@ local function _watchPlayerDeath(p)
         end)
     end)
 
-    _deathConns[uid] = hum.Died:Connect(function()
+    LOB_STATE._deathConns[uid] = hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
         -- ВСЕГДА помним, что ЭТОТ игрок умер (нужно для ответа «ты только что умер»)
         pcall(function() _recentDeaths[uid] = os.clock() end)
@@ -10076,13 +10084,13 @@ end
 -- Подписываемся на всех игроков при старте и при появлении новых
 Players.PlayerAdded:Connect(function(p)
     if p == Players.LocalPlayer then return end
-    p.CharacterAdded:Connect(function() task.delay(1, function() _watchPlayerDeath(p) end) end)
-    if p.Character then _watchPlayerDeath(p) end
+    p.CharacterAdded:Connect(function() task.delay(1, function() LOB_STATE._watchPlayerDeath(p) end) end)
+    if p.Character then LOB_STATE._watchPlayerDeath(p) end
 end)
 for _, p in ipairs(Players:GetPlayers()) do
     if p ~= Players.LocalPlayer then
-        p.CharacterAdded:Connect(function() task.delay(1, function() _watchPlayerDeath(p) end) end)
-        if p.Character then _watchPlayerDeath(p) end
+        p.CharacterAdded:Connect(function() task.delay(1, function() LOB_STATE._watchPlayerDeath(p) end) end)
+        if p.Character then LOB_STATE._watchPlayerDeath(p) end
     end
 end
 
@@ -10106,9 +10114,9 @@ task.delay(120, function()
         end
         -- Чистим worldReact кулдауны (ключ = "userId+eventType")
         local wrcNow = os.clock()
-        for key, t in pairs(_worldReactCooldowns) do
+        for key, t in pairs(LOB_STATE._worldReactCooldowns) do
             if (wrcNow - t) > 300 then
-                _worldReactCooldowns[key] = nil
+                LOB_STATE._worldReactCooldowns[key] = nil
             end
         end
     end
@@ -10118,11 +10126,11 @@ end)
 -- §PROCESS_MSG
 -- [v19.9.9] ОПТИМИЗАЦИЯ: имена бота кешируются один раз при старте
 -- БАГИ ДО: Players.LocalPlayer.Name:lower() вызывался при каждом сообщении от каждого игрока
-local _cachedMyNameLow = Players.LocalPlayer.Name:lower()
-local _cachedMyDispLow = Players.LocalPlayer.DisplayName:lower()
+LOB_STATE._cachedMyNameLow = Players.LocalPlayer.Name:lower()
+LOB_STATE._cachedMyDispLow = Players.LocalPlayer.DisplayName:lower()
 -- Обновляем кеш при смене DisplayName (редко, но возможно)
 Players.LocalPlayer:GetPropertyChangedSignal("DisplayName"):Connect(function()
-    _cachedMyDispLow = Players.LocalPlayer.DisplayName:lower()
+    LOB_STATE._cachedMyDispLow = Players.LocalPlayer.DisplayName:lower()
 end)
 local function processChatMessage(player, rawMessage)
     -- v24: МОД-ЛоАДЕР — событие "chat" (ходит ВСЕГДА, даже при выключенном боте)
@@ -10140,27 +10148,27 @@ local function processChatMessage(player, rawMessage)
     local now = os.clock()
     local maxPerSecond = tonumber(settings.MaxMessagesPerSecond) or 3
     if maxPerSecond < 1 then maxPerSecond = 1 end
-    if not _floodLastBatch then
-        _floodLastBatch = now
-        _floodBatchCount = 0
+    if not LOB_STATE._floodLastBatch then
+        LOB_STATE._floodLastBatch = now
+        LOB_STATE._floodBatchCount = 0
     end
     
-    if (now - _floodLastBatch) < 1 then
-        _floodBatchCount = _floodBatchCount + 1
-        if _floodBatchCount > maxPerSecond then
+    if (now - LOB_STATE._floodLastBatch) < 1 then
+        LOB_STATE._floodBatchCount = LOB_STATE._floodBatchCount + 1
+        if LOB_STATE._floodBatchCount > maxPerSecond then
             print("[LOB] drop: flood " .. player.Name)
             return -- Drop message, too many in this second
         end
     else
-        _floodLastBatch = now
-        _floodBatchCount = 1
+        LOB_STATE._floodLastBatch = now
+        LOB_STATE._floodBatchCount = 1
     end
 
     -- Ignore self (Robust UserId check)
     if player.UserId == Players.LocalPlayer.UserId then return end
     
     -- Blacklist check
-    if isBlacklisted(settings, player.UserId) then return end
+    if LOB_STATE.isBlacklisted(settings, player.UserId) then return end
 
     -- v22: ФОКУС НА СОБЕСЕДНИКЕ. Пока бот общается с одним игроком — чужих не слушаем
     -- (толпа сзади не должна «перехватывать» разговор). Исключение — прямое обращение
@@ -10168,7 +10176,7 @@ local function processChatMessage(player, rawMessage)
     local focusUid = lobSmartFocusUid and lobSmartFocusUid() or nil
     if focusUid and player.UserId ~= focusUid then
         local rawLow = rawMessage:lower()
-        local directCall = rawLow:find(_cachedMyNameLow, 1, true) or rawLow:find(_cachedMyDispLow, 1, true)
+        local directCall = rawLow:find(LOB_STATE._cachedMyNameLow, 1, true) or rawLow:find(LOB_STATE._cachedMyDispLow, 1, true)
         if not directCall then
             print("[LOB] focus: ignore " .. player.Name)
             return
@@ -10231,16 +10239,16 @@ local function processChatMessage(player, rawMessage)
     -- v17.5: ReactToMention — кешируем имена один раз (не пересоздаём на каждом сообщении)
     local msgLowerForMention = rawMessage:lower()
     local mentionHit = settings.ReactToMention
-        and (msgLowerForMention:find(_cachedMyNameLow, 1, true)
-          or msgLowerForMention:find(_cachedMyDispLow, 1, true))
+        and (msgLowerForMention:find(LOB_STATE._cachedMyNameLow, 1, true)
+          or msgLowerForMention:find(LOB_STATE._cachedMyDispLow, 1, true))
 
     -- ВАЖНО: passesTrigger проверяем на оригинальном сообщении ДО нормализации
-    if not mentionHit and not passesTrigger(settings, rawMessage) then
+    if not mentionHit and not LOB_STATE.passesTrigger(settings, rawMessage) then
         print("[LOB] drop: trigger " .. player.Name .. ": " .. tostring(rawMessage):sub(1, 40))
         return
     end
 
-    local message = normalizeOneLine(rawMessage)
+    local message = LOB_STATE.normalizeOneLine(rawMessage)
     if message == "" then return end
 
     -- Selective Mode Check
@@ -10260,7 +10268,7 @@ local function processChatMessage(player, rawMessage)
 
     -- Proximity Check
     if settings.Range.Enabled then
-        local myChar = LocalCharacter or Players.LocalPlayer.Character
+        local myChar = LOB_STATE.LocalCharacter or Players.LocalPlayer.Character
         local theirChar = player.Character
 
         if not myChar or not theirChar then return end
@@ -10271,7 +10279,7 @@ local function processChatMessage(player, rawMessage)
             or theirChar:FindFirstChild("Torso") -- R6
 
         if not myRoot or not theirRoot then return end
-        LocalRoot = myRoot  -- обновляем кеш
+        LOB_STATE.LocalRoot = myRoot  -- обновляем кеш
 
         -- Проверяем дистанцию — с учётом высоты (настройка Height)
         local heightRange = settings.Range.Height or 0  -- 0 = без ограничения по высоте
@@ -10292,10 +10300,10 @@ local function processChatMessage(player, rawMessage)
             local dir = target - origin
 
             -- Исключаем ОБА персонажа из raycast (раньше исключался только свой)
-            RangeRaycastFilter[1] = myChar
-            RangeRaycastFilter[2] = theirChar
-            RangeRaycastParams.FilterDescendantsInstances = RangeRaycastFilter
-            local result = workspace:Raycast(origin, dir, RangeRaycastParams)
+            LOB_STATE.RangeRaycastFilter[1] = myChar
+            LOB_STATE.RangeRaycastFilter[2] = theirChar
+            LOB_STATE.RangeRaycastParams.FilterDescendantsInstances = LOB_STATE.RangeRaycastFilter
+            local result = workspace:Raycast(origin, dir, LOB_STATE.RangeRaycastParams)
             if result and result.Instance then
                 print("[LOB] drop: wall " .. player.Name)
                 -- Луч что-то задел — стена между нами
@@ -10314,7 +10322,7 @@ local function processChatMessage(player, rawMessage)
         return
     end
     
-    local cleaned = normalizeOneLine(stripTrigger(settings, message))
+    local cleaned = LOB_STATE.normalizeOneLine(LOB_STATE.stripTrigger(settings, message))
     if cleaned == "" then
         return
     end
@@ -10332,7 +10340,7 @@ local function processChatMessage(player, rawMessage)
     local queueKey = player.UserId
     local maxQueue = tonumber(settings.MaxQueuePerUser) or 3
     if maxQueue < 1 then maxQueue = 1 end
-    local queued = enqueueChatItem(queueKey, {
+    local queued = LOB_STATE.enqueueChatItem(queueKey, {
         userId      = player.UserId,
         displayName = player.DisplayName,
         name        = player.Name,
@@ -10348,13 +10356,13 @@ end
 
 -- Chat message handlers
 -- §CHAT_HANDLERS
-local function handleLegacyChat(p, message)
+LOB_STATE.handleLegacyChat = function(p, message)
     -- p = игрок который написал, message = текст
     processChatMessage(p, message)
 end
 
 -- [v19.9.9] ФИКС: добавлена защита от эха собственных сообщений бота
-local function handleTextChatService(textChatMessage)
+LOB_STATE.handleTextChatService = function(textChatMessage)
     if not textChatMessage then return end
     local textSource = textChatMessage.TextSource
     if not textSource then return end
@@ -10409,12 +10417,12 @@ local function handleTextChatService(textChatMessage)
 end
 
 -- Connect to chat services
-local useTextChat = false
+LOB_STATE.useTextChat = false
 pcall(function()
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-        useTextChat = true
+        LOB_STATE.useTextChat = true
     elseif TextChatService:FindFirstChild("TextChannels") then
-        useTextChat = true -- Fallback detection if ChatVersion property is unreliable but channels exist
+        LOB_STATE.useTextChat = true -- Fallback detection if ChatVersion property is unreliable but channels exist
     end
 end)
 
@@ -10425,7 +10433,7 @@ local ChatListener = {
     PerPlayer = {},
 }
 
-local function chatListenerDisconnectAll()
+LOB_STATE.chatListenerDisconnectAll = function()
     for _, c in ipairs(ChatListener.Connections) do
         pcall(function()
             if c and c.Disconnect then c:Disconnect() end
@@ -10441,12 +10449,12 @@ local function chatListenerDisconnectAll()
     ChatListener.PerPlayer = {}
 end
 
-local function startChatListening()
+LOB_STATE.startChatListening = function()
     if ChatListener.Active then return end
     ChatListener.Active = true
 
-    if useTextChat then
-        table.insert(ChatListener.Connections, TextChatService.MessageReceived:Connect(handleTextChatService))
+    if LOB_STATE.useTextChat then
+        table.insert(ChatListener.Connections, TextChatService.MessageReceived:Connect(LOB_STATE.handleTextChatService))
         return
     end
 
@@ -10472,27 +10480,27 @@ local function startChatListening()
     end))
 end
 
-local function stopChatListening()
+LOB_STATE.stopChatListening = function()
     if not ChatListener.Active then return end
     ChatListener.Active = false
-    chatListenerDisconnectAll()
+    LOB_STATE.chatListenerDisconnectAll()
 end
 
 -- §CHAT_LISTEN
-local function updateChatListening()
+LOB_STATE.updateChatListening = function()
     local s = ClientSettings
     if s.Enabled and s.AutoReply then
-        startChatListening()
+        LOB_STATE.startChatListening()
     else
-        stopChatListening()
+        LOB_STATE.stopChatListening()
     end
 end
 
-updateChatListening()
+LOB_STATE.updateChatListening()
 
 -- защита от двойного запуска: следующий запуск сможет отключить ЭТИ слушатели
 _LOB_DISCONNECT_LISTENERS = function()
-    pcall(chatListenerDisconnectAll)
+    pcall(LOB_STATE.chatListenerDisconnectAll)
 end
 
 -- UI Components
@@ -10512,21 +10520,21 @@ local AURORA_COLORS = {
     Color3.fromRGB(100, 140, 255),
     Color3.fromRGB(100, 180, 255),
 }
-local AURORA_COLORS_OBSIDIAN = {
+LOB_STATE.AURORA_COLORS_OBSIDIAN = {
     Color3.fromRGB(200, 80, 255),
     Color3.fromRGB(255, 80, 200),
     Color3.fromRGB(150, 50, 255),
     Color3.fromRGB(210, 100, 255),
     Color3.fromRGB(200, 80, 255),
 }
-local AURORA_COLORS_EMERALD = {
+LOB_STATE.AURORA_COLORS_EMERALD = {
     Color3.fromRGB(60, 230, 150),
     Color3.fromRGB(60, 210, 255),
     Color3.fromRGB(80, 240, 180),
     Color3.fromRGB(50, 190, 255),
     Color3.fromRGB(60, 230, 150),
 }
-local AURORA_COLORS_GOLD = {
+LOB_STATE.AURORA_COLORS_GOLD = {
     Color3.fromRGB(255, 200, 70),
     Color3.fromRGB(255, 150, 80),
     Color3.fromRGB(255, 215, 90),
@@ -10534,13 +10542,13 @@ local AURORA_COLORS_GOLD = {
     Color3.fromRGB(255, 200, 70),
 }
 
-local function lerpColor(a, b, t)
+LOB_STATE.lerpColor = function(a, b, t)
     return Color3.new(a.R+(b.R-a.R)*t, a.G+(b.G-a.G)*t, a.B+(b.B-a.B)*t)
 end
-local function getAuroraColor(palette, speed)
+LOB_STATE.getAuroraColor = function(palette, speed)
     local t = (os.clock() * (speed or 0.4)) % #palette
     local idx = math.floor(t) + 1
-    return lerpColor(palette[idx], palette[(idx % #palette)+1], t-math.floor(t))
+    return LOB_STATE.lerpColor(palette[idx], palette[(idx % #palette)+1], t-math.floor(t))
 end
 
 local Themes = {
@@ -10630,7 +10638,7 @@ local Themes = {
         IconTint            = Color3.fromRGB(200, 170, 255),
         InputBg             = Color3.fromRGB(10, 7, 22),
         Accent              = Color3.fromRGB(170, 100, 255),
-        AuroraPalette       = AURORA_COLORS_OBSIDIAN,
+        AuroraPalette       = LOB_STATE.AURORA_COLORS_OBSIDIAN,
         AuroraSpeed         = 0.40,
     },
     Obsidian = {
@@ -10655,7 +10663,7 @@ local Themes = {
         IconTint            = Color3.fromRGB(215, 185, 255),
         InputBg             = Color3.fromRGB(9, 7, 16),
         Accent              = Color3.fromRGB(210, 90, 255),
-        AuroraPalette       = AURORA_COLORS_OBSIDIAN,
+        AuroraPalette       = LOB_STATE.AURORA_COLORS_OBSIDIAN,
         AuroraSpeed         = 0.50,
     },
     FrostedGlass = {
@@ -10705,7 +10713,7 @@ local Themes = {
         IconTint            = Color3.fromRGB(120, 230, 165),
         InputBg             = Color3.fromRGB(6, 12, 8),
         Accent              = Color3.fromRGB(0, 220, 130),
-        AuroraPalette       = AURORA_COLORS_EMERALD,
+        AuroraPalette       = LOB_STATE.AURORA_COLORS_EMERALD,
         AuroraSpeed         = 0.30,
     },
 }
@@ -10713,10 +10721,10 @@ local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
 
 local TWEEN_FAST = TweenInfo.new(0.14, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 local TWEEN_MED  = TweenInfo.new(0.26, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local TWEEN_SLOW = TweenInfo.new(0.40, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local TWEEN_TAB  = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TWEEN_SPRING = TweenInfo.new(0.45, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
-local TWEEN_BOUNCE = TweenInfo.new(0.38, Enum.EasingStyle.Bounce,      Enum.EasingDirection.Out)
+LOB_STATE.TWEEN_SLOW = TweenInfo.new(0.40, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+LOB_STATE.TWEEN_TAB = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+LOB_STATE.TWEEN_SPRING = TweenInfo.new(0.45, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
+LOB_STATE.TWEEN_BOUNCE = TweenInfo.new(0.38, Enum.EasingStyle.Bounce,      Enum.EasingDirection.Out)
 
 local function tween(o, info, props)
     local t = TweenService:Create(o, info, props)
@@ -10962,7 +10970,7 @@ local function makeButton(parent, text, icon, style)
         -- v17.5: aurora на стрелке при наведении
         if arrow.Visible ~= false then
             local palette = THEME.AuroraPalette or AURORA_COLORS
-            arrow.TextColor3 = getAuroraColor(palette, THEME.AuroraSpeed or 0.35)
+            arrow.TextColor3 = LOB_STATE.getAuroraColor(palette, THEME.AuroraSpeed or 0.35)
         end
         tween(contentStroke, TWEEN_FAST, { Transparency = 0.1 })
     end)
@@ -10976,7 +10984,7 @@ local function makeButton(parent, text, icon, style)
     return btn
 end
 
-local function ensureNotifyHost()
+LOB_STATE.ensureNotifyHost = function()
     local gui = CurrentGui
     if not gui or not gui.Parent then
         return nil
@@ -11007,8 +11015,8 @@ local function ensureNotifyHost()
     return host
 end
 
-local function pushNotificationInternal(titleText, bodyText, accent, actions)
-    local host = ensureNotifyHost()
+LOB_STATE.pushNotificationInternal = function(titleText, bodyText, accent, actions)
+    local host = LOB_STATE.ensureNotifyHost()
     if not host then
         Logger:Add("info", tostring(titleText or "") .. " " .. tostring(bodyText or ""))
         return
@@ -11151,7 +11159,7 @@ local function pushNotificationInternal(titleText, bodyText, accent, actions)
     end
 end
 
-local lastNotifyTime = 0
+LOB_STATE.lastNotifyTime = 0
 pushNotification = function(titleText, bodyText, accent, actions)
     if not (CurrentGui and CurrentGui.Enabled) then
         return
@@ -11159,11 +11167,11 @@ pushNotification = function(titleText, bodyText, accent, actions)
     -- Debounce only if NO actions (don't block requests)
     if not actions then
         local now = os.clock()
-        if (now - lastNotifyTime) < 1 then return end
-        lastNotifyTime = now
+        if (now - LOB_STATE.lastNotifyTime) < 1 then return end
+        LOB_STATE.lastNotifyTime = now
     end
 
-    pushNotificationInternal(titleText, bodyText, accent, actions)
+    LOB_STATE.pushNotificationInternal(titleText, bodyText, accent, actions)
 end
 
 local PathfindingService = game:GetService("PathfindingService")
@@ -11192,7 +11200,7 @@ requestFollow = function(p)
             Text = "Идти",
             Primary = true,
             Callback = function()
-                startFollowingPlayer(p)
+                LOB_STATE.startFollowingPlayer(p)
                 pushNotification("Следую", "Иду за " .. pName, THEME.Accent)
             end
         },
@@ -11204,16 +11212,16 @@ requestFollow = function(p)
 end
 
 -- Movement Loop (Smooth Follow)
-local currentWaypointIndex = 1
+LOB_STATE.currentWaypointIndex = 1
 local currentWaypoints = {}
-local lastPosition = nil
-local stuckTimer = 0
+LOB_STATE.lastPosition = nil
+LOB_STATE.stuckTimer = 0
 
 trackConn(RunService.Heartbeat:Connect(function(dt)
     _followMgrActive = (FollowManager.Active and FollowManager.Target ~= nil) and true or false
     if not FollowManager.Active or not FollowManager.Target then return end
     
-    local myChar = LocalCharacter or Players.LocalPlayer.Character
+    local myChar = LOB_STATE.LocalCharacter or Players.LocalPlayer.Character
     local theirChar = FollowManager.Target.Character
     if not myChar or not theirChar then return end
     
@@ -11227,26 +11235,26 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
     
     if distance <= stopDistance then
         currentWaypoints = {}
-        lastPosition = nil
-        stuckTimer = 0
+        LOB_STATE.lastPosition = nil
+        LOB_STATE.stuckTimer = 0
         return
     end
     
     -- Anti-stuck detection
     local currentPos = myRoot.Position
-    if lastPosition then
-        local moved = (currentPos - lastPosition).Magnitude
+    if LOB_STATE.lastPosition then
+        local moved = (currentPos - LOB_STATE.lastPosition).Magnitude
         if moved < 0.3 then
-            stuckTimer = stuckTimer + dt
-            if stuckTimer > 0.5 then
+            LOB_STATE.stuckTimer = LOB_STATE.stuckTimer + dt
+            if LOB_STATE.stuckTimer > 0.5 then
                 humanoid.Jump = true
-                stuckTimer = 0
+                LOB_STATE.stuckTimer = 0
             end
         else
-            stuckTimer = 0
+            LOB_STATE.stuckTimer = 0
         end
     end
-    lastPosition = currentPos
+    LOB_STATE.lastPosition = currentPos
     
     local mode = ClientSettings.FollowMode or "Pathfinding"
     
@@ -11270,7 +11278,7 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
                 
                 if success and path.Status == Enum.PathStatus.Success then
                     currentWaypoints = path:GetWaypoints()
-                    currentWaypointIndex = 2
+                    LOB_STATE.currentWaypointIndex = 2
                 else
                     -- Fallback to linear if pathfinding fails or is blocked
                     humanoid:MoveTo(theirRoot.Position)
@@ -11280,8 +11288,8 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
         end
         
         if #currentWaypoints > 0 then
-            if currentWaypointIndex <= #currentWaypoints then
-                local wp = currentWaypoints[currentWaypointIndex]
+            if LOB_STATE.currentWaypointIndex <= #currentWaypoints then
+                local wp = currentWaypoints[LOB_STATE.currentWaypointIndex]
                 humanoid:MoveTo(wp.Position)
                 
                 if wp.Action == Enum.PathWaypointAction.Jump then
@@ -11289,7 +11297,7 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
                 end
                 
                 if (myRoot.Position - wp.Position).Magnitude < 3.5 then
-                    currentWaypointIndex = currentWaypointIndex + 1
+                    LOB_STATE.currentWaypointIndex = LOB_STATE.currentWaypointIndex + 1
                 end
             end
         else
@@ -11298,19 +11306,19 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
     end
 end))
 
-local rateLimitNoticeAt = 0
-local _providerNames = {
+LOB_STATE.rateLimitNoticeAt = 0
+LOB_STATE._providerNames = {
     groq     = "Groq",
     gemini   = "Gemini",
     deepseek = "DeepSeek",
     ollama   = "Ollama",
 }
 
-local function handleRateLimitNotice(provider, force)
+LOB_STATE.handleRateLimitNotice = function(provider, force)
     local now = os.clock()
-    if (not force) and (now - rateLimitNoticeAt) < 20 then return end
-    rateLimitNoticeAt = now
-    local name = _providerNames[provider] or tostring(provider or "API")
+    if (not force) and (now - LOB_STATE.rateLimitNoticeAt) < 20 then return end
+    LOB_STATE.rateLimitNoticeAt = now
+    local name = LOB_STATE._providerNames[provider] or tostring(provider or "API")
     local title = "Rate limit — " .. name
     local body = name .. " временно ограничил запросы. Бот автоматически продолжит через несколько секунд."
     if pushNotification then
@@ -11321,11 +11329,11 @@ end
 
 onApiRateLimited = function(provider)
     task.spawn(function()
-        handleRateLimitNotice(provider, false)
+        LOB_STATE.handleRateLimitNotice(provider, false)
     end)
 end
 
-local function makeToggle(parent, text, initialState, callback)
+LOB_STATE.makeToggle = function(parent, text, initialState, callback)
     local container = Instance.new("Frame")
     container.BackgroundTransparency = 0
     container.Size = UDim2.new(1, 0, 0, 52)
@@ -11405,12 +11413,12 @@ local function makeToggle(parent, text, initialState, callback)
         state = not state
         if state then
             startSwitchAurora()
-            tween(knob, TWEEN_SPRING, { Position = UDim2.new(0, 25, 0.5, 0) })
+            tween(knob, LOB_STATE.TWEEN_SPRING, { Position = UDim2.new(0, 25, 0.5, 0) })
             tween(sideAccent, TWEEN_MED, { BackgroundTransparency = 0 })
             TweenService:Create(switchBg:FindFirstChildOfClass("UIStroke"), TWEEN_MED, { Transparency = 0.75 }):Play()
         else
             stopSwitchAurora()
-            tween(knob, TWEEN_SPRING, { Position = UDim2.new(0, 3, 0.5, 0) })
+            tween(knob, LOB_STATE.TWEEN_SPRING, { Position = UDim2.new(0, 3, 0.5, 0) })
             tween(sideAccent, TWEEN_MED, { BackgroundTransparency = 1 })
             TweenService:Create(switchBg:FindFirstChildOfClass("UIStroke"), TWEEN_MED, { Transparency = 0.92 }):Play()
         end
@@ -11679,7 +11687,12 @@ end
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- §MODLOADER (v24.1) — ВСТРОЕННЫЙ МОД-ЛОАДЕР
+-- §MODLOADER (v24.3) — ВСТРОЕННЫЙ МОД-ЛОАДЕР
+-- v24.3 FIX: «Out of local registers ... exceeded limit 200» — часть экзекьюторов
+--   компилирует БЕЗ оптимизации (-O0), и чанк с 215 локалками не влезал в лимит
+--   200 регистров Luau. mod2_*/mod3_* и 130 топ-левел локалок упакованы в таблицы
+--   (mod2./mod3./LOB_STATE) — семантика 1:1, ничего не удалено, все режимы -O0/-O1/-O2
+--   и таргеты x64/a64 компилируются.
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ЕДИНАЯ ПАПКА «LineOfBots» в папке инжектора (workspace executor'а):
 --   LineOfBots/mods     — моды: каждый *.lua / *.luau / *.lobmod — отдельный мод
@@ -11761,7 +11774,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.2",
+    VERSION       = "v24.3",  -- v24.3: фикс «limit 200» (регистры Luau при -O0)
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -11800,7 +11813,7 @@ end
 
 -- ── ПРОСТОЙ СЕРИАЛИЗАТОР ДЛЯ ХРАНИЛИЩА МОДА (строки/числа/bool/плоские таблицы) ──
 -- v24.1: поднят ВЫШЕ файловых операций — используется в saveMetaCache
-local function lobModSer(val, indent, depth)
+LOB_STATE.lobModSer = function(val, indent, depth)
     depth = (depth or 0) + 1
     indent = indent or ""
     local t = type(val)
@@ -11814,7 +11827,7 @@ local function lobModSer(val, indent, depth)
             local key
             if type(k) == "string" then key = "[" .. string.format("%q", k) .. "]"
             else key = "[" .. tostring(k) .. "]" end
-            table.insert(parts, indent .. "    " .. key .. " = " .. lobModSer(v, indent .. "    ", depth))
+            table.insert(parts, indent .. "    " .. key .. " = " .. LOB_STATE.lobModSer(v, indent .. "    ", depth))
         end
         if #parts == 0 then return "{}" end
         return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
@@ -11908,7 +11921,7 @@ end
 -- ── v24.1: КЭШ МЕТЫ (иконка/название/флаги) — виден даже у выключенных модов ──
 function LOB_MODS.saveMetaCache()
     LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.METACACHE_FILE,
-        "return " .. lobModSer(LOB_MODS.metaCache, ""))
+        "return " .. LOB_STATE.lobModSer(LOB_MODS.metaCache, ""))
 end
 
 function LOB_MODS.loadMetaCache()
@@ -12256,7 +12269,7 @@ function LOB_MODS.makeAPI(mod)
             end
         end)
         return LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/data/" .. mod.name .. ".data",
-            "return " .. lobModSer(api.data(), ""))
+            "return " .. LOB_STATE.lobModSer(api.data(), ""))
     end
 
     -- ══ UI (вкладки/секции/элементы — в любые вкладки, даже родные) ══
@@ -12795,7 +12808,7 @@ function LOB_MODS.loadAll()
 end
 
 -- ── ПРИМЕР МОДА (создаётся в папке модов) ──────────────────────────────────
-LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v24.2)
+LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v24.3)
   Кладите свои моды (.lua) в папку  LineOfBots/mods  рядом с инжектором.
   Общие библиотеки — в  LineOfBots/libs  (api.lib("имя файла")).
   Управление — вкладка «Моды»: иконка, название, тоггл вкл/выкл.
@@ -12997,7 +13010,7 @@ local function createInterface()
     gui.Parent = player:WaitForChild("PlayerGui")
     CurrentGui = gui
     NotifyHost = nil
-    ensureNotifyHost()
+    LOB_STATE.ensureNotifyHost()
     
     -- Background Dimmer (World Overlay) - disabled (no screen darkening)
     local dimmer = Instance.new("Frame")
@@ -13323,11 +13336,15 @@ end)
  local tabFrames = {}
  local tabSwitchId = 0
  local tabFrameTweens = {}
- local mod3_closeOpenTimeoutMenu = nil
- local mod3_scrim = nil
- local mod3_scrimOwner = nil
- local mod3_rebuild = nil
- local mod3_needsRebuild = false
+-- v24.3 FIX: все mod3_* локалки упакованы в таблицу mod3 (лимит регистров Luau
+-- 200 на функцию: без этой упаковки компиляция без оптимизации (-O0) падает
+-- с 'Out of local registers ... exceeded limit 200'). Семантика не изменена.
+local mod3 = {}
+ mod3.closeOpenTimeoutMenu = nil
+ mod3.scrim = nil
+ mod3.scrimOwner = nil
+ mod3.rebuild = nil
+ mod3.needsRebuild = false
 
 -- (Indicator code removed/skipped)
 local function updateTabIndicator(tabName, instant)
@@ -13446,9 +13463,9 @@ local function switchTab(name)
         return
     end
     currentTab = name
-    if name == "Модерация" and mod3_rebuild then
-        mod3_needsRebuild = false
-        mod3_rebuild()
+    if name == "Модерация" and mod3.rebuild then
+        mod3.needsRebuild = false
+        mod3.rebuild()
     end
     -- v24: вкладка «Моды» — обновляем список при открытии
     if name == "Моды" and LOB_UI and LOB_UI.refreshMods then
@@ -13463,9 +13480,9 @@ local function switchTab(name)
     end
 
     -- Close any open moderation timeout menus when switching tabs
-    if mod3_closeOpenTimeoutMenu then
-        pcall(mod3_closeOpenTimeoutMenu)
-        mod3_closeOpenTimeoutMenu = nil
+    if mod3.closeOpenTimeoutMenu then
+        pcall(mod3.closeOpenTimeoutMenu)
+        mod3.closeOpenTimeoutMenu = nil
     end
 
     for n, _ in pairs(tabButtons) do
@@ -13529,7 +13546,7 @@ local function switchTab(name)
     end
 
     -- Cleanup
-    task.delay(TWEEN_TAB.Time + 0.05, function()
+    task.delay(LOB_STATE.TWEEN_TAB.Time + 0.05, function()
         if tabSwitchId ~= switchId then return end
         
         if oldFrame then
@@ -14441,7 +14458,7 @@ autoReplyToggle = makeToggleRow(
     function(state)
         ClientSettings.AutoReply = state
         saveSettings()
-        updateChatListening()
+        LOB_STATE.updateChatListening()
     end
 )
 
@@ -14550,7 +14567,7 @@ makeToggleRow(
         saveSettings()
         if not state then
             stopFollowing()
-            stopCurrentEmote()
+            LOB_STATE.stopCurrentEmote()
         end
     end
 )
@@ -14800,7 +14817,7 @@ do
     
     local modelDropdown = makeDropdown(ctrl, groqModels, currentModel or "openai/gpt-oss-20b", function(val)
         ClientSettings.Models.groq = val
-        saveModel(val)
+        LOB_STATE.saveModel(val)
     end)
 end
 
@@ -14814,7 +14831,7 @@ do
             local val = (customBox.Text or ""):match("^%s*(.-)%s*$") or ""
             if val ~= "" then
                 ClientSettings.Models.groq = val
-                saveModel(val)
+                LOB_STATE.saveModel(val)
             end
         end)
     end
@@ -14966,7 +14983,7 @@ do
             end
         end
         ClientSettings.CustomSystemPrompt = customPromptBox.Text
-        saveCustomPrompt(customPromptBox.Text)
+        LOB_STATE.saveCustomPrompt(customPromptBox.Text)
         -- Очищаем историю когда промпт изменился (debounce чтобы не чистить на каждую букву)
         if not _customPromptClearPending then
             _customPromptClearPending = true
@@ -15398,7 +15415,7 @@ do
         local clean = normalizeApiKey(apiBox2.Text)
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq2 = clean
-        saveApiKey2(clean)
+        LOB_STATE.saveApiKey2(clean)
         apiBox2.Text = clean
     end)
 
@@ -15429,7 +15446,7 @@ do
         local clean = normalizeApiKey(apiBox3.Text)
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq3 = clean
-        saveApiKey3(clean)
+        LOB_STATE.saveApiKey3(clean)
         apiBox3.Text = clean
     end)
 
@@ -15493,14 +15510,14 @@ do
             apiLimitLbl.Text = slotInfo
         end
     end
-    onRateLimitUpdate = refreshLimitDisplay
+    LOB_STATE.onRateLimitUpdate = refreshLimitDisplay
     if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
 
     local function doApiCheck()
         local clean = normalizeApiKey(apiBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
-        saveApiKey(clean)
+        LOB_STATE.saveApiKey(clean)
         apiCheckBtn.Text = "Проверяю..."
         apiCheckBtn.BackgroundTransparency = 0.4
         task.spawn(function()
@@ -15543,7 +15560,7 @@ do
         local clean = normalizeApiKey(apiBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
-        saveApiKey(clean)
+        LOB_STATE.saveApiKey(clean)
         apiBox.Text = clean
         tween(apiStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80,80,80) })
         apiStatusLbl.Text = "не проверен"
@@ -15661,7 +15678,7 @@ do
         local clean = normalizeApiKey(gemBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.gemini = clean
-        saveGeminiKey(clean)
+        LOB_STATE.saveGeminiKey(clean)
 
         gemCheckBtn.Text = "Проверяю..."
         gemCheckBtn.BackgroundTransparency = 0.4
@@ -15674,7 +15691,7 @@ do
             -- Тестируем с выбранной моделью или дефолтом
                 local testModel = (ClientSettings.Models and ClientSettings.Models.groq) or "gemini-3.5-flash-lite"
                 if not testModel:find("^gemini") then testModel = "gemini-3.5-flash-lite" end
-                testModel = normalizeGeminiModel(testModel)
+                testModel = LOB_STATE.normalizeGeminiModel(testModel)
                 local testUrl = "https://generativelanguage.googleapis.com/v1beta/models/" .. testModel .. ":generateContent"
             local ok2, res2 = pcall(req, {
                 Url = testUrl, Method = "POST",
@@ -15731,7 +15748,7 @@ do
         local clean = normalizeApiKey(gemBox.Text)
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.gemini = clean
-        saveGeminiKey(clean)
+        LOB_STATE.saveGeminiKey(clean)
         gemBox.Text = clean
         tween(gemStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
         gemStatusLbl.Text = "не проверен"
@@ -16026,7 +16043,7 @@ do
         ClientSettings.Models = ClientSettings.Models or {}
         ClientSettings.Models.groq = full
         olModelBox.Text = nm
-        saveModel(full)
+        LOB_STATE.saveModel(full)
     end
 
     local function doOllamaCheck()
@@ -16320,100 +16337,100 @@ modInfo.TextTransparency = 0.25
 -- Moderation UI (list redesign)
 modInfo.Visible = false
 
-local mod3_shell = Instance.new("Frame")
-mod3_shell.BackgroundColor3 = THEME.Button
-mod3_shell.BackgroundTransparency = 0.55
-mod3_shell.BorderSizePixel = 0
-mod3_shell.Position = UDim2.new(0, 8, 0, 70)
-mod3_shell.Size = UDim2.new(1, -16, 1, -78)
-mod3_shell.Parent = moderationFrame
-makeCorner(mod3_shell, 18)
-makeStroke(mod3_shell, 1, THEME.Stroke, 0.35)
+mod3.shell = Instance.new("Frame")
+mod3.shell.BackgroundColor3 = THEME.Button
+mod3.shell.BackgroundTransparency = 0.55
+mod3.shell.BorderSizePixel = 0
+mod3.shell.Position = UDim2.new(0, 8, 0, 70)
+mod3.shell.Size = UDim2.new(1, -16, 1, -78)
+mod3.shell.Parent = moderationFrame
+makeCorner(mod3.shell, 18)
+makeStroke(mod3.shell, 1, THEME.Stroke, 0.35)
 
-local mod3_shellGrad = Instance.new("UIGradient")
-mod3_shellGrad.Rotation = 90
-mod3_shellGrad.Color = ColorSequence.new({
+mod3.shellGrad = Instance.new("UIGradient")
+mod3.shellGrad.Rotation = 90
+mod3.shellGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, THEME.ButtonHover),
     ColorSequenceKeypoint.new(1, THEME.Button),
 })
-mod3_shellGrad.Transparency = NumberSequence.new({
+mod3.shellGrad.Transparency = NumberSequence.new({
     NumberSequenceKeypoint.new(0, 0.25),
     NumberSequenceKeypoint.new(1, 0.5),
 })
-mod3_shellGrad.Parent = mod3_shell
+mod3.shellGrad.Parent = mod3.shell
 
-local mod3_list = Instance.new("ScrollingFrame")
-mod3_list.BackgroundTransparency = 1
-mod3_list.BorderSizePixel = 0
-mod3_list.Position = UDim2.new(0, 0, 0, 0)
-mod3_list.Size = UDim2.new(1, 0, 1, 0)
-mod3_list.ScrollBarThickness = 0
-mod3_list.ScrollBarImageTransparency = 0.75
+mod3.list = Instance.new("ScrollingFrame")
+mod3.list.BackgroundTransparency = 1
+mod3.list.BorderSizePixel = 0
+mod3.list.Position = UDim2.new(0, 0, 0, 0)
+mod3.list.Size = UDim2.new(1, 0, 1, 0)
+mod3.list.ScrollBarThickness = 0
+mod3.list.ScrollBarImageTransparency = 0.75
 pcall(function()
-    mod3_list.ScrollBarInset = Enum.ScrollBarInset.ScrollBar
+    mod3.list.ScrollBarInset = Enum.ScrollBarInset.ScrollBar
 end)
-mod3_list.CanvasSize = UDim2.new(0, 0, 0, 0)
-mod3_list.Parent = mod3_shell
+mod3.list.CanvasSize = UDim2.new(0, 0, 0, 0)
+mod3.list.Parent = mod3.shell
 
-local mod3_listPad = Instance.new("UIPadding")
-mod3_listPad.PaddingTop = UDim.new(0, 12)
-mod3_listPad.PaddingBottom = UDim.new(0, 12)
-mod3_listPad.PaddingLeft = UDim.new(0, 12)
-mod3_listPad.PaddingRight = UDim.new(0, 12)
-mod3_listPad.Parent = mod3_list
+mod3.listPad = Instance.new("UIPadding")
+mod3.listPad.PaddingTop = UDim.new(0, 12)
+mod3.listPad.PaddingBottom = UDim.new(0, 12)
+mod3.listPad.PaddingLeft = UDim.new(0, 12)
+mod3.listPad.PaddingRight = UDim.new(0, 12)
+mod3.listPad.Parent = mod3.list
 
-local mod3_layout = Instance.new("UIListLayout")
-mod3_layout.SortOrder = Enum.SortOrder.LayoutOrder
-mod3_layout.Padding = UDim.new(0, 12)
-mod3_layout.Parent = mod3_list
+mod3.layout = Instance.new("UIListLayout")
+mod3.layout.SortOrder = Enum.SortOrder.LayoutOrder
+mod3.layout.Padding = UDim.new(0, 12)
+mod3.layout.Parent = mod3.list
 
-mod3_layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    mod3_list.CanvasSize = UDim2.new(0, 0, 0, (mod3_layout.AbsoluteContentSize.Y + 12) / _guiScale)
+mod3.layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    mod3.list.CanvasSize = UDim2.new(0, 0, 0, (mod3.layout.AbsoluteContentSize.Y + 12) / _guiScale)
 end)
 
 -- Shared scrim for the timeout menu (kept out of rowWrap so it doesn't affect list layout).
-mod3_scrim = Instance.new("TextButton")
-mod3_scrim.Name = "ModerationScrim"
-mod3_scrim.Text = ""
-mod3_scrim.AutoButtonColor = false
-mod3_scrim.Active = true
-mod3_scrim.BackgroundColor3 = Color3.new(0, 0, 0)
+mod3.scrim = Instance.new("TextButton")
+mod3.scrim.Name = "ModerationScrim"
+mod3.scrim.Text = ""
+mod3.scrim.AutoButtonColor = false
+mod3.scrim.Active = true
+mod3.scrim.BackgroundColor3 = Color3.new(0, 0, 0)
 -- No dimming overlay; keep scrim only for "click outside to close".
-mod3_scrim.BackgroundTransparency = 1
-mod3_scrim.BorderSizePixel = 0
-mod3_scrim.Size = UDim2.new(1, 0, 1, 0)
-mod3_scrim.Position = UDim2.new(0, 0, 0, 0)
-mod3_scrim.ZIndex = 950
-mod3_scrim.Visible = false
-mod3_scrim.Parent = moderationFrame
-mod3_scrim.MouseButton1Click:Connect(function()
-    if mod3_scrimOwner then
-        pcall(mod3_scrimOwner)
+mod3.scrim.BackgroundTransparency = 1
+mod3.scrim.BorderSizePixel = 0
+mod3.scrim.Size = UDim2.new(1, 0, 1, 0)
+mod3.scrim.Position = UDim2.new(0, 0, 0, 0)
+mod3.scrim.ZIndex = 950
+mod3.scrim.Visible = false
+mod3.scrim.Parent = moderationFrame
+mod3.scrim.MouseButton1Click:Connect(function()
+    if mod3.scrimOwner then
+        pcall(mod3.scrimOwner)
     end
 end)
 
-local mod3_blockedSet = {}
-local mod3_blockedSetDirty = true
+mod3.blockedSet = {}
+mod3.blockedSetDirty = true
 
-local function mod3_getBlockedList()
+mod3.getBlockedList = function()
     local list = ClientSettings.BlacklistUserIds
     if type(list) ~= "table" then
         ClientSettings.BlacklistUserIds = {}
         list = ClientSettings.BlacklistUserIds
-        mod3_blockedSetDirty = true
+        mod3.blockedSetDirty = true
     end
     return list
 end
 
-local function mod3_rebuildBlockedSet()
-    table.clear(mod3_blockedSet)
-    for _, id in ipairs(mod3_getBlockedList()) do
-        mod3_blockedSet[id] = true
+mod3.rebuildBlockedSet = function()
+    table.clear(mod3.blockedSet)
+    for _, id in ipairs(mod3.getBlockedList()) do
+        mod3.blockedSet[id] = true
     end
-    mod3_blockedSetDirty = false
+    mod3.blockedSetDirty = false
 end
 
-local function mod3_getTempMap()
+mod3.getTempMap = function()
     local bl = ClientSettings.Blacklist
     if type(bl) ~= "table" then
         ClientSettings.Blacklist = { Permanent = {}, Temporary = {} }
@@ -16425,8 +16442,8 @@ local function mod3_getTempMap()
     return bl.Temporary
 end
 
-local mod3_nameCache = {}
-local mod3_namePending = {}
+mod3.nameCache = {}
+mod3.namePending = {}
 
 local NameLookupQueue = { head = 1, tail = 0, items = {}, running = false }
 
@@ -16459,34 +16476,34 @@ local function enqueueNameLookup(userId, callback)
     end)
 end
 
-local function mod3_requestName(userId, callback)
-    local cached = mod3_nameCache[userId]
+mod3.requestName = function(userId, callback)
+    local cached = mod3.nameCache[userId]
     if cached then
         if callback then callback(cached) end
         return
     end
-    if mod3_namePending[userId] then
+    if mod3.namePending[userId] then
         return
     end
-    mod3_namePending[userId] = true
+    mod3.namePending[userId] = true
     enqueueNameLookup(userId, function(fetchedName)
-        mod3_namePending[userId] = nil
+        mod3.namePending[userId] = nil
         if fetchedName then
-            mod3_nameCache[userId] = fetchedName
+            mod3.nameCache[userId] = fetchedName
             if callback then callback(fetchedName) end
         end
     end)
 end
 
-local function mod3_isBlocked(userId)
-    if mod3_blockedSetDirty then
-        mod3_rebuildBlockedSet()
+mod3.isBlocked = function(userId)
+    if mod3.blockedSetDirty then
+        mod3.rebuildBlockedSet()
     end
-    return mod3_blockedSet[userId] == true
+    return mod3.blockedSet[userId] == true
 end
 
-local function mod3_getTimeoutRemainingSeconds(userId)
-    local tmp = mod3_getTempMap()
+mod3.getTimeoutRemainingSeconds = function(userId)
+    local tmp = mod3.getTempMap()
     local exp = tmp[userId]
     if type(exp) ~= "number" then
         return nil
@@ -16499,8 +16516,8 @@ local function mod3_getTimeoutRemainingSeconds(userId)
     return exp - now
 end
 
-local function mod3_hasActiveTimeouts()
-    local tmp = mod3_getTempMap()
+mod3.hasActiveTimeouts = function()
+    local tmp = mod3.getTempMap()
     local now = os.time()
     for _, exp in pairs(tmp) do
         if type(exp) == "number" and exp > now then
@@ -16510,34 +16527,34 @@ local function mod3_hasActiveTimeouts()
     return false
 end
 
-local function mod3_setTimeoutMinutes(userId, minutes)
+mod3.setTimeoutMinutes = function(userId, minutes)
     minutes = tonumber(minutes)
     if not minutes then return false end
     minutes = math.floor(minutes)
     if minutes < 1 then return false end
     if minutes > 1440 then minutes = 1440 end
-    mod3_getTempMap()[userId] = os.time() + (minutes * 60)
+    mod3.getTempMap()[userId] = os.time() + (minutes * 60)
     return true
 end
 
-local function mod3_clearTimeout(userId)
-    local tmp = mod3_getTempMap()
+mod3.clearTimeout = function(userId)
+    local tmp = mod3.getTempMap()
     tmp[userId] = nil
 end
 
-local function mod3_setBlocked(userId, shouldBlock)
-    local list = mod3_getBlockedList()
+mod3.setBlocked = function(userId, shouldBlock)
+    local list = mod3.getBlockedList()
     if shouldBlock then
-        if mod3_isBlocked(userId) then
+        if mod3.isBlocked(userId) then
             return
         end
         table.insert(list, userId)
-        mod3_blockedSet[userId] = true
-        mod3_blockedSetDirty = false
+        mod3.blockedSet[userId] = true
+        mod3.blockedSetDirty = false
         return
     end
 
-    if not mod3_isBlocked(userId) then
+    if not mod3.isBlocked(userId) then
         return
     end
     for idx, id in ipairs(list) do
@@ -16546,10 +16563,10 @@ local function mod3_setBlocked(userId, shouldBlock)
             break
         end
     end
-    mod3_blockedSet[userId] = nil
+    mod3.blockedSet[userId] = nil
 end
 
-local function mod3_makeIconButton(parent, kind)
+mod3.makeIconButton = function(parent, kind)
     local btn = Instance.new("TextButton")
     btn.AutoButtonColor = false
     btn.Text = ""
@@ -16691,31 +16708,31 @@ local function mod3_makeIconButton(parent, kind)
     return btn, setState
 end
 
-local mod3_rebuildToken = 0
-mod3_closeOpenTimeoutMenu = nil
-local mod3_refreshers = {}
-mod3_rebuild = function()
-    mod3_rebuildToken = mod3_rebuildToken + 1
-    local token = mod3_rebuildToken
+mod3.rebuildToken = 0
+mod3.closeOpenTimeoutMenu = nil
+mod3.refreshers = {}
+mod3.rebuild = function()
+    mod3.rebuildToken = mod3.rebuildToken + 1
+    local token = mod3.rebuildToken
 
-    local saved = mod3_list.CanvasPosition
-    mod3_closeOpenTimeoutMenu = nil
-    mod3_scrimOwner = nil
-    if mod3_scrim then
-        mod3_scrim.Visible = false
+    local saved = mod3.list.CanvasPosition
+    mod3.closeOpenTimeoutMenu = nil
+    mod3.scrimOwner = nil
+    if mod3.scrim then
+        mod3.scrim.Visible = false
     end
-    mod3_refreshers = {}
+    mod3.refreshers = {}
 
-    for _, c in ipairs(mod3_list:GetChildren()) do
-        if c:IsA("GuiObject") and c ~= mod3_layout then
+    for _, c in ipairs(mod3.list:GetChildren()) do
+        if c:IsA("GuiObject") and c ~= mod3.layout then
             c:Destroy()
         end
     end
 
-    local blockedList = mod3_getBlockedList()
-    mod3_blockedSetDirty = true
-    mod3_rebuildBlockedSet()
-    local blockedSet = mod3_blockedSet
+    local blockedList = mod3.getBlockedList()
+    mod3.blockedSetDirty = true
+    mod3.rebuildBlockedSet()
+    local blockedSet = mod3.blockedSet
     local allowNameLookup = moderationFrame.Visible
 
     local entries = {}
@@ -16738,7 +16755,7 @@ mod3_rebuild = function()
         local userId = entry.userId
         local isBlocked = blockedSet[userId] == true
         local function getTimeoutRemaining()
-            return mod3_getTimeoutRemainingSeconds(userId)
+            return mod3.getTimeoutRemainingSeconds(userId)
         end
 
         local timeoutRemaining = getTimeoutRemaining()
@@ -16750,7 +16767,7 @@ mod3_rebuild = function()
         rowWrap.AutomaticSize = Enum.AutomaticSize.Y
         rowWrap.ClipsDescendants = false
         rowWrap.LayoutOrder = layoutOrder or 0
-        rowWrap.Parent = mod3_list
+        rowWrap.Parent = mod3.list
 
         local rowWrapLayout = Instance.new("UIListLayout")
         rowWrapLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -16815,18 +16832,18 @@ mod3_rebuild = function()
         btnLayout.Padding = UDim.new(0, 6)
         btnLayout.Parent = btnHolder
 
-        local blockBtn, setBlockState = mod3_makeIconButton(btnHolder, "block")
-        local clockBtn, setClockState = mod3_makeIconButton(btnHolder, "clock")
+        local blockBtn, setBlockState = mod3.makeIconButton(btnHolder, "block")
+        local clockBtn, setClockState = mod3.makeIconButton(btnHolder, "clock")
 
         local function refreshIcons()
-            isBlocked = mod3_isBlocked(userId)
+            isBlocked = mod3.isBlocked(userId)
             timeoutRemaining = getTimeoutRemaining()
             setBlockState(isBlocked, { Accent = Color3.fromRGB(170, 55, 70) })
             setClockState(timeoutRemaining ~= nil, { Accent = Color3.fromRGB(60, 180, 130) })
         end
 
         refreshIcons()
-        mod3_refreshers[userId] = function()
+        mod3.refreshers[userId] = function()
             if not (row and row.Parent) then
                 return
             end
@@ -17190,9 +17207,9 @@ mod3_rebuild = function()
                 pcall(function() clickAwayConn:Disconnect() end)
                 clickAwayConn = nil
             end
-            mod3_scrimOwner = nil
-            if mod3_scrim then
-                mod3_scrim.Visible = false
+            mod3.scrimOwner = nil
+            if mod3.scrim then
+                mod3.scrim.Visible = false
             end
             cancelTween(menuTween)
             cancelTween(spacerTween)
@@ -17210,15 +17227,15 @@ mod3_rebuild = function()
         end
 
         local function openMenu()
-            if mod3_closeOpenTimeoutMenu and mod3_closeOpenTimeoutMenu ~= closeMenu then
-                mod3_closeOpenTimeoutMenu()
+            if mod3.closeOpenTimeoutMenu and mod3.closeOpenTimeoutMenu ~= closeMenu then
+                mod3.closeOpenTimeoutMenu()
             end
-            mod3_closeOpenTimeoutMenu = closeMenu
+            mod3.closeOpenTimeoutMenu = closeMenu
             menuOpen = true
             -- Don't use a fullscreen scrim (some executors route clicks to it even when menu ZIndex is higher).
-            mod3_scrimOwner = nil
-            if mod3_scrim then
-                mod3_scrim.Visible = false
+            mod3.scrimOwner = nil
+            if mod3.scrim then
+                mod3.scrim.Visible = false
             end
             setFrameZIndex(menu, 960)
             if timeoutRemaining then
@@ -17278,8 +17295,8 @@ mod3_rebuild = function()
                 end
 
                 closeMenu()
-                if mod3_closeOpenTimeoutMenu == closeMenu then
-                    mod3_closeOpenTimeoutMenu = nil
+                if mod3.closeOpenTimeoutMenu == closeMenu then
+                    mod3.closeOpenTimeoutMenu = nil
                 end
             end)
         end
@@ -17288,15 +17305,15 @@ mod3_rebuild = function()
         local function toggleBlock()
             if locked then return end
             locked = true
-            local newBlocked = not mod3_isBlocked(userId)
-            mod3_setBlocked(userId, newBlocked)
+            local newBlocked = not mod3.isBlocked(userId)
+            mod3.setBlocked(userId, newBlocked)
             if newBlocked then
-                mod3_clearTimeout(userId)
+                mod3.clearTimeout(userId)
             end
             if menuOpen then
                 closeMenu()
-                if mod3_closeOpenTimeoutMenu == closeMenu then
-                    mod3_closeOpenTimeoutMenu = nil
+                if mod3.closeOpenTimeoutMenu == closeMenu then
+                    mod3.closeOpenTimeoutMenu = nil
                 end
             end
             refreshIcons()
@@ -17316,33 +17333,33 @@ mod3_rebuild = function()
         clockBtn.MouseButton1Click:Connect(toggleTimeoutMenu)
 
         applyBtn.MouseButton1Click:Connect(function()
-            local ok = mod3_setTimeoutMinutes(userId, durBox.Text)
+            local ok = mod3.setTimeoutMinutes(userId, durBox.Text)
             if not ok then
                 durBox.Text = ""
                 durBox.PlaceholderText = "Enter 1-1440"
                 return
             end
-            mod3_setBlocked(userId, false)
+            mod3.setBlocked(userId, false)
             closeMenu()
-            if mod3_closeOpenTimeoutMenu == closeMenu then
-                mod3_closeOpenTimeoutMenu = nil
+            if mod3.closeOpenTimeoutMenu == closeMenu then
+                mod3.closeOpenTimeoutMenu = nil
             end
             refreshIcons()
         end)
 
         clearBtn.MouseButton1Click:Connect(function()
-            mod3_clearTimeout(userId)
+            mod3.clearTimeout(userId)
             closeMenu()
-            if mod3_closeOpenTimeoutMenu == closeMenu then
-                mod3_closeOpenTimeoutMenu = nil
+            if mod3.closeOpenTimeoutMenu == closeMenu then
+                mod3.closeOpenTimeoutMenu = nil
             end
             refreshIcons()
         end)
 
         cancelBtn.MouseButton1Click:Connect(function()
             closeMenu()
-            if mod3_closeOpenTimeoutMenu == closeMenu then
-                mod3_closeOpenTimeoutMenu = nil
+            if mod3.closeOpenTimeoutMenu == closeMenu then
+                mod3.closeOpenTimeoutMenu = nil
             end
         end)
 
@@ -17354,8 +17371,8 @@ mod3_rebuild = function()
         overlay.MouseButton1Click:Connect(function()
             if menuOpen then
                 closeMenu()
-                if mod3_closeOpenTimeoutMenu == closeMenu then
-                    mod3_closeOpenTimeoutMenu = nil
+                if mod3.closeOpenTimeoutMenu == closeMenu then
+                    mod3.closeOpenTimeoutMenu = nil
                 end
             end
         end)
@@ -17370,13 +17387,13 @@ mod3_rebuild = function()
         end)
 
         if (not entry.name) then
-            local cached = mod3_nameCache[userId]
+            local cached = mod3.nameCache[userId]
             if cached then
                 nameLbl.Text = cached
                 tagLbl.Text = "@" .. cached
             elseif isOfflineBlocked and allowNameLookup then
-                mod3_requestName(userId, function(fetchedName)
-                    if token ~= mod3_rebuildToken then return end
+                mod3.requestName(userId, function(fetchedName)
+                    if token ~= mod3.rebuildToken then return end
                     if row.Parent then
                         nameLbl.Text = fetchedName
                         tagLbl.Text = "@" .. fetchedName
@@ -17405,9 +17422,9 @@ mod3_rebuild = function()
         spacer.Size = UDim2.new(1, 0, 0, 6)
         lo = lo + 1
         spacer.LayoutOrder = lo
-        spacer.Parent = mod3_list
+        spacer.Parent = mod3.list
 
-        local hdr = makeTextLabel(mod3_list, "Blocked (not in server)", 12, "bold")
+        local hdr = makeTextLabel(mod3.list, "Blocked (not in server)", 12, "bold")
         hdr.TextColor3 = THEME.TextDim
         hdr.TextTransparency = 0.35
         hdr.Size = UDim2.new(1, 0, 0, 18)
@@ -17420,72 +17437,75 @@ mod3_rebuild = function()
         end
     end
 
-    mod3_list.CanvasPosition = saved
+    mod3.list.CanvasPosition = saved
 end
 
-mod3_rebuild()
+mod3.rebuild()
 
-local mod3_refreshActive = true
-local mod3_refreshRunning = false
+mod3.refreshActive = true
+mod3.refreshRunning = false
 local function startMod3RefreshLoop()
-    if mod3_refreshRunning then
+    if mod3.refreshRunning then
         return
     end
-    mod3_refreshRunning = true
+    mod3.refreshRunning = true
     task.spawn(function()
-        while mod3_refreshActive and moderationFrame and moderationFrame.Parent do
-            if moderationFrame.Visible and mod3_hasActiveTimeouts() and next(mod3_refreshers) ~= nil then
-                local refreshers = mod3_refreshers
+        while mod3.refreshActive and moderationFrame and moderationFrame.Parent do
+            if moderationFrame.Visible and mod3.hasActiveTimeouts() and next(mod3.refreshers) ~= nil then
+                local refreshers = mod3.refreshers
                 for _, fn in pairs(refreshers) do
                     pcall(fn)
                 end
             end
             task.wait(1)
         end
-        mod3_refreshRunning = false
+        mod3.refreshRunning = false
     end)
 end
 
 startMod3RefreshLoop()
 
-local mod3_rebuildScheduled = false
+mod3.rebuildScheduled = false
 local function scheduleMod3Rebuild()
-    if mod3_rebuildScheduled then return end
-    mod3_rebuildScheduled = true
+    if mod3.rebuildScheduled then return end
+    mod3.rebuildScheduled = true
     task.delay(0.2, function()
-        mod3_rebuildScheduled = false
-        if mod3_list.Parent then
+        mod3.rebuildScheduled = false
+        if mod3.list.Parent then
             if moderationFrame.Visible then
-                mod3_rebuild()
+                mod3.rebuild()
             else
-                mod3_needsRebuild = true
+                mod3.needsRebuild = true
             end
         end
     end)
 end
 
-local mod3_connAdded = trackConn(Players.PlayerAdded:Connect(function()
-    if mod3_list.Parent then
+mod3.connAdded = trackConn(Players.PlayerAdded:Connect(function()
+    if mod3.list.Parent then
         scheduleMod3Rebuild()
     end
 end))
-local mod3_connRemoving = trackConn(Players.PlayerRemoving:Connect(function()
-    if mod3_list.Parent then
+mod3.connRemoving = trackConn(Players.PlayerRemoving:Connect(function()
+    if mod3.list.Parent then
         scheduleMod3Rebuild()
     end
 end))
 
 moderationFrame.Destroying:Connect(function()
-    if mod3_connAdded then mod3_connAdded:Disconnect() end
-    if mod3_connRemoving then mod3_connRemoving:Disconnect() end
-    mod3_refreshActive = false
+    if mod3.connAdded then mod3.connAdded:Disconnect() end
+    if mod3.connRemoving then mod3.connRemoving:Disconnect() end
+    mod3.refreshActive = false
 end)
 
 -- Moderation UI (premium redesign)
 if false then
 modInfo.Text = "Search, filter, and manage your blacklist."
 
-local function mod2_lerpColor(a, b, t)
+-- v24.3 FIX: все mod2_* локалки упакованы в таблицу mod2 (та же причина:
+-- лимит регистров Luau 200 при компиляции без оптимизации). Семантика не изменена.
+local mod2 = {}
+mod2.lerpColor = function(a, b, t)
     return Color3.new(
         a.R + (b.R - a.R) * t,
         a.G + (b.G - a.G) * t,
@@ -17493,7 +17513,7 @@ local function mod2_lerpColor(a, b, t)
     )
 end
 
-local function mod2_makeCard(parent)
+mod2.makeCard = function(parent)
     local card = Instance.new("Frame")
     card.BackgroundColor3 = THEME.Button
     card.BackgroundTransparency = 0
@@ -17517,7 +17537,7 @@ local function mod2_makeCard(parent)
     return card
 end
 
-local function mod2_makeBadge(parent, text)
+mod2.makeBadge = function(parent, text)
     local badge = Instance.new("Frame")
     badge.BackgroundColor3 = THEME.SidebarSelected
     badge.BackgroundTransparency = 0.2
@@ -17536,7 +17556,7 @@ local function mod2_makeBadge(parent, text)
     return badge, lbl, stroke
 end
 
-local function mod2_makePillButton(parent, text, scheme)
+mod2.makePillButton = function(parent, text, scheme)
     local btn = Instance.new("TextButton")
     btn.AutoButtonColor = false
     btn.Text = ""
@@ -17557,7 +17577,7 @@ local function mod2_makePillButton(parent, text, scheme)
     local grad = Instance.new("UIGradient")
     grad.Rotation = 90
     grad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, mod2_lerpColor(scheme.Bg, Color3.fromRGB(255, 255, 255), 0.07)),
+        ColorSequenceKeypoint.new(0, mod2.lerpColor(scheme.Bg, Color3.fromRGB(255, 255, 255), 0.07)),
         ColorSequenceKeypoint.new(1, scheme.Bg),
     })
     grad.Transparency = NumberSequence.new({
@@ -17583,82 +17603,82 @@ local function mod2_makePillButton(parent, text, scheme)
     return btn, lbl, stroke
 end
 
-local mod2_banner = mod2_makeCard(moderationFrame)
-mod2_banner.Position = UDim2.new(0, 0, 0, 110)
-mod2_banner.Size = UDim2.new(1, 0, 0, 56)
-makePadding(mod2_banner, 14)
+mod2.banner = mod2_makeCard(moderationFrame)
+mod2.banner.Position = UDim2.new(0, 0, 0, 110)
+mod2.banner.Size = UDim2.new(1, 0, 0, 56)
+makePadding(mod2.banner, 14)
 
-local mod2_bannerTitle = makeTextLabel(mod2_banner, "Blacklist", 15, "bold")
-mod2_bannerTitle.Size = UDim2.new(1, -170, 0, 20)
-mod2_bannerTitle.Position = UDim2.new(0, 0, 0, 6)
+mod2.bannerTitle = makeTextLabel(mod2_banner, "Blacklist", 15, "bold")
+mod2.bannerTitle.Size = UDim2.new(1, -170, 0, 20)
+mod2.bannerTitle.Position = UDim2.new(0, 0, 0, 6)
 
-local mod2_bannerHint = makeTextLabel(mod2_banner, "Blocked users are ignored by the bot.", 12, "semibold")
-mod2_bannerHint.TextColor3 = THEME.TextDim
-mod2_bannerHint.TextTransparency = 0.25
-mod2_bannerHint.Size = UDim2.new(1, -170, 0, 16)
-mod2_bannerHint.Position = UDim2.new(0, 0, 0, 28)
+mod2.bannerHint = makeTextLabel(mod2_banner, "Blocked users are ignored by the bot.", 12, "semibold")
+mod2.bannerHint.TextColor3 = THEME.TextDim
+mod2.bannerHint.TextTransparency = 0.25
+mod2.bannerHint.Size = UDim2.new(1, -170, 0, 16)
+mod2.bannerHint.Position = UDim2.new(0, 0, 0, 28)
 
-local mod2_blockedBadge, mod2_blockedBadgeLbl = mod2_makeBadge(mod2_banner, "Blocked: 0")
-mod2_blockedBadge.AnchorPoint = Vector2.new(1, 0.5)
-mod2_blockedBadge.Position = UDim2.new(1, -14, 0.5, 0)
-mod2_blockedBadge.Size = UDim2.new(0, 132, 0, 28)
+mod2.blockedBadge, mod2.blockedBadgeLbl = mod2_makeBadge(mod2_banner, "Blocked: 0")
+mod2.blockedBadge.AnchorPoint = Vector2.new(1, 0.5)
+mod2.blockedBadge.Position = UDim2.new(1, -14, 0.5, 0)
+mod2.blockedBadge.Size = UDim2.new(0, 132, 0, 28)
 
-local mod2_toolbar = Instance.new("Frame")
-mod2_toolbar.BackgroundTransparency = 1
-mod2_toolbar.Position = UDim2.new(0, 0, 0, 178)
-mod2_toolbar.Size = UDim2.new(1, 0, 0, 44)
-mod2_toolbar.Parent = moderationFrame
+mod2.toolbar = Instance.new("Frame")
+mod2.toolbar.BackgroundTransparency = 1
+mod2.toolbar.Position = UDim2.new(0, 0, 0, 178)
+mod2.toolbar.Size = UDim2.new(1, 0, 0, 44)
+mod2.toolbar.Parent = moderationFrame
 
-local mod2_search = Instance.new("Frame")
-mod2_search.BackgroundColor3 = THEME.InputBg or THEME.Button
-mod2_search.BackgroundTransparency = 0.08
-mod2_search.BorderSizePixel = 0
-mod2_search.Size = UDim2.new(1, -260, 1, 0)
-mod2_search.Parent = mod2_toolbar
-makeCorner(mod2_search, 14)
-local mod2_searchStroke = makeStroke(mod2_search, 1, THEME.Stroke, 0.25)
-makePadding(mod2_search, 12)
+mod2.search = Instance.new("Frame")
+mod2.search.BackgroundColor3 = THEME.InputBg or THEME.Button
+mod2.search.BackgroundTransparency = 0.08
+mod2.search.BorderSizePixel = 0
+mod2.search.Size = UDim2.new(1, -260, 1, 0)
+mod2.search.Parent = mod2.toolbar
+makeCorner(mod2.search, 14)
+mod2.searchStroke = makeStroke(mod2_search, 1, THEME.Stroke, 0.25)
+makePadding(mod2.search, 12)
 
-local mod2_searchIcon = makeTextLabel(mod2_search, "Search", 12, "bold")
-mod2_searchIcon.TextColor3 = THEME.TextDim
-mod2_searchIcon.TextTransparency = 0.35
-mod2_searchIcon.Size = UDim2.new(0, 54, 1, 0)
+mod2.searchIcon = makeTextLabel(mod2_search, "Search", 12, "bold")
+mod2.searchIcon.TextColor3 = THEME.TextDim
+mod2.searchIcon.TextTransparency = 0.35
+mod2.searchIcon.Size = UDim2.new(0, 54, 1, 0)
 
-local mod2_searchInput = Instance.new("TextBox")
-mod2_searchInput.ClearTextOnFocus = false
-mod2_searchInput.BackgroundTransparency = 1
-mod2_searchInput.Text = ""
-mod2_searchInput.PlaceholderText = "Name, @username, or user id"
-mod2_searchInput.PlaceholderColor3 = THEME.TextDim
-mod2_searchInput.TextColor3 = THEME.Text
-mod2_searchInput.Font = Enum.Font.Gotham
-mod2_searchInput.TextSize = 14
-mod2_searchInput.TextXAlignment = Enum.TextXAlignment.Left
-mod2_searchInput.TextYAlignment = Enum.TextYAlignment.Center
-mod2_searchInput.Size = UDim2.new(1, -60, 1, 0)
-mod2_searchInput.Position = UDim2.new(0, 60, 0, 0)
-mod2_searchInput.Parent = mod2_search
+mod2.searchInput = Instance.new("TextBox")
+mod2.searchInput.ClearTextOnFocus = false
+mod2.searchInput.BackgroundTransparency = 1
+mod2.searchInput.Text = ""
+mod2.searchInput.PlaceholderText = "Name, @username, or user id"
+mod2.searchInput.PlaceholderColor3 = THEME.TextDim
+mod2.searchInput.TextColor3 = THEME.Text
+mod2.searchInput.Font = Enum.Font.Gotham
+mod2.searchInput.TextSize = 14
+mod2.searchInput.TextXAlignment = Enum.TextXAlignment.Left
+mod2.searchInput.TextYAlignment = Enum.TextYAlignment.Center
+mod2.searchInput.Size = UDim2.new(1, -60, 1, 0)
+mod2.searchInput.Position = UDim2.new(0, 60, 0, 0)
+mod2.searchInput.Parent = mod2.search
 
-mod2_searchInput.Focused:Connect(function()
-    tween(mod2_searchStroke, TWEEN_FAST, { Color = THEME.ToggleOn, Transparency = 0.1 })
+mod2.searchInput.Focused:Connect(function()
+    tween(mod2.searchStroke, TWEEN_FAST, { Color = THEME.ToggleOn, Transparency = 0.1 })
 end)
-mod2_searchInput.FocusLost:Connect(function()
-    tween(mod2_searchStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.25 })
+mod2.searchInput.FocusLost:Connect(function()
+    tween(mod2.searchStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.25 })
 end)
 
-local mod2_modeWrap = mod2_makeCard(mod2_toolbar)
-mod2_modeWrap.AnchorPoint = Vector2.new(1, 0)
-mod2_modeWrap.Position = UDim2.new(1, 0, 0, 0)
-mod2_modeWrap.Size = UDim2.new(0, 248, 1, 0)
-makePadding(mod2_modeWrap, 8)
+mod2.modeWrap = mod2_makeCard(mod2_toolbar)
+mod2.modeWrap.AnchorPoint = Vector2.new(1, 0)
+mod2.modeWrap.Position = UDim2.new(1, 0, 0, 0)
+mod2.modeWrap.Size = UDim2.new(0, 248, 1, 0)
+makePadding(mod2.modeWrap, 8)
 
-local mod2_mode = "Active"
-local mod2_modeBtns = {}
-local mod2_rebuild
+mod2.mode = "Active"
+mod2.modeBtns = {}
+mod2.rebuild = nil  -- v24.3: forward-decl (было local mod2_rebuild)
 
-local function mod2_setMode(mode, instant)
-    mod2_mode = mode
-    for key, rec in pairs(mod2_modeBtns) do
+mod2.setMode = function(mode, instant)
+    mod2.mode = mode
+    for key, rec in pairs(mod2.modeBtns) do
         local selected = (key == mode)
         local bgT = selected and 0.05 or 1
         local col = selected and THEME.ButtonHover or THEME.Button
@@ -17679,12 +17699,12 @@ local function mod2_setMode(mode, instant)
     end
 end
 
-local mod2_modeList = Instance.new("UIListLayout")
-mod2_modeList.FillDirection = Enum.FillDirection.Horizontal
-mod2_modeList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-mod2_modeList.VerticalAlignment = Enum.VerticalAlignment.Center
-mod2_modeList.Padding = UDim.new(0, 8)
-mod2_modeList.Parent = mod2_modeWrap
+mod2.modeList = Instance.new("UIListLayout")
+mod2.modeList.FillDirection = Enum.FillDirection.Horizontal
+mod2.modeList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+mod2.modeList.VerticalAlignment = Enum.VerticalAlignment.Center
+mod2.modeList.Padding = UDim.new(0, 8)
+mod2.modeList.Parent = mod2.modeWrap
 
 for _, name in ipairs({ "Active", "Blocked", "All" }) do
     local modeName = name
@@ -17693,7 +17713,7 @@ for _, name in ipairs({ "Active", "Blocked", "All" }) do
     btn.Text = ""
     btn.BackgroundTransparency = 1
     btn.Size = UDim2.new(0, 68, 0, 28)
-    btn.Parent = mod2_modeWrap
+    btn.Parent = mod2.modeWrap
 
     local bg = Instance.new("Frame")
     bg.BackgroundColor3 = THEME.Button
@@ -17709,115 +17729,115 @@ for _, name in ipairs({ "Active", "Blocked", "All" }) do
     lbl.TextXAlignment = Enum.TextXAlignment.Center
     lbl.TextColor3 = THEME.TextDim
 
-    mod2_modeBtns[name] = { Btn = btn, Bg = bg, Label = lbl, Stroke = st }
+    mod2.modeBtns[name] = { Btn = btn, Bg = bg, Label = lbl, Stroke = st }
 
     btn.MouseButton1Click:Connect(function()
-        if mod2_mode ~= modeName then
-            mod2_setMode(modeName, false)
-            mod2_rebuild()
+        if mod2.mode ~= modeName then
+            mod2.setMode(modeName, false)
+            mod2.rebuild()
         end
     end)
 end
 
-mod2_setMode(mod2_mode, true)
+mod2.setMode(mod2.mode, true)
 
-local mod2_listCard = mod2_makeCard(moderationFrame)
-mod2_listCard.Position = UDim2.new(0, 0, 0, 234)
-mod2_listCard.Size = UDim2.new(1, 0, 1, -234)
+mod2.listCard = mod2_makeCard(moderationFrame)
+mod2.listCard.Position = UDim2.new(0, 0, 0, 234)
+mod2.listCard.Size = UDim2.new(1, 0, 1, -234)
 
-local mod2_listHeader = Instance.new("Frame")
-mod2_listHeader.BackgroundTransparency = 1
-mod2_listHeader.Size = UDim2.new(1, 0, 0, 56)
-mod2_listHeader.Parent = mod2_listCard
-makePadding(mod2_listHeader, 14)
+mod2.listHeader = Instance.new("Frame")
+mod2.listHeader.BackgroundTransparency = 1
+mod2.listHeader.Size = UDim2.new(1, 0, 0, 56)
+mod2.listHeader.Parent = mod2.listCard
+makePadding(mod2.listHeader, 14)
 
-local mod2_listTitle = makeTextLabel(mod2_listHeader, "Users", 16, "bold")
-mod2_listTitle.Size = UDim2.new(1, -90, 0, 22)
-mod2_listTitle.Position = UDim2.new(0, 0, 0, 4)
+mod2.listTitle = makeTextLabel(mod2_listHeader, "Users", 16, "bold")
+mod2.listTitle.Size = UDim2.new(1, -90, 0, 22)
+mod2.listTitle.Position = UDim2.new(0, 0, 0, 4)
 
-local mod2_listSub = makeTextLabel(mod2_listHeader, "Click a user to select. Use the footer actions.", 12, "semibold")
-mod2_listSub.TextColor3 = THEME.TextDim
-mod2_listSub.TextTransparency = 0.25
-mod2_listSub.Size = UDim2.new(1, -90, 0, 18)
-mod2_listSub.Position = UDim2.new(0, 0, 0, 28)
+mod2.listSub = makeTextLabel(mod2_listHeader, "Click a user to select. Use the footer actions.", 12, "semibold")
+mod2.listSub.TextColor3 = THEME.TextDim
+mod2.listSub.TextTransparency = 0.25
+mod2.listSub.Size = UDim2.new(1, -90, 0, 18)
+mod2.listSub.Position = UDim2.new(0, 0, 0, 28)
 
-local mod2_listCount, mod2_listCountLbl = mod2_makeBadge(mod2_listHeader, "0")
-mod2_listCount.AnchorPoint = Vector2.new(1, 0.5)
-mod2_listCount.Position = UDim2.new(1, -14, 0.5, 0)
-mod2_listCount.Size = UDim2.new(0, 56, 0, 26)
+mod2.listCount, mod2.listCountLbl = mod2_makeBadge(mod2_listHeader, "0")
+mod2.listCount.AnchorPoint = Vector2.new(1, 0.5)
+mod2.listCount.Position = UDim2.new(1, -14, 0.5, 0)
+mod2.listCount.Size = UDim2.new(0, 56, 0, 26)
 
-local mod2_listDivider = Instance.new("Frame")
-mod2_listDivider.BackgroundColor3 = THEME.Stroke
-mod2_listDivider.BackgroundTransparency = 0.7
-mod2_listDivider.BorderSizePixel = 0
-mod2_listDivider.Position = UDim2.new(0, 14, 0, 56)
-mod2_listDivider.Size = UDim2.new(1, -28, 0, 1)
-mod2_listDivider.Parent = mod2_listCard
+mod2.listDivider = Instance.new("Frame")
+mod2.listDivider.BackgroundColor3 = THEME.Stroke
+mod2.listDivider.BackgroundTransparency = 0.7
+mod2.listDivider.BorderSizePixel = 0
+mod2.listDivider.Position = UDim2.new(0, 14, 0, 56)
+mod2.listDivider.Size = UDim2.new(1, -28, 0, 1)
+mod2.listDivider.Parent = mod2.listCard
 
-local mod2_listScroll = Instance.new("ScrollingFrame")
-mod2_listScroll.BackgroundTransparency = 1
-mod2_listScroll.BorderSizePixel = 0
-mod2_listScroll.Position = UDim2.new(0, 0, 0, 58)
-mod2_listScroll.Size = UDim2.new(1, 0, 1, -156)
-mod2_listScroll.ScrollBarThickness = 0
-mod2_listScroll.ScrollBarImageTransparency = 0.75
-mod2_listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-mod2_listScroll.Parent = mod2_listCard
-makePadding(mod2_listScroll, 12)
+mod2.listScroll = Instance.new("ScrollingFrame")
+mod2.listScroll.BackgroundTransparency = 1
+mod2.listScroll.BorderSizePixel = 0
+mod2.listScroll.Position = UDim2.new(0, 0, 0, 58)
+mod2.listScroll.Size = UDim2.new(1, 0, 1, -156)
+mod2.listScroll.ScrollBarThickness = 0
+mod2.listScroll.ScrollBarImageTransparency = 0.75
+mod2.listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+mod2.listScroll.Parent = mod2.listCard
+makePadding(mod2.listScroll, 12)
 
-local mod2_listLayout = Instance.new("UIListLayout")
-mod2_listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-mod2_listLayout.Padding = UDim.new(0, 8)
-mod2_listLayout.Parent = mod2_listScroll
-mod2_listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    mod2_listScroll.CanvasSize = UDim2.new(0, 0, 0, (mod2_listLayout.AbsoluteContentSize.Y + 12) / _guiScale)
+mod2.listLayout = Instance.new("UIListLayout")
+mod2.listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+mod2.listLayout.Padding = UDim.new(0, 8)
+mod2.listLayout.Parent = mod2.listScroll
+mod2.listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    mod2.listScroll.CanvasSize = UDim2.new(0, 0, 0, (mod2.listLayout.AbsoluteContentSize.Y + 12) / _guiScale)
 end)
 
-local mod2_footer = Instance.new("Frame")
-mod2_footer.BackgroundColor3 = THEME.SidebarSelected
-mod2_footer.BackgroundTransparency = 0
-mod2_footer.BorderSizePixel = 0
-mod2_footer.AnchorPoint = Vector2.new(0, 1)
-mod2_footer.Position = UDim2.new(0, 12, 1, -12)
-mod2_footer.Size = UDim2.new(1, -24, 0, 74)
-mod2_footer.Parent = mod2_listCard
-makeCorner(mod2_footer, 14)
-makeStroke(mod2_footer, 1, THEME.Stroke, 0.35)
-makePadding(mod2_footer, 12)
+mod2.footer = Instance.new("Frame")
+mod2.footer.BackgroundColor3 = THEME.SidebarSelected
+mod2.footer.BackgroundTransparency = 0
+mod2.footer.BorderSizePixel = 0
+mod2.footer.AnchorPoint = Vector2.new(0, 1)
+mod2.footer.Position = UDim2.new(0, 12, 1, -12)
+mod2.footer.Size = UDim2.new(1, -24, 0, 74)
+mod2.footer.Parent = mod2.listCard
+makeCorner(mod2.footer, 14)
+makeStroke(mod2.footer, 1, THEME.Stroke, 0.35)
+makePadding(mod2.footer, 12)
 
-local mod2_footerEmpty = makeTextLabel(mod2_footer, "Select a user to manage (block/unblock).", 13, "semibold")
-mod2_footerEmpty.TextColor3 = THEME.TextDim
-mod2_footerEmpty.TextTransparency = 0.25
-mod2_footerEmpty.Size = UDim2.new(1, -140, 1, 0)
-mod2_footerEmpty.Position = UDim2.new(0, 0, 0, 0)
+mod2.footerEmpty = makeTextLabel(mod2_footer, "Select a user to manage (block/unblock).", 13, "semibold")
+mod2.footerEmpty.TextColor3 = THEME.TextDim
+mod2.footerEmpty.TextTransparency = 0.25
+mod2.footerEmpty.Size = UDim2.new(1, -140, 1, 0)
+mod2.footerEmpty.Position = UDim2.new(0, 0, 0, 0)
 
-local mod2_selAvatar = Instance.new("ImageLabel")
-mod2_selAvatar.BackgroundTransparency = 1
-mod2_selAvatar.Size = UDim2.new(0, 38, 0, 38)
-mod2_selAvatar.Position = UDim2.new(0, 0, 0.5, -19)
-mod2_selAvatar.Image = ""
-mod2_selAvatar.Parent = mod2_footer
-makeCorner(mod2_selAvatar, 19)
-makeStroke(mod2_selAvatar, 1, THEME.Stroke, 0.45)
+mod2.selAvatar = Instance.new("ImageLabel")
+mod2.selAvatar.BackgroundTransparency = 1
+mod2.selAvatar.Size = UDim2.new(0, 38, 0, 38)
+mod2.selAvatar.Position = UDim2.new(0, 0, 0.5, -19)
+mod2.selAvatar.Image = ""
+mod2.selAvatar.Parent = mod2.footer
+makeCorner(mod2.selAvatar, 19)
+makeStroke(mod2.selAvatar, 1, THEME.Stroke, 0.45)
 
-local mod2_selName = makeTextLabel(mod2_footer, "No user selected", 14, "bold")
-mod2_selName.Position = UDim2.new(0, 50, 0, 6)
-mod2_selName.Size = UDim2.new(1, -220, 0, 20)
-mod2_selName.TextTruncate = Enum.TextTruncate.AtEnd
+mod2.selName = makeTextLabel(mod2_footer, "No user selected", 14, "bold")
+mod2.selName.Position = UDim2.new(0, 50, 0, 6)
+mod2.selName.Size = UDim2.new(1, -220, 0, 20)
+mod2.selName.TextTruncate = Enum.TextTruncate.AtEnd
 
-local mod2_selTag = makeTextLabel(mod2_footer, "", 12, "semibold")
-mod2_selTag.TextColor3 = THEME.TextDim
-mod2_selTag.TextTransparency = 0.25
-mod2_selTag.Position = UDim2.new(0, 50, 0, 28)
-mod2_selTag.Size = UDim2.new(1, -220, 0, 16)
-mod2_selTag.TextTruncate = Enum.TextTruncate.AtEnd
+mod2.selTag = makeTextLabel(mod2_footer, "", 12, "semibold")
+mod2.selTag.TextColor3 = THEME.TextDim
+mod2.selTag.TextTransparency = 0.25
+mod2.selTag.Position = UDim2.new(0, 50, 0, 28)
+mod2.selTag.Size = UDim2.new(1, -220, 0, 16)
+mod2.selTag.TextTruncate = Enum.TextTruncate.AtEnd
 
-local mod2_selStatus, mod2_selStatusLbl = mod2_makeBadge(mod2_footer, "-")
-mod2_selStatus.AnchorPoint = Vector2.new(1, 0.5)
-mod2_selStatus.Position = UDim2.new(1, -132, 0.5, 0)
-mod2_selStatus.Size = UDim2.new(0, 88, 0, 26)
+mod2.selStatus, mod2.selStatusLbl = mod2_makeBadge(mod2_footer, "-")
+mod2.selStatus.AnchorPoint = Vector2.new(1, 0.5)
+mod2.selStatus.Position = UDim2.new(1, -132, 0.5, 0)
+mod2.selStatus.Size = UDim2.new(0, 88, 0, 26)
 
-local mod2_schemes = {
+mod2.schemes = {
     Block = {
         Bg = Color3.fromRGB(90, 28, 35),
         Text = Color3.fromRGB(255, 190, 200),
@@ -17834,26 +17854,26 @@ local mod2_schemes = {
     },
 }
 
-local mod2_actionZone = Instance.new("Frame")
-mod2_actionZone.BackgroundTransparency = 1
-mod2_actionZone.AnchorPoint = Vector2.new(1, 0.5)
-mod2_actionZone.Position = UDim2.new(1, -12, 0.5, 0)
-mod2_actionZone.Size = UDim2.new(0, 112, 0, 34)
-mod2_actionZone.Parent = mod2_footer
+mod2.actionZone = Instance.new("Frame")
+mod2.actionZone.BackgroundTransparency = 1
+mod2.actionZone.AnchorPoint = Vector2.new(1, 0.5)
+mod2.actionZone.Position = UDim2.new(1, -12, 0.5, 0)
+mod2.actionZone.Size = UDim2.new(0, 112, 0, 34)
+mod2.actionZone.Parent = mod2.footer
 
-local mod2_actionBtn, mod2_actionLbl, mod2_actionStroke = mod2_makePillButton(mod2_actionZone, "Block", mod2_schemes.Block)
-mod2_actionBtn.Position = UDim2.new(0, 0, 0, 0)
-mod2_actionBtn.Size = UDim2.new(1, 0, 1, 0)
-local mod2_actionBg = mod2_actionBtn:FindFirstChild("Bg")
+mod2.actionBtn, mod2.actionLbl, mod2.actionStroke = mod2_makePillButton(mod2_actionZone, "Block", mod2_schemes.Block)
+mod2.actionBtn.Position = UDim2.new(0, 0, 0, 0)
+mod2.actionBtn.Size = UDim2.new(1, 0, 1, 0)
+mod2.actionBg = mod2_actionBtn:FindFirstChild("Bg")
 
-local mod2_selected = {
+mod2.selected = {
     userId = nil,
     isBlocked = false,
     displayName = nil,
     name = nil,
 }
 
-local function mod2_getBlockedList()
+mod2.getBlockedList = function()
     local list = ClientSettings.BlacklistUserIds
     if type(list) ~= "table" then
         ClientSettings.BlacklistUserIds = {}
@@ -17862,15 +17882,15 @@ local function mod2_getBlockedList()
     return list
 end
 
-local function mod2_isBlocked(userId)
-    for _, id in ipairs(mod2_getBlockedList()) do
+mod2.isBlocked = function(userId)
+    for _, id in ipairs(mod2.getBlockedList()) do
         if id == userId then return true end
     end
     return false
 end
 
-local function mod2_applyBlock(userId, shouldBlock)
-    local list = mod2_getBlockedList()
+mod2.applyBlock = function(userId, shouldBlock)
+    local list = mod2.getBlockedList()
     if shouldBlock then
         for _, id in ipairs(list) do
             if id == userId then return end
@@ -17886,59 +17906,59 @@ local function mod2_applyBlock(userId, shouldBlock)
     end
 end
 
-local function mod2_updateDetails()
-    if not mod2_selected.userId then
-        mod2_footerEmpty.Visible = true
-        mod2_selAvatar.Visible = false
-        mod2_selName.Visible = false
-        mod2_selTag.Visible = false
-        mod2_selAvatar.Image = ""
-        mod2_selName.Text = "No user selected"
-        mod2_selTag.Text = ""
-        mod2_selStatusLbl.Text = "-"
-        mod2_selStatus.BackgroundColor3 = THEME.SidebarSelected
-        mod2_actionZone.Visible = false
-        mod2_actionLbl.Text = "Block"
-        if mod2_actionBg then mod2_actionBg.BackgroundColor3 = mod2_schemes.Block.Bg end
-        mod2_actionLbl.TextColor3 = mod2_schemes.Block.Text
-        if mod2_actionStroke then mod2_actionStroke.Color = mod2_schemes.Block.Stroke end
-        mod2_actionBtn.Active = false
+mod2.updateDetails = function()
+    if not mod2.selected.userId then
+        mod2.footerEmpty.Visible = true
+        mod2.selAvatar.Visible = false
+        mod2.selName.Visible = false
+        mod2.selTag.Visible = false
+        mod2.selAvatar.Image = ""
+        mod2.selName.Text = "No user selected"
+        mod2.selTag.Text = ""
+        mod2.selStatusLbl.Text = "-"
+        mod2.selStatus.BackgroundColor3 = THEME.SidebarSelected
+        mod2.actionZone.Visible = false
+        mod2.actionLbl.Text = "Block"
+        if mod2.actionBg then mod2.actionBg.BackgroundColor3 = mod2.schemes.Block.Bg end
+        mod2.actionLbl.TextColor3 = mod2.schemes.Block.Text
+        if mod2.actionStroke then mod2.actionStroke.Color = mod2.schemes.Block.Stroke end
+        mod2.actionBtn.Active = false
         return
     end
 
-    mod2_footerEmpty.Visible = false
-    mod2_selAvatar.Visible = true
-    mod2_selName.Visible = true
-    mod2_selTag.Visible = true
-    mod2_actionZone.Visible = true
-    mod2_selAvatar.Image = "rbxthumb://type=AvatarHeadShot&id=" .. mod2_selected.userId .. "&w=150&h=150"
-    mod2_selName.Text = tostring(mod2_selected.displayName or mod2_selected.name or ("User " .. tostring(mod2_selected.userId)))
-    mod2_selTag.Text = mod2_selected.name and ("@" .. tostring(mod2_selected.name)) or ("ID " .. tostring(mod2_selected.userId))
+    mod2.footerEmpty.Visible = false
+    mod2.selAvatar.Visible = true
+    mod2.selName.Visible = true
+    mod2.selTag.Visible = true
+    mod2.actionZone.Visible = true
+    mod2.selAvatar.Image = "rbxthumb://type=AvatarHeadShot&id=" .. mod2.selected.userId .. "&w=150&h=150"
+    mod2.selName.Text = tostring(mod2.selected.displayName or mod2.selected.name or ("User " .. tostring(mod2.selected.userId)))
+    mod2.selTag.Text = mod2.selected.name and ("@" .. tostring(mod2.selected.name)) or ("ID " .. tostring(mod2.selected.userId))
 
-    if mod2_selected.isBlocked then
-        mod2_selStatusLbl.Text = "Blocked"
-        mod2_actionLbl.Text = "Unblock"
-        mod2_selStatus.BackgroundColor3 = Color3.fromRGB(22, 60, 45)
-        if mod2_actionBg then mod2_actionBg.BackgroundColor3 = mod2_schemes.Unblock.Bg end
-        mod2_actionLbl.TextColor3 = mod2_schemes.Unblock.Text
-        if mod2_actionStroke then mod2_actionStroke.Color = mod2_schemes.Unblock.Stroke end
+    if mod2.selected.isBlocked then
+        mod2.selStatusLbl.Text = "Blocked"
+        mod2.actionLbl.Text = "Unblock"
+        mod2.selStatus.BackgroundColor3 = Color3.fromRGB(22, 60, 45)
+        if mod2.actionBg then mod2.actionBg.BackgroundColor3 = mod2.schemes.Unblock.Bg end
+        mod2.actionLbl.TextColor3 = mod2.schemes.Unblock.Text
+        if mod2.actionStroke then mod2.actionStroke.Color = mod2.schemes.Unblock.Stroke end
     else
-        mod2_selStatusLbl.Text = "Active"
-        mod2_actionLbl.Text = "Block"
-        mod2_selStatus.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-        if mod2_actionBg then mod2_actionBg.BackgroundColor3 = mod2_schemes.Block.Bg end
-        mod2_actionLbl.TextColor3 = mod2_schemes.Block.Text
-        if mod2_actionStroke then mod2_actionStroke.Color = mod2_schemes.Block.Stroke end
+        mod2.selStatusLbl.Text = "Active"
+        mod2.actionLbl.Text = "Block"
+        mod2.selStatus.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        if mod2.actionBg then mod2.actionBg.BackgroundColor3 = mod2.schemes.Block.Bg end
+        mod2.actionLbl.TextColor3 = mod2.schemes.Block.Text
+        if mod2.actionStroke then mod2.actionStroke.Color = mod2.schemes.Block.Stroke end
     end
-    mod2_actionBtn.Active = true
+    mod2.actionBtn.Active = true
 end
 
-local mod2_rowRecs = {}
-local mod2_rebuildToken = 0
+mod2.rowRecs = {}
+mod2.rebuildToken = 0
 
-local function mod2_updateRowSelection()
-    for _, rec in ipairs(mod2_rowRecs) do
-        local selected = mod2_selected.userId == rec.Entry.userId and mod2_selected.isBlocked == rec.Entry.isBlocked
+mod2.updateRowSelection = function()
+    for _, rec in ipairs(mod2.rowRecs) do
+        local selected = mod2.selected.userId == rec.Entry.userId and mod2.selected.isBlocked == rec.Entry.isBlocked
         if selected then
             tween(rec.Row, TWEEN_FAST, { BackgroundTransparency = 0.5 })
             tween(rec.Stroke, TWEEN_FAST, { Transparency = 0.2, Color = THEME.ToggleOn })
@@ -17949,14 +17969,14 @@ local function mod2_updateRowSelection()
     end
 end
 
-local function mod2_makeRow(entry, layoutOrder)
+mod2.makeRow = function(entry, layoutOrder)
     local row = Instance.new("Frame")
     row.BackgroundColor3 = THEME.Sidebar
     row.BackgroundTransparency = 0.65
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, -8, 0, 60)
     row.LayoutOrder = layoutOrder or 0
-    row.Parent = mod2_listScroll
+    row.Parent = mod2.listScroll
     makeCorner(row, 22)
     local stroke = makeStroke(row, 1, THEME.Stroke, 0.55)
 
@@ -17990,7 +18010,7 @@ local function mod2_makeRow(entry, layoutOrder)
     local statusBg = entry.isBlocked and Color3.fromRGB(22, 60, 45) or Color3.fromRGB(35, 35, 35)
     local statusFg = entry.isBlocked and Color3.fromRGB(170, 255, 215) or THEME.TextDim
     local statusSt = entry.isBlocked and Color3.fromRGB(60, 180, 130) or THEME.Stroke
-    local status, statusLbl, statusStroke = mod2_makeBadge(row, entry.isBlocked and "Blocked" or "Active")
+    local status, statusLbl, statusStroke = mod2.makeBadge(row, entry.isBlocked and "Blocked" or "Active")
     status.BackgroundColor3 = statusBg
     statusLbl.TextColor3 = statusFg
     if statusStroke then statusStroke.Color = statusSt end
@@ -17998,7 +18018,7 @@ local function mod2_makeRow(entry, layoutOrder)
     status.Position = UDim2.new(1, -92, 0.5, 0)
     status.Size = UDim2.new(0, 74, 0, 26)
 
-    local quickBtn, quickLbl = mod2_makePillButton(row, entry.isBlocked and "Unblock" or "Block", entry.isBlocked and mod2_schemes.Unblock or mod2_schemes.Block)
+    local quickBtn, quickLbl = mod2.makePillButton(row, entry.isBlocked and "Unblock" or "Block", entry.isBlocked and mod2.schemes.Unblock or mod2.schemes.Block)
     quickBtn.AnchorPoint = Vector2.new(1, 0.5)
     quickBtn.Position = UDim2.new(1, -12, 0.5, 0)
     quickBtn.Size = UDim2.new(0, 76, 0, 32)
@@ -18010,30 +18030,30 @@ local function mod2_makeRow(entry, layoutOrder)
     overlay.Parent = row
 
     overlay.MouseEnter:Connect(function()
-        if not (mod2_selected.userId == entry.userId and mod2_selected.isBlocked == entry.isBlocked) then
+        if not (mod2.selected.userId == entry.userId and mod2.selected.isBlocked == entry.isBlocked) then
             tween(row, TWEEN_FAST, { BackgroundTransparency = 0.55 })
             tween(stroke, TWEEN_FAST, { Transparency = 0.35 })
         end
     end)
     overlay.MouseLeave:Connect(function()
-        mod2_updateRowSelection()
+        mod2.updateRowSelection()
     end)
 
     overlay.MouseButton1Click:Connect(function()
-        mod2_selected.userId = entry.userId
-        mod2_selected.isBlocked = entry.isBlocked
-        mod2_selected.displayName = entry.displayName
-        mod2_selected.name = entry.name
-        mod2_updateDetails()
-        mod2_updateRowSelection()
+        mod2.selected.userId = entry.userId
+        mod2.selected.isBlocked = entry.isBlocked
+        mod2.selected.displayName = entry.displayName
+        mod2.selected.name = entry.name
+        mod2.updateDetails()
+        mod2.updateRowSelection()
     end)
 
     quickBtn.MouseButton1Click:Connect(function()
-        mod2_applyBlock(entry.userId, not entry.isBlocked)
-        if mod2_selected.userId == entry.userId then
-            mod2_selected.isBlocked = mod2_isBlocked(entry.userId)
+        mod2.applyBlock(entry.userId, not entry.isBlocked)
+        if mod2.selected.userId == entry.userId then
+            mod2.selected.isBlocked = mod2.isBlocked(entry.userId)
         end
-        mod2_rebuild()
+        mod2.rebuild()
     end)
 
     local rec = {
@@ -18043,42 +18063,42 @@ local function mod2_makeRow(entry, layoutOrder)
         NameLabel = nameLbl,
         TagLabel = tagLbl,
     }
-    table.insert(mod2_rowRecs, rec)
+    table.insert(mod2.rowRecs, rec)
     return rec
 end
 
-mod2_rebuild = function()
-    mod2_rebuildToken = mod2_rebuildToken + 1
-    local token = mod2_rebuildToken
+mod2.rebuild = function()
+    mod2.rebuildToken = mod2.rebuildToken + 1
+    local token = mod2.rebuildToken
 
-    table.clear(mod2_rowRecs)
-    for _, c in ipairs(mod2_listScroll:GetChildren()) do
+    table.clear(mod2.rowRecs)
+    for _, c in ipairs(mod2.listScroll:GetChildren()) do
         if c:IsA("GuiObject") then c:Destroy() end
     end
 
-    local blocked = mod2_getBlockedList()
-    mod2_blockedBadgeLbl.Text = "Blocked: " .. tostring(#blocked)
+    local blocked = mod2.getBlockedList()
+    mod2.blockedBadgeLbl.Text = "Blocked: " .. tostring(#blocked)
 
     local blockedSet = {}
     for _, id in ipairs(blocked) do blockedSet[id] = true end
 
-    if mod2_selected.userId then
-        mod2_selected.isBlocked = mod2_isBlocked(mod2_selected.userId)
-        if mod2_mode == "Active" and mod2_selected.isBlocked then
-            mod2_selected.userId = nil
-            mod2_selected.isBlocked = false
-            mod2_selected.displayName = nil
-            mod2_selected.name = nil
-        elseif mod2_mode == "Blocked" and not mod2_selected.isBlocked then
-            mod2_selected.userId = nil
-            mod2_selected.isBlocked = false
-            mod2_selected.displayName = nil
-            mod2_selected.name = nil
+    if mod2.selected.userId then
+        mod2.selected.isBlocked = mod2.isBlocked(mod2.selected.userId)
+        if mod2.mode == "Active" and mod2.selected.isBlocked then
+            mod2.selected.userId = nil
+            mod2.selected.isBlocked = false
+            mod2.selected.displayName = nil
+            mod2.selected.name = nil
+        elseif mod2.mode == "Blocked" and not mod2.selected.isBlocked then
+            mod2.selected.userId = nil
+            mod2.selected.isBlocked = false
+            mod2.selected.displayName = nil
+            mod2.selected.name = nil
         end
     end
 
     local entries = {}
-    if mod2_mode == "Active" or mod2_mode == "All" then
+    if mod2.mode == "Active" or mod2.mode == "All" then
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= player and not blockedSet[p.UserId] then
                 table.insert(entries, {
@@ -18091,7 +18111,7 @@ mod2_rebuild = function()
         end
     end
 
-    if mod2_mode == "Blocked" or mod2_mode == "All" then
+    if mod2.mode == "Blocked" or mod2.mode == "All" then
         for _, uid in ipairs(blocked) do
             local p = Players:GetPlayerByUserId(uid)
             table.insert(entries, {
@@ -18103,7 +18123,7 @@ mod2_rebuild = function()
         end
     end
 
-    local q = tostring(mod2_searchInput.Text or ""):lower()
+    local q = tostring(mod2.searchInput.Text or ""):lower()
     local filtered = {}
     for _, e in ipairs(entries) do
         local dn = tostring(e.displayName or ""):lower()
@@ -18116,58 +18136,58 @@ mod2_rebuild = function()
         if ok then table.insert(filtered, e) end
     end
 
-    mod2_listCountLbl.Text = tostring(#filtered)
+    mod2.listCountLbl.Text = tostring(#filtered)
 
     if #filtered == 0 then
-        local empty = makeTextLabel(mod2_listScroll, "No results.", 14, "semibold")
+        local empty = makeTextLabel(mod2.listScroll, "No results.", 14, "semibold")
         empty.Size = UDim2.new(1, 0, 0, 40)
         empty.TextColor3 = THEME.TextDim
         empty.TextTransparency = 0.5
         empty.TextXAlignment = Enum.TextXAlignment.Center
-        empty.Parent = mod2_listScroll
-        mod2_updateDetails()
+        empty.Parent = mod2.listScroll
+        mod2.updateDetails()
         return
     end
 
     local lo = 0
     for _, e in ipairs(filtered) do
         lo = lo + 1
-        local rec = mod2_makeRow(e, lo)
+        local rec = mod2.makeRow(e, lo)
         if e.isBlocked and not e.name then
             task.spawn(function()
                 local ok, fetchedName = pcall(function()
                     return Players:GetNameFromUserIdAsync(e.userId)
                 end)
-                if token ~= mod2_rebuildToken then return end
+                if token ~= mod2.rebuildToken then return end
                 if ok and fetchedName and rec.Row and rec.Row.Parent then
                     rec.NameLabel.Text = fetchedName
                     rec.TagLabel.Text = "@" .. fetchedName
-                    if mod2_selected.userId == e.userId and mod2_selected.isBlocked then
-                        mod2_selected.displayName = fetchedName
-                        mod2_selected.name = fetchedName
-                        mod2_updateDetails()
+                    if mod2.selected.userId == e.userId and mod2.selected.isBlocked then
+                        mod2.selected.displayName = fetchedName
+                        mod2.selected.name = fetchedName
+                        mod2.updateDetails()
                     end
                 end
             end)
         end
     end
 
-    mod2_updateDetails()
-    mod2_updateRowSelection()
+    mod2.updateDetails()
+    mod2.updateRowSelection()
 end
 
-mod2_searchInput:GetPropertyChangedSignal("Text"):Connect(mod2_rebuild)
-trackConn(Players.PlayerAdded:Connect(mod2_rebuild))
-trackConn(Players.PlayerRemoving:Connect(mod2_rebuild))
+mod2.searchInput:GetPropertyChangedSignal("Text"):Connect(mod2.rebuild)
+trackConn(Players.PlayerAdded:Connect(mod2.rebuild))
+trackConn(Players.PlayerRemoving:Connect(mod2.rebuild))
 
-mod2_actionBtn.MouseButton1Click:Connect(function()
-    if not mod2_selected.userId then return end
-    mod2_applyBlock(mod2_selected.userId, not mod2_selected.isBlocked)
-    mod2_selected.isBlocked = mod2_isBlocked(mod2_selected.userId)
-    mod2_rebuild()
+mod2.actionBtn.MouseButton1Click:Connect(function()
+    if not mod2.selected.userId then return end
+    mod2.applyBlock(mod2.selected.userId, not mod2.selected.isBlocked)
+    mod2.selected.isBlocked = mod2.isBlocked(mod2.selected.userId)
+    mod2.rebuild()
 end)
 
-mod2_rebuild()
+mod2.rebuild()
 end
 
 -- Moderation UI (legacy, disabled)
@@ -19549,3 +19569,4 @@ createInterface()
 
 -- v24: ЗАПУСК МОД-ЛОАДЕРА — после сборки интерфейса (моды могут сразу строить UI)
 if LOB_MODS and LOB_MODS.init then pcall(LOB_MODS.init) end
+
