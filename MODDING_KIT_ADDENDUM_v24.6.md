@@ -1,6 +1,6 @@
-# LineOfBots Modding Kit — дополнение v24.6
+# LineOfBots Modding Kit v2 — дополнение v24.6
 
-**Файл ядра:** `lineofgui2` (ветка `main`) · **Дата:** 8 ноября 2026
+**Файл ядра:** `lineofgui2` (ветка `main`) · **Версия кита:** 2 · **Дата:** 8 ноября 2026
 **Это дополнение к MODDING_FOR_AI.md** — описывает новый API v24.5–v24.6 и исправленные баги лоадера.
 Мод проверяет совместимость: `if api.version and api.version >= "v24.6" then ... end`
 
