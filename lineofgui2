@@ -221,7 +221,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v24.1 LOADED")
+print("LOB VERSION: v24.4 LOADED")
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -515,17 +515,26 @@ local function trackConn(conn) return conn end
 
 local player = Players.LocalPlayer
 if not player then
-    return
+    -- v24.4: на мобильных инжекторах LocalPlayer может быть не готов сразу — ждём до 10с
+    for _ = 1, 100 do
+        task.wait(0.1)
+        player = Players.LocalPlayer
+        if player then break end
+    end
+    if not player then
+        warn("[LOB] LocalPlayer не найден за 10с — запуск отменён")
+        return
+    end
 end
 
 LOB_STATE.LocalCharacter = player.Character
-LOB_STATE.LocalRoot = LOB_STATE.LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
+LOB_STATE.LocalRoot = LOB_STATE.LocalCharacter and LOB_STATE.LocalCharacter:FindFirstChild("HumanoidRootPart")
 LOB_STATE.localCharConn = nil
 LOB_STATE.watchLocalCharacter = function(char)
     LOB_STATE.LocalCharacter = char
     LOB_STATE.LocalRoot = char and char:FindFirstChild("HumanoidRootPart")
     if LOB_STATE.localCharConn then
-        localCharConn:Disconnect()
+        LOB_STATE.localCharConn:Disconnect()
         LOB_STATE.localCharConn = nil
     end
     if char then
@@ -544,7 +553,7 @@ player.CharacterRemoving:Connect(function()
     LOB_STATE.LocalCharacter = nil
     LOB_STATE.LocalRoot = nil
     if LOB_STATE.localCharConn then
-        localCharConn:Disconnect()
+        LOB_STATE.localCharConn:Disconnect()
         LOB_STATE.localCharConn = nil
     end
 end)
@@ -3125,7 +3134,7 @@ LOB_STATE.stopCurrentEmote = function()
         _activeEmoteThread = nil
     end
     if LOB_STATE._activeEmoteTrack then
-        pcall(function() _activeEmoteTrack:Stop(0.3) end)
+        pcall(function() LOB_STATE._activeEmoteTrack:Stop(0.3) end)
         LOB_STATE._activeEmoteTrack = nil
     end
     -- Останавливаем только Action-треки — НЕ idle/walk
@@ -11774,7 +11783,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.3",  -- v24.3: фикс «limit 200» (регистры Luau при -O0)
+    VERSION       = "v24.4",  -- v24.4: фикс nil-ошибок старта (LOB_STATE префиксы + mod2.* после упаковки v24.3)
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -17603,22 +17612,22 @@ mod2.makePillButton = function(parent, text, scheme)
     return btn, lbl, stroke
 end
 
-mod2.banner = mod2_makeCard(moderationFrame)
+mod2.banner = mod2.makeCard(moderationFrame)
 mod2.banner.Position = UDim2.new(0, 0, 0, 110)
 mod2.banner.Size = UDim2.new(1, 0, 0, 56)
 makePadding(mod2.banner, 14)
 
-mod2.bannerTitle = makeTextLabel(mod2_banner, "Blacklist", 15, "bold")
+mod2.bannerTitle = makeTextLabel(mod2.banner, "Blacklist", 15, "bold")
 mod2.bannerTitle.Size = UDim2.new(1, -170, 0, 20)
 mod2.bannerTitle.Position = UDim2.new(0, 0, 0, 6)
 
-mod2.bannerHint = makeTextLabel(mod2_banner, "Blocked users are ignored by the bot.", 12, "semibold")
+mod2.bannerHint = makeTextLabel(mod2.banner, "Blocked users are ignored by the bot.", 12, "semibold")
 mod2.bannerHint.TextColor3 = THEME.TextDim
 mod2.bannerHint.TextTransparency = 0.25
 mod2.bannerHint.Size = UDim2.new(1, -170, 0, 16)
 mod2.bannerHint.Position = UDim2.new(0, 0, 0, 28)
 
-mod2.blockedBadge, mod2.blockedBadgeLbl = mod2_makeBadge(mod2_banner, "Blocked: 0")
+mod2.blockedBadge, mod2.blockedBadgeLbl = mod2.makeBadge(mod2.banner, "Blocked: 0")
 mod2.blockedBadge.AnchorPoint = Vector2.new(1, 0.5)
 mod2.blockedBadge.Position = UDim2.new(1, -14, 0.5, 0)
 mod2.blockedBadge.Size = UDim2.new(0, 132, 0, 28)
@@ -17636,10 +17645,10 @@ mod2.search.BorderSizePixel = 0
 mod2.search.Size = UDim2.new(1, -260, 1, 0)
 mod2.search.Parent = mod2.toolbar
 makeCorner(mod2.search, 14)
-mod2.searchStroke = makeStroke(mod2_search, 1, THEME.Stroke, 0.25)
+mod2.searchStroke = makeStroke(mod2.search, 1, THEME.Stroke, 0.25)
 makePadding(mod2.search, 12)
 
-mod2.searchIcon = makeTextLabel(mod2_search, "Search", 12, "bold")
+mod2.searchIcon = makeTextLabel(mod2.search, "Search", 12, "bold")
 mod2.searchIcon.TextColor3 = THEME.TextDim
 mod2.searchIcon.TextTransparency = 0.35
 mod2.searchIcon.Size = UDim2.new(0, 54, 1, 0)
@@ -17666,7 +17675,7 @@ mod2.searchInput.FocusLost:Connect(function()
     tween(mod2.searchStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.25 })
 end)
 
-mod2.modeWrap = mod2_makeCard(mod2_toolbar)
+mod2.modeWrap = mod2.makeCard(mod2.toolbar)
 mod2.modeWrap.AnchorPoint = Vector2.new(1, 0)
 mod2.modeWrap.Position = UDim2.new(1, 0, 0, 0)
 mod2.modeWrap.Size = UDim2.new(0, 248, 1, 0)
@@ -17741,7 +17750,7 @@ end
 
 mod2.setMode(mod2.mode, true)
 
-mod2.listCard = mod2_makeCard(moderationFrame)
+mod2.listCard = mod2.makeCard(moderationFrame)
 mod2.listCard.Position = UDim2.new(0, 0, 0, 234)
 mod2.listCard.Size = UDim2.new(1, 0, 1, -234)
 
@@ -17751,17 +17760,17 @@ mod2.listHeader.Size = UDim2.new(1, 0, 0, 56)
 mod2.listHeader.Parent = mod2.listCard
 makePadding(mod2.listHeader, 14)
 
-mod2.listTitle = makeTextLabel(mod2_listHeader, "Users", 16, "bold")
+mod2.listTitle = makeTextLabel(mod2.listHeader, "Users", 16, "bold")
 mod2.listTitle.Size = UDim2.new(1, -90, 0, 22)
 mod2.listTitle.Position = UDim2.new(0, 0, 0, 4)
 
-mod2.listSub = makeTextLabel(mod2_listHeader, "Click a user to select. Use the footer actions.", 12, "semibold")
+mod2.listSub = makeTextLabel(mod2.listHeader, "Click a user to select. Use the footer actions.", 12, "semibold")
 mod2.listSub.TextColor3 = THEME.TextDim
 mod2.listSub.TextTransparency = 0.25
 mod2.listSub.Size = UDim2.new(1, -90, 0, 18)
 mod2.listSub.Position = UDim2.new(0, 0, 0, 28)
 
-mod2.listCount, mod2.listCountLbl = mod2_makeBadge(mod2_listHeader, "0")
+mod2.listCount, mod2.listCountLbl = mod2.makeBadge(mod2.listHeader, "0")
 mod2.listCount.AnchorPoint = Vector2.new(1, 0.5)
 mod2.listCount.Position = UDim2.new(1, -14, 0.5, 0)
 mod2.listCount.Size = UDim2.new(0, 56, 0, 26)
@@ -17805,7 +17814,7 @@ makeCorner(mod2.footer, 14)
 makeStroke(mod2.footer, 1, THEME.Stroke, 0.35)
 makePadding(mod2.footer, 12)
 
-mod2.footerEmpty = makeTextLabel(mod2_footer, "Select a user to manage (block/unblock).", 13, "semibold")
+mod2.footerEmpty = makeTextLabel(mod2.footer, "Select a user to manage (block/unblock).", 13, "semibold")
 mod2.footerEmpty.TextColor3 = THEME.TextDim
 mod2.footerEmpty.TextTransparency = 0.25
 mod2.footerEmpty.Size = UDim2.new(1, -140, 1, 0)
@@ -17820,19 +17829,19 @@ mod2.selAvatar.Parent = mod2.footer
 makeCorner(mod2.selAvatar, 19)
 makeStroke(mod2.selAvatar, 1, THEME.Stroke, 0.45)
 
-mod2.selName = makeTextLabel(mod2_footer, "No user selected", 14, "bold")
+mod2.selName = makeTextLabel(mod2.footer, "No user selected", 14, "bold")
 mod2.selName.Position = UDim2.new(0, 50, 0, 6)
 mod2.selName.Size = UDim2.new(1, -220, 0, 20)
 mod2.selName.TextTruncate = Enum.TextTruncate.AtEnd
 
-mod2.selTag = makeTextLabel(mod2_footer, "", 12, "semibold")
+mod2.selTag = makeTextLabel(mod2.footer, "", 12, "semibold")
 mod2.selTag.TextColor3 = THEME.TextDim
 mod2.selTag.TextTransparency = 0.25
 mod2.selTag.Position = UDim2.new(0, 50, 0, 28)
 mod2.selTag.Size = UDim2.new(1, -220, 0, 16)
 mod2.selTag.TextTruncate = Enum.TextTruncate.AtEnd
 
-mod2.selStatus, mod2.selStatusLbl = mod2_makeBadge(mod2_footer, "-")
+mod2.selStatus, mod2.selStatusLbl = mod2.makeBadge(mod2.footer, "-")
 mod2.selStatus.AnchorPoint = Vector2.new(1, 0.5)
 mod2.selStatus.Position = UDim2.new(1, -132, 0.5, 0)
 mod2.selStatus.Size = UDim2.new(0, 88, 0, 26)
@@ -17861,10 +17870,10 @@ mod2.actionZone.Position = UDim2.new(1, -12, 0.5, 0)
 mod2.actionZone.Size = UDim2.new(0, 112, 0, 34)
 mod2.actionZone.Parent = mod2.footer
 
-mod2.actionBtn, mod2.actionLbl, mod2.actionStroke = mod2_makePillButton(mod2_actionZone, "Block", mod2_schemes.Block)
+mod2.actionBtn, mod2.actionLbl, mod2.actionStroke = mod2.makePillButton(mod2.actionZone, "Block", mod2.schemes.Block)
 mod2.actionBtn.Position = UDim2.new(0, 0, 0, 0)
 mod2.actionBtn.Size = UDim2.new(1, 0, 1, 0)
-mod2.actionBg = mod2_actionBtn:FindFirstChild("Bg")
+mod2.actionBg = mod2.actionBtn:FindFirstChild("Bg")
 
 mod2.selected = {
     userId = nil,
