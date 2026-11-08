@@ -1,0 +1,202 @@
+--[[
+    ════════════════════════════════════════════════════════════════
+     LINEOFBOTS — ЛОАДЕР С ДИАГНОСТИКОЙ  (Delta / Android / любой executor)
+    ════════════════════════════════════════════════════════════════
+     КАК ПОЛЬЗОВАТЬСЯ:
+       1. Вставь в Delta ТОЛЬКО ЭТОТ файл (он маленький, ~150 строк).
+       2. НЕ вставляй большой скрипт целиком — у Delta лимит редактора
+          200 000 символов, а полный скрипт ~960 000 символов.
+       3. Жми Execute. Скрипт скачается и запустится сам.
+       4. Если появится красное сообщение — сделай скриншот и отправь его.
+
+     ЧТО ПРОВЕРЯЕТ:
+       [1] доступность executor-функций
+       [2] скачивание с GitHub (3 адреса на выбор + повтор)
+       [3] что скачался настоящий скрипт, а не страница ошибки
+       [4] компиляцию (loadstring) — покажет текст ошибки синтаксиса
+       [5] запуск (pcall) — покажет текст ошибки времени выполнения
+--]]
+
+local VERSION = "v24.2"
+
+-- Адреса скрипта (по порядку). Первый — основной, остальные — запасные.
+local URLS = {
+    "https://raw.githubusercontent.com/liudyna800/LineOfGui/main/lineofgui2",
+    "https://github.com/liudyna800/LineOfGui/raw/main/lineofgui2",
+    "https://cdn.jsdelivr.net/gh/liudyna800/LineOfGui@main/lineofgui2",
+}
+
+local EXPECTED_MIN = 500000   -- настоящий скрипт ~960 000 символов
+local MARKER       = "LineOfBots"
+
+-- ───────────────────────── экранное окно статуса ─────────────────────────
+local statusFrame, statusLabel
+local function ensureGui()
+    if statusFrame then return end
+    local ok, err = pcall(function()
+        local lp = game:GetService("Players").LocalPlayer
+        local pg = lp:WaitForChild("PlayerGui", 10)
+        local g = Instance.new("ScreenGui")
+        g.Name = "LOB_LoaderStatus"
+        g.ResetOnSpawn = false
+        g.DisplayOrder = 999999
+        local f = Instance.new("Frame")
+        f.Size = UDim2.new(0, 460, 0, 118)
+        f.Position = UDim2.new(0, 12, 1, -134)
+        f.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+        f.BackgroundTransparency = 0.12
+        f.BorderSizePixel = 0
+        f.Parent = g
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 10)
+        corner.Parent = f
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(120, 120, 160)
+        stroke.Transparency = 0.4
+        stroke.Parent = f
+        local t = Instance.new("TextLabel")
+        t.Size = UDim2.new(1, -20, 1, -14)
+        t.Position = UDim2.new(0, 10, 0, 7)
+        t.BackgroundTransparency = 1
+        t.Font = Enum.Font.Code
+        t.TextSize = 14
+        t.TextColor3 = Color3.fromRGB(235, 235, 245)
+        t.TextXAlignment = Enum.TextXAlignment.Left
+        t.TextYAlignment = Enum.TextYAlignment.Top
+        t.RichText = false
+        t.TextWrapped = true
+        t.Text = "LOB loader: запуск..."
+        t.Parent = f
+        g.Parent = pg
+        statusFrame = f
+        statusLabel = t
+    end)
+    if not ok then
+        warn("[LOB loader] не удалось создать окно статуса: " .. tostring(err))
+    end
+end
+
+local lines = {}
+local function say(msg, isErr)
+    table.insert(lines, msg)
+    if #lines > 6 then table.remove(lines, 1) end
+    local text = table.concat(lines, "\n")
+    print("[LOB loader] " .. msg)
+    if isErr then warn("[LOB loader] " .. msg) end
+    if statusLabel then
+        statusLabel.Text = text
+        statusLabel.TextColor3 = isErr
+            and Color3.fromRGB(255, 120, 120)
+            or  Color3.fromRGB(235, 235, 245)
+    end
+end
+
+local function hideSoon()
+    task.delay(10, function()
+        pcall(function()
+            if statusFrame and statusFrame.Parent then
+                local g = statusFrame.Parent
+                g:Destroy()
+            end
+        end)
+    end)
+end
+
+-- ───────────────────────── HTTP без game:HttpGet ─────────────────────────
+local function httpGetFallback(url)
+    -- ищем executor-функцию HTTP по имени в глобальной среде
+    local f = http_request or request or (syn and syn.request) or (http and http.request)
+    if type(f) ~= "function" then return nil, "нет http_request/request" end
+    local ok, resp = pcall(f, { Url = url, Method = "GET" })
+    if not ok then return nil, tostring(resp) end
+    if type(resp) ~= "table" then return nil, "странный ответ http" end
+    local body = resp.Body or resp.body
+    local code = resp.StatusCode or resp.statusCode or resp.code
+    if not body then return nil, "пустой Body (код " .. tostring(code) .. ")" end
+    return body, nil, code
+end
+
+local function fetchScript()
+    local errors = {}
+    for i, url in ipairs(URLS) do
+        for attempt = 1, 2 do
+            say("[" .. i .. "/" .. #URLS .. "] скачиваю (попытка " .. attempt .. ")...")
+            local body, err, code
+            local okH = pcall(function()
+                body = game:HttpGet(url)
+            end)
+            if not okH or type(body) ~= "string" or #body == 0 then
+                body, err, code = httpGetFallback(url)
+            else
+                err = nil
+            end
+            if type(body) ~= "string" or #body == 0 then
+                table.insert(errors, url .. " -> " .. tostring(err or "пустой ответ"))
+                task.wait(0.5)
+            else
+                return body, url, nil, errors
+            end
+        end
+    end
+    return nil, nil, "ни один адрес не сработал", errors
+end
+
+-- ───────────────────────── основная логика ─────────────────────────
+ensureGui()
+say("LOB loader " .. VERSION)
+
+pcall(function()
+    local name = identifyexecutor and identifyexecutor() or "неизвестно"
+    say("executor: " .. tostring(name))
+end)
+
+if type(loadstring) ~= "function" and type(load) ~= "function" then
+    say("ОШИБКА: loadstring недоступен — исполнитель сломан, обнови Delta", true)
+    return
+end
+local doLoad = loadstring or load
+
+local src, usedUrl, fetchErr, fetchErrors = fetchScript()
+if not src then
+    say("ОШИБКА СЕТИ: скрипт не скачался", true)
+    for _, e in ipairs(fetchErrors or {}) do warn("[LOB loader]   " .. e) end
+    say("Проверь интернет / VPN и запусти ещё раз", true)
+    return
+end
+say("скачано: " .. #src .. " симв. с " .. (usedUrl:find("raw%.github") and "GitHub" or usedUrl:find("jsdelivr") and "jsDelivr" or "GitHub"))
+
+-- Проверка: не страница ли ошибки пришла
+if #src < EXPECTED_MIN then
+    say("ОШИБКА: файл подозрительно короткий (" .. #src .. " симв.)", true)
+    say("начало файла: " .. src:sub(1, 80), true)
+    return
+end
+if src:find("<html", 1, true) or src:find("404: Not Found", 1, true) or src:find("<!DOCTYPE", 1, true) then
+    say("ОШИБКА: пришла HTML-страница вместо скрипта", true)
+    return
+end
+if not src:find(MARKER, 1, true) then
+    say("ОШИБКА: в файле нет метки LineOfBots", true)
+    return
+end
+
+-- Компиляция
+local chunk, compileErr = doLoad(src, "LineOfBots")
+if not chunk then
+    say("ОШИБКА СИНТАКСИСА:", true)
+    say(tostring(compileErr), true)
+    say("Отправь скриншот этой ошибки автору", true)
+    return
+end
+say("компиляция OK, запускаю бот...")
+
+-- Запуск
+local okRun, runErr = pcall(chunk)
+if not okRun then
+    say("ОШИБКА ЗАПУСКА:", true)
+    say(tostring(runErr), true)
+    return
+end
+
+say("Скрипт запущен! Окно бота должно появиться.")
+hideSoon()
