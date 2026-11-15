@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v24.7  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
+-- ║         LINEOFBOTS v24.7.1  —  ОГЛАВЛЕНИЕ / FILE MAP                ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -221,7 +221,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v24.7 LOADED")  -- v24.7: фикс пустой вкладки при отключении мода + вежливое внимание умной ходьбы
+print("LOB VERSION: v24.7.1 LOADED")  -- v24.7.1: «иди сюда» в пути (подход уступает командному движению, goto = визит) + гонка «пока в пути»
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -3756,7 +3756,17 @@ end
 -- §ACTIONS_TABLE
 local ACTION_HANDLERS = {
     -- ── Движение ──────────────────────────────────────────────────────────
-    goto     = function(p) LOB_STATE.gotoPlayer(p) end,
+    -- v24.7 FIX («иди сюда» игнорится в пути): при включённой умной ходьбе goto
+    -- коммитит ПОЛНЫЙ ВИЗИТ к позвавшему (умная ходьба дойдёт, поздоровается и
+    -- останется общаться, а не уйдёт по старым делам сразу после подхода).
+    -- gotoPlayer остаётся мгновенным ходом/фолбэком при выключенной умной ходьбе.
+    goto     = function(p)
+        if p and ClientSettings.SmartWalk and _smartWalk and _smartWalk.active
+            and lobSmartSetTarget and not lobIsDangerTarget(p) then
+            lobSmartSetTarget(p, os.clock())
+        end
+        LOB_STATE.gotoPlayer(p)
+    end,
     follow   = function(p)
         if ClientSettings.FollowConfirm and requestFollow then
             -- Показываем подтверждение через UI-нотификацию
@@ -7884,8 +7894,17 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
     local t0 = os.clock()
     local lastPos, stuckTicks = nil, 0
     local jitter = nil  -- боковое смещение цели после упора в стену (пробуем другой маршрут)
+    -- v24.7 FIX («иди сюда» игнорится в пути): пока бот идёт по своему маршруту,
+    -- идёт ВЕСЬ подход — командное движение ([DO:goto]/[DO:follow]/UI-follow),
+    -- стартовавшее посреди подхода, билось с нашим MoveTo (0.1с цикл перебивал
+    -- путь goto) и бот «доигрывал» свой маршрут, игнорируя команду. Теперь
+    -- любой командный захват движения немедленно отменяет текущий подход.
+    local function cancelled()
+        if cancelFn and cancelFn() then return true end
+        return _isGoing or _isFollowing or _followMgrActive
+    end
     while true do
-        if cancelFn and cancelFn() then return "cancelled" end
+        if cancelled() then return "cancelled" end
         if (os.clock() - t0) > maxT then return "timeout" end
         local ch = Players.LocalPlayer.Character
         local root = ch and ch:FindFirstChild("HumanoidRootPart")
@@ -7913,7 +7932,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
 
         local idx = 2
         while idx <= #wps do
-            if cancelFn and cancelFn() then return "cancelled" end
+            if cancelled() then return "cancelled" end
             -- если цель ушла далеко от исходной точки пути — пересчитываем сразу
             local moved = 0
             local gp = getPos()
@@ -7945,7 +7964,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             local blocked = 0
             local abortPath = false
             while wt < 2.0 do
-                if cancelFn and cancelFn() then return "cancelled" end
+                if cancelled() then return "cancelled" end
                 if (os.clock() - t0) > maxT then return "timeout" end
                 task.wait(0.1); wt = wt + 0.1
                 local c2 = Players.LocalPlayer.Character
@@ -8844,7 +8863,16 @@ function lobSmartWalkStart()
                                 if replied then gw.nudgeStage = 0 end
                             end
 
-                            local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > (gw.socialSince or 0)
+                            -- v24.7.1 FIX (гонка «пока в пути»): socialSince перезаписывается при
+                            -- КАЖДОМ повторном входе в social (партнёр отошёл за поводок → подход →
+                            -- вернулся), и прощание, пришедшее в transit-окне, сравнивалось с НОВЫМ
+                            -- штампом — saidBye навсегда false, бот бегал за попрощавшимся.
+                            -- База сравнения — начало визита (targetSince): стабилен весь визит,
+                            -- старые «пока» прошлых визитов младше него и не срабатывают.
+                            local _visitStart = (gw.targetSince or 0) > 0
+                                and math.min(gw.socialSince or 0, gw.targetSince)
+                                or (gw.socialSince or 0)
+                            local saidBye = ((_smartWalk.farewellFrom or {})[target.UserId] or 0) > _visitStart
                             -- собственная реплика бота тоже сбрасывает «молчание»
                             if (now - botSpoke) < 5 then gw.nudgeStage = 0 end
 
@@ -11983,7 +12011,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.7",  -- v24.7: фикс пустой вкладки при отключении мода + вежливое внимание умной ходьбы (не игнорим чужих, не обрываем разговор, без спидрана)
+    VERSION       = "v24.7.1",  -- v24.7.1: «иди сюда» в пути + гонка «пока в пути» (полигон T6)
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -13619,7 +13647,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.7 · Kit 3", 10, "semibold")  -- v24.7: Kit 3 = номер версии Modding Kit (виден в GUI для проверки сборки)
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.7.1 · Kit 3", 10, "semibold")  -- v24.7.1: видимый маркер сборки в GUI («иди сюда» в пути + гонка «пока в пути»)
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
