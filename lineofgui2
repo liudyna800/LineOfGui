@@ -224,9 +224,9 @@
 -- v25.1: ЕДИНСТВЕННЫЙ ИСТОЧНИК ВЕРСИИ (отчёт Claude A17): раньше версия была
 -- строкой в трёх местах (константа лоадера, GUI-подзаголовок, print) — в v25.0
 -- два из них остались «v24.8», и моды видели api.version = "v24.8".
-LOB_VERSION = "v25.1"  -- мега-умная ходьба v25.0 + hardened мод-лоадер v25.1
-LOB_KIT     = 6        -- номер кита (README/архив LineOfBots_Modding_Kit_v6.zip)
-print("LOB VERSION: " .. LOB_VERSION .. " LOADED (Kit " .. LOB_KIT .. ")")  -- v25.1: hardened мод-лоадер — песочница модов с правами, hook без дублей оригинала, таймеры с само-стопом, onUnload-список, exports-очистка, перехват chat/action, кириллица в командах, UI-спека переигрывается, цепочки патчей, зависимости модов
+LOB_VERSION = "v25.2"  -- мега-умная ходьба v25.0 + hardened лоадер v25.1 + прямые команды движения v25.2
+LOB_KIT     = 7        -- номер кита (README/архив LineOfBots_Modding_Kit_v7.zip)
+print("LOB VERSION: " .. LOB_VERSION .. " LOADED (Kit " .. LOB_KIT .. ")")  -- v25.2: «иди сюда/стой/следуй за мной» исполняются детерминированно мимо ИИ и фокус-гейта (бот больше не игнорирует команды в движении/разговоре); отложенные сообщения больше не умирают при остановке ходьбы
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -6971,25 +6971,74 @@ function lobIsFarewellCommand(msg)
         "хорошего дня", "спокойной ночи", "bye", "goodbye", "cya", "see ya", "see you", "farewell" }
     -- v23.3 FIX: раньше совпадение шло по подстроке — «покажи биту» содержало «пока», «nice to see you»
     -- содержало «see you» → бот прощался посреди диалога на ЛЮБОЕ такое сообщение.
-    -- Теперь слово должно стоять ОТДЕЛЬНО (не внутри другого слова).
+    -- Теперь слово должно стоять ОТДЕЛЬНО (lobWordFind, v25.2: границы слов + эмодзи).
+    for _, w in ipairs(words) do
+        if lobWordFind(m, w) then return true end
+    end
+    return false
+end
+
+-- v25.2: поиск ЦЕЛОГО слова (границы слов, как в farewell v23.3) — общий помощник
+-- словарей команд. Эмодзи/символы (первый байт 0xF0) НЕ считаются буквами:
+-- «🙂 пока» и «стой 🙂» распознаются. Возвращает позицию первого вхождения
+-- или nil.
+function lobWordFind(m, w)
     local function isLetterByte(c)
         if c == nil or c == "" then return false end
         local b = c:byte()
-        if b and b >= 128 then return true end  -- кириллица (UTF-8 байты)
+        if not b then return false end
+        if b >= 240 then return false end  -- эмодзи/символы (4-байтовые UTF-8) — не буквы
+        if b >= 128 then return true end   -- кириллица (2-байтовые UTF-8)
         return c:match("%w") ~= nil
     end
-    for _, w in ipairs(words) do
-        local s = 1
-        while true do
-            local a, bb = m:find(w, s, true)
-            if not a then break end
-            local before = m:sub(a - 1, a - 1)
-            local after = m:sub(bb + 1, bb + 1)
-            if (not isLetterByte(before)) and (not isLetterByte(after)) then return true end
-            s = bb + 1
+    local s = 1
+    while true do
+        local a, bb = m:find(w, s, true)
+        if not a then return nil end
+        local before = m:sub(a - 1, a - 1)
+        local after = m:sub(bb + 1, bb + 1)
+        if (not isLetterByte(before)) and (not isLetterByte(after)) then return a end
+        s = bb + 1
+    end
+end
+
+-- v25.2 ФИКС (логика бота, запрос пользователя «бот игнорирует, когда идёт или
+-- разговаривает»): ПРЯМЫЕ КОМАНДЫ ДВИЖЕНИЯ. Раньше «иди сюда»/«стой»/«следуй за
+-- мной» от игрока, который не был текущим собеседником, уходили в отложенную
+-- очередь «вежливого внимания» (focus-гейт v22) и ждали паузы в разговоре — или
+-- умирали по TTL 90с. Теперь команды распознаются детерминированно, обходят
+-- фокус-гейт и исполняются НЕМЕДЛЕННО (без ИИ): «стой» — стоп, «иди сюда» —
+-- подход, «следуй за мной» — следование. ИИ-ответ (вежливая реплика) идёт поверх.
+-- Словарь консервативный: короткие императивы, ЦЕЛЫЕ слова, сообщение ≤60 символов
+-- (в длинной фразе «стой» — слово, а не команда). «не иди сюда» командой не считается.
+function lobMoveCommandKind(msg)
+    msg = tostring(msg or "")
+    if #msg > 60 then return nil end
+    local m = lobLower(msg)
+    local function negated(pos)
+        -- «не иди сюда» / «not stop» — отрицание перед командой: командой не считается.
+        -- «не » в UTF-8 — 5 байт (н=2, е=2, пробел=1), «not »/«don'»/«dont» — 4 байта.
+        local p5 = m:sub(pos - 5, pos - 1)
+        local p4 = m:sub(pos - 4, pos - 1)
+        return p5 == "не " or p4 == "not " or p4 == "don'" or p4 == "dont" or p4 == "n't "
+    end
+    -- порядок: come/follow раньше stop — «стой, подойди сюда» читается как come
+    local groups = {
+        { k = "come", w = { "иди сюда", "иди ко мне", "беги сюда", "беги ко мне", "подойди", "ко мне",
+                            "come here", "come to me", "come over", "иди сюда ко мне" } },
+        { k = "follow", w = { "следуй за мной", "иди за мной", "пойди за мной", "иди следом",
+                              "follow me", "follow за мной", "пойдем за мной" } },
+        { k = "stop", w = { "стой", "стойте", "стоп", "остановись", "остановитесь", "замри",
+                            "не ходи", "не иди", "не двигайся", "не уходи",
+                            "wait", "stop", "halt", "freeze", "don't move" } },
+    }
+    for _, g in ipairs(groups) do
+        for _, w in ipairs(g.w) do
+            local pos = lobWordFind(m, w)
+            if pos and not negated(pos) then return g.k end
         end
     end
-    return false
+    return nil
 end
 
 -- Короткое прощание в чат (только при включённом автоответе). Редко.
@@ -9439,6 +9488,19 @@ function lobSmartWalkStop()
         _smartWalk.baseWalkSpeed = nil
         if hum and root then hum:MoveTo(root.Position) end
     end)
+    -- v25.2 ФИКС (логика бота): при остановке ходьбы отложенные «вежливым вниманием»
+    -- сообщения НЕ должны умирать в pendingMsgs (бот свободен — фокус-гейт больше
+    -- не сработает, сообщение спокойно дойдёт до ИИ). Отдаём самое свежее.
+    do
+        local pm = _smartWalk.pendingMsgs or {}
+        local bestUid, bestAt = nil, -1
+        for uid, rec in pairs(pm) do
+            if (rec.lastAt or 0) > bestAt then bestUid, bestAt = uid, rec.lastAt or 0 end
+        end
+        if bestUid and Players:GetPlayerByUserId(bestUid) then
+            lobSmartFlushPending(bestUid)
+        end
+    end
 end
 
 -- §HANDLE_CHAT
@@ -10808,6 +10870,10 @@ local function processChatMessage(player, rawMessage)
     -- v22: ФОКУС НА СОБЕСЕДНИКЕ. Пока бот общается с одним игроком — чужих не слушаем
     -- (толпа сзади не должна «перехватывать» разговор). Исключение — прямое обращение
     -- к боту по имени: тогда отвечаем.
+    -- v25.2: ПРЯМЫЕ КОМАНДЫ ДВИЖЕНИЯ («иди сюда», «стой», «следуй за мной») обходят
+    -- фокус-гейт КАК «уйди» — раньше они уезжали в отложенную очередь и по TTL 90с
+    -- умирали: пользователь видел «бот игнорирует во время разговора».
+    local moveCmd = lobMoveCommandKind and lobMoveCommandKind(rawMessage) or nil
     local focusUid = lobSmartFocusUid and lobSmartFocusUid() or nil
     if focusUid and player.UserId ~= focusUid
         -- v24.7: _flushUid — отложенное сообщение, которое умная ходьба САМА разрешила
@@ -10818,7 +10884,8 @@ local function processChatMessage(player, rawMessage)
         -- v24.8 FIX: «уйди/отстань» обходит фокус-гейт КАК прямое обращение. Раньше
         -- прогон откладывался в pending на 90с: команда не выполнялась, а после визита
         -- бот внезапно отвечал на «уйди» как на обычную реплику.
-        if not directCall and not (lobIsLeaveCommand and lobIsLeaveCommand(rawMessage)) then
+        -- v25.2 FIX: команды движения (moveCmd) обходят фокус-гейт так же.
+        if not directCall and not (lobIsLeaveCommand and lobIsLeaveCommand(rawMessage)) and not moveCmd then
             -- v24.7 FIX («игнорирует других»): раньше чужое сообщение ТЕРЯЛОСЬ молча
             -- (return). Теперь запоминаем его и отвечаем на паузе в разговоре (цикл
             -- умной ходьбы: POLITE_PAUSE/POLITE_WAIT). Немедленно не отвечаем: толпа
@@ -10848,10 +10915,36 @@ local function processChatMessage(player, rawMessage)
             -- — всегда прощание боту, какой бы длины ни была.
             local myName = tostring(Players.LocalPlayer.Name or ""):lower()
             local myDisp = tostring(Players.LocalPlayer.DisplayName or ""):lower()
-            local lm = rawMessage:lower()
+            local lm = lobLower(rawMessage)
             if #rawMessage <= 40 or (myName ~= "" and lm:find(myName, 1, true)) or (myDisp ~= "" and lm:find(myDisp, 1, true)) then
                 _smartWalk.farewellFrom[player.UserId] = os.clock()
             end
+        end
+    end
+
+    -- v25.2 ФИКС (логика бота): ДЕТЕРМИНИРОВАННОЕ ИСПОЛНЕНИЕ КОМАНД ДВИЖЕНИЯ —
+    -- мгновенно, мимо ИИ/антиспама/кулдауна (команду можно повторить, если бот
+    -- застрял). Раньше движение ждало, пока модель ИИ решит поставить [DO:goto]/[DO:stop],
+    -- — и когда бот шёл или разговаривал, команда казалась проигнорированной.
+    -- ИИ-ответ (вежливая реплика) по-прежнему формируется обычным конвейером ниже.
+    if moveCmd then
+        if moveCmd == "stop" then
+            stopFollowing()
+            if _smartWalk and _smartWalk.active and lobSmartWalkStop then lobSmartWalkStop() end
+            print("[LOB] move-cmd: стоп (" .. player.Name .. ")")
+        else
+            -- come / follow: отменяем текущее занятие (в т.ч. разговор) и немедленно
+            -- идём к позвавшему; умная ходьба затем «доиграет» визит по-своему
+            if _smartWalk and _smartWalk.active and lobSmartWalkStop then lobSmartWalkStop() end
+            if ClientSettings.SmartWalk and lobSmartSetTarget and not lobIsDangerTarget(player) then
+                lobSmartSetTarget(player, os.clock())
+            end
+            if moveCmd == "follow" then
+                LOB_STATE.startFollowingPlayer(player)
+            else
+                LOB_STATE.gotoPlayer(player)
+            end
+            print("[LOB] move-cmd: " .. moveCmd .. " → " .. player.Name)
         end
     end
 
