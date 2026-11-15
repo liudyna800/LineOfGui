@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v24.6  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
+-- ║         LINEOFBOTS v24.7  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -221,7 +221,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v24.6 LOADED")  -- v24.6: синхронизировано с LOB_MODS.VERSION (было v24.4)
+print("LOB VERSION: v24.7 LOADED")  -- v24.7: фикс пустой вкладки при отключении мода + вежливое внимание умной ходьбы
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -6633,6 +6633,8 @@ _smartWalk = {
     dangerZones = {},
     fear = {},
     lastPos = nil, lastMoveAt = 0,
+    -- v24.7: ВЕЖЛИВОЕ ВНИМАНИЕ — отложенные чужие сообщения (пока бот в разговоре)
+    pendingMsgs = {}, lastPoliteAt = 0, lastHoldLineAt = 0, _flushUid = nil,
 }
 _lastChatAt = _lastChatAt or {}
 -- v23: память «уйди»-команд: лечит баг, когда бот в первые 15с после «уйди» снова
@@ -6726,9 +6728,17 @@ _SW = {
     MUMBLE_CD_MAX  = 360,  -- макс кулдаун бормотания (случайный разброс)
     MUMBLE_EMPTY_R = 35,   -- бормочет только если вокруг действительно пусто
     HOT_SPOT_R     = 24,   -- радиус «компании» при поиске горячей точки для блуждания
-    SWITCH_CD      = 4,    -- анти-пинг-понг: не чаще этого переключаемся между говорящими
+    SWITCH_CD      = 8,    -- анти-пинг-понг: не чаще этого переключаемся между говорящими (v24.7: было 4 — в толпе выглядело «спидраном»)
     SHORTCUT_CAP   = 12,   -- сколько точек пути вперёд проверяем на срез углов (CPU)
     STUCK_JUMPS    = 3,    -- столько прыжков без прогресса на точке — маршрут в мусор
+    -- ── v24.7: ВЕЖЛИВОЕ ВНИМАНИЕ (чужие больше не игнорируются, но и не «спидран») ──
+    PENDING_TTL    = 90,   -- сколько помним отложенное чужое сообщение (потом «не расслышали»)
+    POLITE_PAUSE   = 8,    -- партнёр молчит столько — окно для вежливого переключения
+    POLITE_WAIT    = 10,   -- чужая реплика ждёт паузы минимум столько (не рвёмся на первом же «привет»)
+    SWITCH_MAX_DIST = 45,  -- вежливое переключение только на ближнего (дальний дождётся паузы/визита)
+    SWITCH_SOFT_CD = 45,   -- после одного вежливого перехода минимум столько до следующего (анти-кружение)
+    HOLD_LINE_CD   = 60,   -- не чаще этого говорим партнёру «секунду» при переключении
+    CHAT_LEASH     = 18,   -- с ЖИВЫМ собеседником подходим заново только если он отошёл дальше этого
 }
 
 function lobSmartWalkNoteChat(userId, name)
@@ -6794,6 +6804,12 @@ function lobSmartClean(now)
     end
     for uid in pairs(_smartWalk.greetAt) do
         if not Players:GetPlayerByUserId(uid) then _smartWalk.greetAt[uid] = nil end
+    end
+    -- v24.7: отложенные чужие сообщения ушедших игроков — забываем
+    if _smartWalk.pendingMsgs then
+        for uid in pairs(_smartWalk.pendingMsgs) do
+            if not Players:GetPlayerByUserId(uid) then _smartWalk.pendingMsgs[uid] = nil end
+        end
     end
     -- v21: чистим карту угроз от ушедших игроков
     if _smartWalk.sight then
@@ -8008,6 +8024,40 @@ function lobSmartFocusUid()
     return p.UserId
 end
 
+-- ── v24.7: ВЕЖЛИВОЕ ВНИМАНИЕ ────────────────────────────────────────────────
+-- Отложенное чужое сообщение попадает в обычный конвейер обработки (как новая
+-- реплика). _flushUid — пропуск фокуса: цикл умной ходьбы сам решил, что пора.
+function lobSmartFlushPending(uid)
+    local pm = _smartWalk.pendingMsgs or {}
+    local rec = pm[uid]
+    if not rec then return false end
+    pm[uid] = nil
+    local p = Players:GetPlayerByUserId(uid)
+    if not (p and p.Parent) then return false end
+    _smartWalk._flushUid = uid
+    local ok, err = pcall(LOB_STATE.handleLegacyChat, p, rec.text)
+    _smartWalk._flushUid = nil
+    if not ok then print("[SMARTWALK] flush pending: " .. tostring(err)) end
+    return ok
+end
+
+-- Короткая реплика-держатель партнёру при вежливом переключении («секунду, вернусь»).
+-- Без Gemini: переключение должно быть мгновенным; кулдаун HOLD_LINE_CD от спама.
+function lobSmartHoldLine(partner, newName)
+    local now = os.clock()
+    if (now - (_smartWalk.lastHoldLineAt or 0)) < _SW.HOLD_LINE_CD then return end
+    if not (partner and partner.Parent) then return end
+    if not ClientSettings.AutoReply then return end
+    _smartWalk.lastHoldLineAt = now
+    local nm = tostring(newName or "")
+    local lines = {
+        "секунду, вижу " .. nm .. " — быстро отвечу и вернусь",
+        "один момент — " .. nm .. " пишет, сейчас вернусь к разговору",
+        "стоп, секунду — вижу " .. nm,
+    }
+    pcall(function() LOB_STATE.sendBotMessage(lines[math.random(#lines)]) end)
+end
+
 -- Назначить новую цель (единая точка сброса всех таймеров визита)
 function lobSmartSetTarget(p, now)
     local gw = _smartWalk
@@ -8455,7 +8505,10 @@ function lobSmartWalkStart()
                 -- последнего КОНТАКТА: реплика цели, ответ бота ей, приход (arrivedAt) или
                 -- назначение цели (targetSince). Минимум 20с живого визита — без «подошёл-сразу-ушёл».
                 if speakerFresh and target and target.UserId ~= spkUid
-                    and (now - (gw.lastSwitchAt or 0)) >= _SW.SWITCH_CD then
+                    and (now - (gw.lastSwitchAt or 0)) >= _SW.SWITCH_CD
+                    -- v24.7 FIX: не бросаем партнёра, пока бот ещё генерирует ОТВЕТ ЕМУ.
+                    -- Раньше долгий ответ + чужая реплика = «отошёл посреди разговора».
+                    and (((_botBusyByUser or {})[target.UserId] or 0) == 0) then
                     local curContact = math.max(
                         _lastChatAt[target.UserId] or 0,
                         ((_smartWalk.botReplyAt or {})[target.UserId] or 0),
@@ -8481,11 +8534,12 @@ function lobSmartWalkStart()
                             local dSp = spRoot and (spRoot.Position - root.Position).Magnitude or 999
                             local spRel = _rel[sp.UserId]
                             local spKnown = spRel and (spRel.affinity or 0) > 0
-                            if dSp <= 80 or spKnown then
+                            if dSp <= _SW.SWITCH_MAX_DIST or spKnown then  -- v24.7: было 80 — через полкарты к случайному болтуну не бежим
                                 gw.avoid[target.UserId] = now + 12  -- мягко, не бан
                                 target = sp
                                 lobSmartSetTarget(sp, now)
                                 gw.lastSwitchAt = now  -- v23: анти-пинг-понг
+                                gw.lastPoliteAt = now  -- v24.7: это тоже переключение внимания
                             end
                         end
                     end
@@ -8499,6 +8553,72 @@ function lobSmartWalkStart()
                     if target then lobSmartSetTarget(target, now) end
                 end
 
+                -- v24.7: ВЕЖЛИВОЕ ВНИМАНИЕ — разбор отложенных чужих сообщений.
+                -- Свободен (нет цели и разговора) → отвечаем самому свежему писавшему;
+                -- ближнего (≤80) встречаем как обычно (подходим), дальнего — отвечаем с места.
+                -- В разговоре → окно вежливого перехода: партнёр молчит POLITE_PAUSE,
+                -- чужой ждёт POLITE_WAIT и в пределах SWITCH_MAX_DIST, бот не занят ответом
+                -- партнёру, не чаще SWITCH_SOFT_CD — ОДИН переход за окно (анти-кружение).
+                do
+                    local pm = gw.pendingMsgs or {}
+                    for uid, rec in pairs(pm) do
+                        if (not Players:GetPlayerByUserId(uid)) or ((now - (rec.lastAt or 0)) > _SW.PENDING_TTL) then
+                            pm[uid] = nil
+                        end
+                    end
+                    local focusNow = lobSmartFocusUid and lobSmartFocusUid() or nil
+                    if not focusNow and not gw.target and next(pm) then
+                        local bestUid, bestAt = nil, -1
+                        for uid, rec in pairs(pm) do
+                            if (rec.lastAt or 0) > bestAt then bestUid, bestAt = uid, rec.lastAt or 0 end
+                        end
+                        local pp = bestUid and Players:GetPlayerByUserId(bestUid) or nil
+                        local pc = pp and pp.Character
+                        local prr = pc and pc:FindFirstChild("HumanoidRootPart")
+                        local ph = pc and pc:FindFirstChildOfClass("Humanoid")
+                        if pp and prr and ph and ph.Health > 0
+                            and ((gw.avoid[bestUid] or 0) < now)
+                            and (not lobSmartInStuckZone(prr.Position)) then
+                            if (prr.Position - root.Position).Magnitude <= 80 then
+                                lobSmartSetTarget(pp, now)  -- ближний: подходим и отвечаем по пути
+                            end
+                            gw.lastPoliteAt = now
+                            lobSmartFlushPending(bestUid)
+                        end
+                    elseif focusNow and gw.target then
+                        local bestUid, bestAt = nil, -1
+                        for uid, rec in pairs(pm) do
+                            if uid ~= focusNow and (rec.lastAt or 0) > bestAt then bestUid, bestAt = uid, rec.lastAt or 0 end
+                        end
+                        if bestUid then
+                            local rec = pm[bestUid]
+                            local partner = gw.target
+                            local partnerQuiet = now - math.max(
+                                _lastChatAt[focusNow] or 0,
+                                (gw.botReplyAt or {})[focusNow] or 0)
+                            local pend = Players:GetPlayerByUserId(bestUid)
+                            local pc = pend and pend.Character
+                            local prr = pc and pc:FindFirstChild("HumanoidRootPart")
+                            local ph = pc and pc:FindFirstChildOfClass("Humanoid")
+                            local pendDist = prr and (prr.Position - root.Position).Magnitude or 999
+                            local okPend = pend and prr and ph and ph.Health > 0
+                                and (pendDist <= _SW.SWITCH_MAX_DIST)
+                                and ((gw.avoid[bestUid] or 0) < now)
+                            if okPend
+                                and partnerQuiet >= _SW.POLITE_PAUSE
+                                and ((now - (rec.firstAt or now)) >= _SW.POLITE_WAIT)
+                                and (((_botBusyByUser or {})[focusNow] or 0) == 0)
+                                and ((now - (gw.lastPoliteAt or 0)) >= _SW.SWITCH_SOFT_CD) then
+                                lobSmartHoldLine(partner, pend.DisplayName or pend.Name)
+                                gw.avoid[focusNow] = now + 20  -- мягко: вернёмся позже, это не «уйди»
+                                lobSmartSetTarget(pend, now)
+                                gw.lastPoliteAt = now
+                                lobSmartFlushPending(bestUid)
+                            end
+                        end
+                    end
+                end
+
                 if target then
                     local tchar = target.Character
                     local tr = tchar and tchar:FindFirstChild("HumanoidRootPart")
@@ -8507,6 +8627,9 @@ function lobSmartWalkStart()
                         local spokeAt = _lastChatAt[target.UserId] or 0
                         local dist = (tr.Position - root.Position).Magnitude
                         local botSpoke = ((_smartWalk.botReplyAt or {})[target.UserId] or 0)
+                        -- v24.7: разговор живой — партнёр писал <25с назад или бот готовит ему ответ
+                        local partnerLive = ((now - spokeAt) < 25)
+                            or (((_botBusyByUser or {})[target.UserId] or 0) > 0)
 
                         -- СВОРАЧИВАНИЕ: постояли/попрощались — уходим спокойно
                         if gw.state == "winddown" then
@@ -8530,8 +8653,12 @@ function lobSmartWalkStart()
                                 gw.leaveAt = now
                                 gw.state = "wander"
                             end
-                        -- ГИСТЕРЕЗИС: идём если далеко, стоим если уже близко
-                        elseif dist > _SW.RESUME_DIST or (gw.moving and dist > _SW.STOP_DIST) then
+                        -- ГИСТЕРЕЗИС: идём если далеко, стоим если уже близко.
+                        -- v24.7 FIX («ходит туда-сюда у собеседника»): пока разговор живой,
+                        -- не догоняем каждое перемещение партнёра — подходим только если он
+                        -- отошёл заметно дальше (CHAT_LEASH). Иначе стоим и разговариваем.
+                        elseif dist > (partnerLive and _SW.CHAT_LEASH or _SW.RESUME_DIST)
+                            or (gw.moving and dist > _SW.STOP_DIST) then
                             gw.moving = true
                             gw.arrivedAt = 0
                             if (gw.travelSince or 0) == 0 then gw.travelSince = now end
@@ -8739,7 +8866,13 @@ function lobSmartWalkStart()
                             -- не прощаемся и не уходим по MAX_STAY: раньше ответ мог прийти уже
                             -- ПОСЛЕ «пока ‹ник›» — выглядело как «прощается и отвечает одновременно».
                             elseif (now - (gw.socialSince or now)) > _SW.MAX_STAY and (now - spokeAt) > 30
-                                and (((_botBusyByUser or {})[target.UserId] or 0) == 0) then
+                                and (((_botBusyByUser or {})[target.UserId] or 0) == 0)
+                                -- v24.7 FIX («отходит в любой момент»): живой разговор больше не
+                                -- обрывается таймером молча. С партнёром, который ПИСАЛ в этом
+                                -- визите, уходим только после вежливых подначек (nudgeStage >= 2:
+                                -- «ты тут?» → «почему молчишь?»), а не через 30с молчания.
+                                -- Молчуны (не писали вовсе) уходят как раньше.
+                                and (((gw.nudgeStage or 0) >= 2) or not replied) then
                                 doLeave, withFarewell = true, true
                             elseif wasTalking then
                                 -- не подначиваем, если прямо сейчас заговорил ДРУГОЙ игрок
@@ -10209,11 +10342,25 @@ local function processChatMessage(player, rawMessage)
     -- (толпа сзади не должна «перехватывать» разговор). Исключение — прямое обращение
     -- к боту по имени: тогда отвечаем.
     local focusUid = lobSmartFocusUid and lobSmartFocusUid() or nil
-    if focusUid and player.UserId ~= focusUid then
+    if focusUid and player.UserId ~= focusUid
+        -- v24.7: _flushUid — отложенное сообщение, которое умная ходьба САМА разрешила
+        -- сейчас (наступила пауза в разговоре); фокус его обязан пропустить.
+        and player.UserId ~= (_smartWalk._flushUid or nil) then
         local rawLow = rawMessage:lower()
         local directCall = rawLow:find(LOB_STATE._cachedMyNameLow, 1, true) or rawLow:find(LOB_STATE._cachedMyDispLow, 1, true)
         if not directCall then
-            print("[LOB] focus: ignore " .. player.Name)
+            -- v24.7 FIX («игнорирует других»): раньше чужое сообщение ТЕРЯЛОСЬ молча
+            -- (return). Теперь запоминаем его и отвечаем на паузе в разговоре (цикл
+            -- умной ходьбы: POLITE_PAUSE/POLITE_WAIT). Немедленно не отвечаем: толпа
+            -- вокруг не должна превращать разговор в «спидран» с ответами всем подряд.
+            _smartWalk.pendingMsgs = _smartWalk.pendingMsgs or {}
+            local rec = _smartWalk.pendingMsgs[player.UserId]
+                or { n = 0, firstAt = os.clock(), lastAt = 0, text = "" }
+            rec.n = rec.n + 1
+            rec.lastAt = os.clock()
+            rec.text = rawMessage
+            _smartWalk.pendingMsgs[player.UserId] = rec
+            print("[LOB] focus: сообщение " .. player.Name .. " отложено (ответим на паузе)")
             return
         end
     end
@@ -11812,7 +11959,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.6",  -- v24.6: масштабный багфикс лоадера — loadChunk (без loadstring моды молча не грузились), табы-призраки при выгрузке, утечка подписок api.on, сохранение родных [DO:тегов], fail-safe patch/override/connect
+    VERSION       = "v24.7",  -- v24.7: фикс пустой вкладки при отключении мода + вежливое внимание умной ходьбы (не игнорим чужих, не обрываем разговор, без спидрана)
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -12173,6 +12320,10 @@ function LOB_MODS.uiEnsureTab(mod, tabName, icon)
     frame.Size = UDim2.new(1, 0, 1, 0)
     frame.Visible = false
     frame.Parent = b.contentArea
+    -- v24.7 ФИКС (пустая вкладка): помечаем вкладку владельцем-модом. Атрибут
+    -- переживает Destroy(), поэтому вкладку мода можно корректно удалить, даже
+    -- если её фрейм уже уничтожен циклом mod.instances в unloadOne (см. uiRemoveTab).
+    frame:SetAttribute("ModTabOwner", mod.name)
     b.tabFrames[tabName] = frame
     local title = b.makeTextLabel(frame, tabName, 24, "bold")
     title.Size = UDim2.new(1, 0, 0, 30)
@@ -12227,7 +12378,18 @@ function LOB_MODS.uiRemoveTab(mod, tabName)
     local f = b.tabFrames[tabName]
     -- v24.1 ФИКС: удаляем только СВОЮ вкладку мода (с ModScroll).
     -- БАГ ДО: выгрузка мода, добавлявшего элементы в родную вкладку, удаляла её целиком.
-    if f and f:FindFirstChild("ModScroll") then
+    -- v24.7 ФИКС (пустая вкладка при отключении мода): unloadOne раньше уничтожал
+    -- фрейм вкладки (mod.instances) ДО uiRemoveTab — у уничтоженного фрейма детей уже
+    -- нет, FindFirstChild("ModScroll") давал nil, вкладка считалась «родной» и КНОПКА
+    -- оставалась висеть с пустым содержимым. Теперь владелец определяется по
+    -- атрибуту ModTabOwner (переживает Destroy) ИЛИ по ModScroll — оба пути означают
+    -- вкладку, созданную модом; родные вкладки (без атрибута) по-прежнему не трогаем.
+    local isModTab = false
+    if f then
+        isModTab = (f:GetAttribute("ModTabOwner") ~= nil)
+            or (f:FindFirstChild("ModScroll") ~= nil)
+    end
+    if f and isModTab then
         pcall(function() f:Destroy() end)
         b.tabFrames[tabName] = nil
         local btnObj = b.tabButtons[tabName]
@@ -12932,17 +13094,21 @@ function LOB_MODS.unloadOne(name, silent)
     end
     -- v24.2: вернуть тексты родного GUI, заменённые модом (мгновенный тоггл — чисто)
     pcall(LOB_MODS.uiRevertTexts, mod)
-    -- UI мода
-    for i = #mod.instances, 1, -1 do
-        pcall(function()
-            if mod.instances[i] and mod.instances[i].Parent then mod.instances[i]:Destroy() end
-        end)
-    end
+    -- v24.7 ФИКС (пустая вкладка при отключении мода): вкладки убираем ДО
+    -- уничтожения mod.instances. БАГ ДО: instances-цикл уничтожал фрейм вкладки
+    -- (контент), а вызываемый после uiRemoveTab уже не находил ModScroll у
+    -- мёртвого фрейма и пропускал удаление КНОПКИ — оставалась пустая вкладка.
     for i = #mod.tabs, 1, -1 do
         -- v24.6 ФИКС (табы-призраки): uiRemoveTab УДАЛЯЕТ элемент из mod.tabs во время
         -- итерации ipairs → каждый ВТОРОЙ таб пропускался и его кнопка/фрейм оставались
         -- в GUI навсегда. Идём с конца — удаление не сдвигает ещё не пройденные индексы.
         pcall(LOB_MODS.uiRemoveTab, mod, mod.tabs[i])
+    end
+    -- UI мода (после вкладок: v24.7 — иначе кнопки вкладок становились «сиротами»)
+    for i = #mod.instances, 1, -1 do
+        pcall(function()
+            if mod.instances[i] and mod.instances[i].Parent then mod.instances[i]:Destroy() end
+        end)
     end
     LOB_MODS.mods[name] = nil
     for i, n in ipairs(LOB_MODS.order) do
@@ -13062,7 +13228,7 @@ function LOB_MODS.loadAll()
 end
 
 -- ── ПРИМЕР МОДА (создаётся в папке модов) ──────────────────────────────────
-LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v24.6)
+LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v24.7)
   Кладите свои моды (.lua) в папку  LineOfBots/mods  рядом с инжектором.
   Общие библиотеки — в  LineOfBots/libs  (api.lib("имя файла")).
   Управление — вкладка «Моды»: иконка, название, тоггл вкл/выкл.
@@ -13429,7 +13595,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.6 · Kit 2", 10, "semibold")  -- v24.6: синхронизировано (было «v21»); Kit 2 = номер версии Modding Kit
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.7 · Kit 3", 10, "semibold")  -- v24.7: Kit 3 = номер версии Modding Kit (виден в GUI для проверки сборки)
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
@@ -19525,7 +19691,7 @@ do
 
     local modsTitle = makeTextLabel(modsFrame, "Моды", 24, "bold")
     modsTitle.Size = UDim2.new(1, 0, 0, 30)
-    local modsDesc = makeTextLabel(modsFrame, "Мод-лоадер v24.6: папка «LineOfBots» в папке инжектора (mods, libs, configs).", 13, "semibold")
+    local modsDesc = makeTextLabel(modsFrame, "Мод-лоадер v24.7: папка «LineOfBots» в папке инжектора (mods, libs, configs).", 13, "semibold")
     modsDesc.TextColor3 = THEME.TextDim
     modsDesc.Position = UDim2.new(0, 0, 0, 32)
     modsDesc.Size = UDim2.new(1, 0, 0, 16)
