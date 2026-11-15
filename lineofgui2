@@ -224,9 +224,9 @@
 -- v25.1: ЕДИНСТВЕННЫЙ ИСТОЧНИК ВЕРСИИ (отчёт Claude A17): раньше версия была
 -- строкой в трёх местах (константа лоадера, GUI-подзаголовок, print) — в v25.0
 -- два из них остались «v24.8», и моды видели api.version = "v24.8".
-LOB_VERSION = "v25.2"  -- мега-умная ходьба v25.0 + hardened лоадер v25.1 + прямые команды движения v25.2
-LOB_KIT     = 7        -- номер кита (README/архив LineOfBots_Modding_Kit_v7.zip)
-print("LOB VERSION: " .. LOB_VERSION .. " LOADED (Kit " .. LOB_KIT .. ")")  -- v25.2: «иди сюда/стой/следуй за мной» исполняются детерминированно мимо ИИ и фокус-гейта (бот больше не игнорирует команды в движении/разговоре); отложенные сообщения больше не умирают при остановке ходьбы
+LOB_VERSION = "v25.3"  -- мега-умная ходьба v25.0 + hardened лоадер v25.1 + нейро-first доставка команд v25.3
+LOB_KIT     = 8        -- номер кита (README/архив LineOfBots_Modding_Kit_v8.zip)
+print("LOB VERSION: " .. LOB_VERSION .. " LOADED (Kit " .. LOB_KIT .. ")")  -- v25.3 НЕЙРО-FIRST: никаких скриптовых команд — сообщение «иди сюда/стой» гарантированно доходит до ИИ (обход фокус-гейта), а действие решает МОДЕЛЬ тегом [DO:goto]/[DO:follow]/[DO:stop]; теги ИИ теперь реально управляют умной ходьбой: [DO:stop] останавливает её, [DO:goto] перезапускает цикл после остановки
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -3791,10 +3791,13 @@ local ACTION_HANDLERS = {
     -- коммитит ПОЛНЫЙ ВИЗИТ к позвавшему (умная ходьба дойдёт, поздоровается и
     -- останется общаться, а не уйдёт по старым делам сразу после подхода).
     -- gotoPlayer остаётся мгновенным ходом/фолбэком при выключенной умной ходьбе.
+    -- v25.3: если тумблер включён, а цикл не запущен (после [DO:stop]) — запускаем
+    -- сами, чтобы [DO:goto] дал ПОЛНЫЙ умный визит, а не голый мгновенный ход.
     goto     = function(p)
-        if p and ClientSettings.SmartWalk and _smartWalk and _smartWalk.active
+        if p and ClientSettings.SmartWalk and _smartWalk
             and lobSmartSetTarget and not lobIsDangerTarget(p) then
-            lobSmartSetTarget(p, os.clock())
+            if not _smartWalk.active and lobSmartWalkStart then pcall(lobSmartWalkStart) end
+            if _smartWalk.active then lobSmartSetTarget(p, os.clock()) end
         end
         LOB_STATE.gotoPlayer(p)
     end,
@@ -3807,7 +3810,16 @@ local ACTION_HANDLERS = {
             LOB_STATE.startFollowingPlayer(p)
         end
     end,
-    stop     = function(_) stopFollowing() end,
+    -- v25.3 ФИКС: тег ИИ [DO:stop] теперь РЕАЛЬНО останавливает умную ходьбу.
+    -- Раньше гасился только UI-фоллоуинг: бот продолжал маршрут/блуждание,
+    -- игнорируя решение модели (выглядело как «бот не слушается нейросети»).
+    -- Возобновление — тегами ИИ: [DO:wander] / [DO:goto] перезапускают цикл сами.
+    stop     = function(_)
+        stopFollowing()
+        if ClientSettings.SmartWalk and _smartWalk and _smartWalk.active and lobSmartWalkStop then
+            lobSmartWalkStop()
+        end
+    end,
     -- v22: ИИ может управлять умной ходьбой
     stay     = function(p)
         local tgt = p or _smartWalk.target
@@ -10870,9 +10882,12 @@ local function processChatMessage(player, rawMessage)
     -- v22: ФОКУС НА СОБЕСЕДНИКЕ. Пока бот общается с одним игроком — чужих не слушаем
     -- (толпа сзади не должна «перехватывать» разговор). Исключение — прямое обращение
     -- к боту по имени: тогда отвечаем.
-    -- v25.2: ПРЯМЫЕ КОМАНДЫ ДВИЖЕНИЯ («иди сюда», «стой», «следуй за мной») обходят
-    -- фокус-гейт КАК «уйди» — раньше они уезжали в отложенную очередь и по TTL 90с
-    -- умирали: пользователь видел «бот игнорирует во время разговора».
+    -- v25.3 НЕЙРО-FIRST (по запросу пользователя: бот — нейросеть, а не скрипт):
+    -- НИКАКОГО скриптового исполнения команд. Детектор moveCmd используется ТОЛЬКО
+    -- чтобы сообщение («иди сюда», «стой», «следуй за мной») гарантированно дошло
+    -- до ИИ: обход фокус-гейта вместо откладывания в pendingMsgs (TTL 90с = «игнор»).
+    -- Что делать — решает МОДЕЛЬ тегом [DO:goto]/[DO:follow]/[DO:stop], и умная
+    -- ходьба обязана эти теги исполнить (см. ACTION_HANDLERS, v25.3).
     local moveCmd = lobMoveCommandKind and lobMoveCommandKind(rawMessage) or nil
     local focusUid = lobSmartFocusUid and lobSmartFocusUid() or nil
     if focusUid and player.UserId ~= focusUid
@@ -10884,7 +10899,9 @@ local function processChatMessage(player, rawMessage)
         -- v24.8 FIX: «уйди/отстань» обходит фокус-гейт КАК прямое обращение. Раньше
         -- прогон откладывался в pending на 90с: команда не выполнялась, а после визита
         -- бот внезапно отвечал на «уйди» как на обычную реплику.
-        -- v25.2 FIX: команды движения (moveCmd) обходят фокус-гейт так же.
+        -- v25.3 FIX: команды движения (moveCmd) обходят фокус-гейт так же — НЕ для
+        -- скриптового исполнения, а чтобы ИИ услышал команду немедленно и сам решил,
+        -- что делать (тег [DO:goto]/[DO:follow]/[DO:stop]).
         if not directCall and not (lobIsLeaveCommand and lobIsLeaveCommand(rawMessage)) and not moveCmd then
             -- v24.7 FIX («игнорирует других»): раньше чужое сообщение ТЕРЯЛОСЬ молча
             -- (return). Теперь запоминаем его и отвечаем на паузе в разговоре (цикл
@@ -10922,38 +10939,21 @@ local function processChatMessage(player, rawMessage)
         end
     end
 
-    -- v25.2 ФИКС (логика бота): ДЕТЕРМИНИРОВАННОЕ ИСПОЛНЕНИЕ КОМАНД ДВИЖЕНИЯ —
-    -- мгновенно, мимо ИИ/антиспама/кулдауна (команду можно повторить, если бот
-    -- застрял). Раньше движение ждало, пока модель ИИ решит поставить [DO:goto]/[DO:stop],
-    -- — и когда бот шёл или разговаривал, команда казалась проигнорированной.
-    -- ИИ-ответ (вежливая реплика) по-прежнему формируется обычным конвейером ниже.
-    if moveCmd then
-        if moveCmd == "stop" then
-            stopFollowing()
-            if _smartWalk and _smartWalk.active and lobSmartWalkStop then lobSmartWalkStop() end
-            print("[LOB] move-cmd: стоп (" .. player.Name .. ")")
-        else
-            -- come / follow: отменяем текущее занятие (в т.ч. разговор) и немедленно
-            -- идём к позвавшему; умная ходьба затем «доиграет» визит по-своему
-            if _smartWalk and _smartWalk.active and lobSmartWalkStop then lobSmartWalkStop() end
-            if ClientSettings.SmartWalk and lobSmartSetTarget and not lobIsDangerTarget(player) then
-                lobSmartSetTarget(player, os.clock())
-            end
-            if moveCmd == "follow" then
-                LOB_STATE.startFollowingPlayer(player)
-            else
-                LOB_STATE.gotoPlayer(player)
-            end
-            print("[LOB] move-cmd: " .. moveCmd .. " → " .. player.Name)
-        end
-    end
+    -- v25.3 НЕЙРО-FIRST: скриптовое исполнение команд движения УДАЛЕНО (v25.2).
+    -- Команда доходит до ИИ как обычное сообщение (обход фокус-гейта выше), модель
+    -- отвечает и при необходимости ставит тег [DO:goto]/[DO:follow]/[DO:stop] —
+    -- исполнение только через ACTION_HANDLERS. Повторная команда не глушится
+    -- антиспамом ниже: повтор «иди сюда» — нормальная ситуация (бот застрял).
 
     -- v17.5: Антиспам — игнорируем если то же самое сообщение подряд
     if settings.AntiSpam then
         local lastData = _lastMsgPerUser[player.UserId]
         local msgLower = rawMessage:lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
         local nowTime = os.clock()
-        if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 12 then
+        -- v25.3: повтор той же КОМАНДЫ ДВИЖЕНИЯ не глушится антиспамом — повтор
+        -- «иди сюда» это нормальная ситуация (бот застрял/не увидел), ИИ должен
+        -- услышать её снова. Обычные дубли по-прежнему режутся.
+        if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 12 and not moveCmd then
             print("[LOB] drop: antispam-dup " .. player.Name)
             return -- то же сообщение в течение 12 секунд — игнорируем
         end
