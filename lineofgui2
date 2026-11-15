@@ -6651,6 +6651,7 @@ _SW = {
     DEAD_WAIT      = 20,   -- сколько ждать респавна цели, прежде чем уйти
     MIN_STAY       = 20,   -- минимум секунд у собеседника после подхода
     MAX_STAY       = 150,  -- максимум визита, если разговор не поддерживают
+    MAX_STAY_HARD  = 420,  -- v24.7 (полигон): жёсткий потолок визита общавшихся — см. ветку ухода
     MAX_TARGET_DIST = 250, -- не идти через всю карту к далёкому молчуну
     FRESH_CHAT     = 20,   -- ...но свежую реплику догоняем даже издалека
     CHAT_EXTEND    = 45,   -- каждая свежая реплика продлевает визит на столько
@@ -8585,17 +8586,30 @@ function lobSmartWalkStart()
                             gw.lastPoliteAt = now
                             lobSmartFlushPending(bestUid)
                         end
-                    elseif focusNow and gw.target then
+                    elseif gw.target and gw.state == "social" then
+                        -- v24.7: окно вежливого перехода — фокус активен ИЛИ визит продолжается,
+                        -- но партнёр замолчал. Фокус (lobSmartFocusUid) истекает через 25с тишины
+                        -- партнёра — раньше окно умирало вместе с ним и отложенное чужое
+                        -- сообщение ждало полного завершения визита, хотя молчащий партнёр
+                        -- сам уже «выключился» из разговора.
+                        local partnerUid = focusNow or gw.target.UserId
+                        -- v24.7: если отложено сообщение САМОГО партнёра (писал, пока бот был
+                        -- занят другим) — отдаём сразу: бот пришёл к нему отвечать. Иначе
+                        -- сообщение залипало до конца визита (свободная ветка не работает
+                        -- при активной цели, а фильтр uid ~= partnerUid его пропускал).
+                        if pm[partnerUid] then
+                            lobSmartFlushPending(partnerUid)
+                        else
                         local bestUid, bestAt = nil, -1
                         for uid, rec in pairs(pm) do
-                            if uid ~= focusNow and (rec.lastAt or 0) > bestAt then bestUid, bestAt = uid, rec.lastAt or 0 end
+                            if uid ~= partnerUid and (rec.lastAt or 0) > bestAt then bestUid, bestAt = uid, rec.lastAt or 0 end
                         end
                         if bestUid then
                             local rec = pm[bestUid]
                             local partner = gw.target
                             local partnerQuiet = now - math.max(
-                                _lastChatAt[focusNow] or 0,
-                                (gw.botReplyAt or {})[focusNow] or 0)
+                                _lastChatAt[partnerUid] or 0,
+                                (gw.botReplyAt or {})[partnerUid] or 0)
                             local pend = Players:GetPlayerByUserId(bestUid)
                             local pc = pend and pend.Character
                             local prr = pc and pc:FindFirstChild("HumanoidRootPart")
@@ -8607,15 +8621,16 @@ function lobSmartWalkStart()
                             if okPend
                                 and partnerQuiet >= _SW.POLITE_PAUSE
                                 and ((now - (rec.firstAt or now)) >= _SW.POLITE_WAIT)
-                                and (((_botBusyByUser or {})[focusNow] or 0) == 0)
+                                and (((_botBusyByUser or {})[partnerUid] or 0) == 0)
                                 and ((now - (gw.lastPoliteAt or 0)) >= _SW.SWITCH_SOFT_CD) then
                                 lobSmartHoldLine(partner, pend.DisplayName or pend.Name)
-                                gw.avoid[focusNow] = now + 20  -- мягко: вернёмся позже, это не «уйди»
+                                gw.avoid[partnerUid] = now + 20  -- мягко: вернёмся позже, это не «уйди»
                                 lobSmartSetTarget(pend, now)
                                 gw.lastPoliteAt = now
                                 lobSmartFlushPending(bestUid)
                             end
                         end
+                        end  -- v24.7: if pm[partnerUid] — ответ партнёру сразу
                     end
                 end
 
@@ -8873,6 +8888,15 @@ function lobSmartWalkStart()
                                 -- «ты тут?» → «почему молчишь?»), а не через 30с молчания.
                                 -- Молчуны (не писали вовсе) уходят как раньше.
                                 and (((gw.nudgeStage or 0) >= 2) or not replied) then
+                                doLeave, withFarewell = true, true
+                            -- v24.7 (найдено на полигоне): жёсткий потолок для ОБЩАВШИХСЯ. Игрок
+                            -- может стоять ЛИЦОМ к боту и молчать вечно: взгляд держит
+                            -- nudgeStage=0 (строка выше), а MAX_STAY теперь требует nudgeStage>=2
+                            -- → без потолка бот зависал рядом навсегда. 7 минут молчания =
+                            -- вежливое прощание.
+                            elseif (now - (gw.socialSince or now)) > _SW.MAX_STAY_HARD
+                                and (now - spokeAt) > 45
+                                and (((_botBusyByUser or {})[target.UserId] or 0) == 0) then
                                 doLeave, withFarewell = true, true
                             elseif wasTalking then
                                 -- не подначиваем, если прямо сейчас заговорил ДРУГОЙ игрок
