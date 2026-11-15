@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v24.7.1  —  ОГЛАВЛЕНИЕ / FILE MAP                ║
+-- ║         LINEOFBOTS v24.8  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -221,7 +221,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v24.7.1 LOADED")  -- v24.7.1: «иди сюда» в пути (подход уступает командному движению, goto = визит) + гонка «пока в пути»
+print("LOB VERSION: v24.8 LOADED")  -- v24.8: аудита умной ходьбы — 6 фиксов (ложное «уйди», pending при «уйди», threat-бан партнёра, MIN_STAY при переключении, «передумал» в winddown, «уйди» сквозь фокус)
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -6781,6 +6781,11 @@ function lobSmartWalkLeave(userId)
         _smartWalk.stayLockUid = nil
         _smartWalk.stayLockUntil = 0
     end
+    -- v24.8 FIX: «уйди» стирает и отложенное сообщение этого игрока — раньше оно
+    -- доживало до конца avoid (60-90с) и бот внезапно отвечал тому, кто его прогнал.
+    if _smartWalk.pendingMsgs then
+        _smartWalk.pendingMsgs[userId] = nil
+    end
     pcall(function() stopFollowing() end)
 end
 
@@ -6862,8 +6867,10 @@ end
 
 function lobIsLeaveCommand(msg)
     local m = tostring(msg or ""):lower()
+    -- v24.8 FIX: убрано «не надо» — оно ловило «не надо, останься!» / «мне не надо домой»
+    -- как «уйди»: бот уходил и ставил 60с бан человеку, который просил ОСТАТЬСЯ.
     local words = { "уйди", "уходи", "отстань", "отвали", "иди отсюда", "не подходи", "отойди",
-        "пошёл отсюда", "дай пройти", "не надо", "отвянь", "go away", "leave me", "get lost",
+        "пошёл отсюда", "дай пройти", "отвянь", "go away", "leave me", "get lost",
         "shoo", "back off" }
     for _, w in ipairs(words) do if m:find(w, 1, true) then return true end end
     return false
@@ -7415,10 +7422,14 @@ function lobSmartEvadeDanger(now)
     gw.avoid[threat.UserId] = now + _SW.AVOID_SEC
     if gw.target and gw.target.UserId == threat.UserId then gw.target = nil gw.targetSince = 0 end
     pcall(lobSmartMarkDanger, tr.Position)
-    -- во время разговора не стоим рядом с угрозой: вежливо сворачиваемся
+    -- во время разговора не стоим рядом с угрозой: вежливо сворачиваемся.
+    -- v24.8 FIX: помечаем ПРИЧИНУ сворачивания — раньше winddown от ПОСТОРОННЕЙ
+    -- угрозы завершался баном ПАРТНЁРА на RETURN_CD_TALK (180с), хотя он ни при чём.
     if gw.state == "social" then
         gw.state = "winddown"
         gw.windUntil = now + _SW.WIND_DOWN
+        gw.windReason = "threat"
+        gw.windReengaged = true  -- угроза рядом: возврат к разговору не отменяет отход
     end
     if (now - (gw.caughtAt or 0)) < 1.0 then return true end
     gw.caughtAt = now
@@ -8098,6 +8109,9 @@ function lobSmartSetTarget(p, now)
     gw.lastCountedChatAt = 0
     gw.saidGoodbyeNudge = false
     gw.travelSince = 0
+    -- v24.8: новый визит — причина/признак сворачивания прошлого не имеют силы
+    gw.windReason = nil
+    gw.windReengaged = false
     local rr = p and _rel[p.UserId]
     if rr then rr.revisitAt = 0 end
 end
@@ -8637,7 +8651,15 @@ function lobSmartWalkStart()
                             local okPend = pend and prr and ph and ph.Health > 0
                                 and (pendDist <= _SW.SWITCH_MAX_DIST)
                                 and ((gw.avoid[bestUid] or 0) < now)
+                            -- v24.8 FIX: у свежего визита ждём MIN_STAY. Раньше партнёр,
+                            -- которому бот только что ответил ПРИВЕТСТВИЕМ (synthetic-очередь
+                            -- "sw:uid" не пишет botReplyAt → partnerQuiet = «вечность»),
+                            -- через ~10с терял бота: приветствие ещё не успело дойти, а бот
+                            -- уже ушёл к отложенному чужому (и бан 20с на партнёра).
+                            local visitFresh = (now - (gw.socialSince or now)) < _SW.MIN_STAY
+                                and partnerQuiet >= _SW.MIN_STAY
                             if okPend
+                                and (not visitFresh)
                                 and partnerQuiet >= _SW.POLITE_PAUSE
                                 and ((now - (rec.firstAt or now)) >= _SW.POLITE_WAIT)
                                 and (((_botBusyByUser or {})[partnerUid] or 0) == 0)
@@ -8670,14 +8692,37 @@ function lobSmartWalkStart()
                             if now < (gw.windUntil or 0) then
                                 lobSmartForceFace(tr.Position)
                                 task.wait(0.25)
+                            elseif (not (gw.windReengaged or false))
+                                and (gw.windReason or "") ~= "threat"
+                                and ((_lastChatAt[target.UserId] or 0)
+                                    > (((_smartWalk.farewellFrom or {})[target.UserId]
+                                        or (gw.windStartAt or 0)) + 0.05)) then
+                                -- v24.8 FIX: партнёр «передумал» во время сворачивания
+                                -- («пока!» → «стой, шучу, побудь») — возвращаемся в разговор,
+                                -- а не уходим с баном на 3 минуты. База — ВРЕМЯ ПРОЩАНИЯ:
+                                -- любая реплика НОВЕЕ «пока» = передумал (само «пока» и
+                                -- windStart совпадают по тику, поэтому сравнение с ним
+                                -- ненадёжно). Один раз на winddown (повторные «пока»
+                                -- уходят по-настоящему), threat-winddown не откатываем.
+                                gw.windReengaged = true
+                                gw.state = "social"
+                                gw.socialSince = now  -- перештамп: «пока» старше визита, saidBye больше не давит
+                                gw.stayUntil = now + _SW.MIN_STAY
+                                gw.travelSince = 0
+                                task.wait(0.4)
                             else
                                 -- v23.4 FIX: после ЖИВОГО разговора не возвращаемся к тому же
                                 -- человеку 3 минуты — раньше через RETURN_CD(30с) выходил
                                 -- пинг-понг «пока X» → (30с) → «привет X». Молчунов отпускаем
                                 -- быстро (с ними и не разговаривали).
+                                -- v24.8 FIX: winddown от ПОСТОРОННЕЙ УГРОЗЫ (windReason=threat)
+                                -- не банит партнёра надолго — это не он прекратил визит.
                                 local hadTalkVisit = ((gw.sessionChats or 0) > 0)
                                     and (((_smartWalk.botReplyAt or {})[target.UserId] or 0) >= (gw.socialSince or 0))
-                                gw.avoid[target.UserId] = now + (hadTalkVisit and _SW.RETURN_CD_TALK or _SW.RETURN_CD)
+                                local banSec = (gw.windReason == "threat") and _SW.RETURN_CD
+                                    or (hadTalkVisit and _SW.RETURN_CD_TALK or _SW.RETURN_CD)
+                                gw.windReason = nil
+                                gw.avoid[target.UserId] = now + banSec
                                 local rr2 = _rel[target.UserId]
                                 if rr2 and (rr2.affinity or 0) > 0 then
                                     rr2.revisitAt = os.clock() + math.random(_SW.REVISIT_MIN, _SW.REVISIT_MAX)
@@ -8863,12 +8908,13 @@ function lobSmartWalkStart()
                                 if replied then gw.nudgeStage = 0 end
                             end
 
-                            -- v24.7.1 FIX (гонка «пока в пути»): socialSince перезаписывается при
-                            -- КАЖДОМ повторном входе в social (партнёр отошёл за поводок → подход →
-                            -- вернулся), и прощание, пришедшее в transit-окне, сравнивалось с НОВЫМ
-                            -- штампом — saidBye навсегда false, бот бегал за попрощавшимся.
-                            -- База сравнения — начало визита (targetSince): стабилен весь визит,
-                            -- старые «пока» прошлых визитов младше него и не срабатывают.
+                            -- v24.7.1 FIX (гонка «пока в пути»): прощание, сказанное ПОКА бот
+                            -- ещё шёл к игроку, сравнивалось со socialSince НОВОГО визита —
+                            -- при прибытии socialSince перештампуется («новый визит»), прощание
+                            -- из transit-окна становилось старше него и НИКОГДА не срабатывало:
+                            -- бот приходил и оставался с попрощавшимся. База сравнения — начало
+                            -- визита (targetSince): стабилен весь визит, старые «пока» прошлых
+                            -- визитов младше него и не срабатывают.
                             local _visitStart = (gw.targetSince or 0) > 0
                                 and math.min(gw.socialSince or 0, gw.targetSince)
                                 or (gw.socialSince or 0)
@@ -8958,6 +9004,8 @@ function lobSmartWalkStart()
                             if doLeave then
                                 gw.state = "winddown"
                                 gw.windUntil = now + _SW.WIND_DOWN
+                                gw.windReengaged = false  -- v24.8: один шанс «передумал» на winddown
+                                gw.windStartAt = now      -- v24.8: реплика ПОСЛЕ этого момента = «передумал»
                                 if withFarewell and not gw.saidGoodbyeNudge and (now - spokeAt) < 120 then
                                     lobSmartFarewell(target)
                                 end
@@ -10400,7 +10448,10 @@ local function processChatMessage(player, rawMessage)
         and player.UserId ~= (_smartWalk._flushUid or nil) then
         local rawLow = rawMessage:lower()
         local directCall = rawLow:find(LOB_STATE._cachedMyNameLow, 1, true) or rawLow:find(LOB_STATE._cachedMyDispLow, 1, true)
-        if not directCall then
+        -- v24.8 FIX: «уйди/отстань» обходит фокус-гейт КАК прямое обращение. Раньше
+        -- прогон откладывался в pending на 90с: команда не выполнялась, а после визита
+        -- бот внезапно отвечал на «уйди» как на обычную реплику.
+        if not directCall and not (lobIsLeaveCommand and lobIsLeaveCommand(rawMessage)) then
             -- v24.7 FIX («игнорирует других»): раньше чужое сообщение ТЕРЯЛОСЬ молча
             -- (return). Теперь запоминаем его и отвечаем на паузе в разговоре (цикл
             -- умной ходьбы: POLITE_PAUSE/POLITE_WAIT). Немедленно не отвечаем: толпа
@@ -12011,7 +12062,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.7.1",  -- v24.7.1: «иди сюда» в пути + гонка «пока в пути» (полигон T6)
+    VERSION       = "v24.8",  -- v24.8: аудит умной ходьбы — 6 фиксов (полигон T7, 23/23)
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -13647,7 +13698,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.7.1 · Kit 3", 10, "semibold")  -- v24.7.1: видимый маркер сборки в GUI («иди сюда» в пути + гонка «пока в пути»)
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.8 · Kit 4", 10, "semibold")  -- v24.8: видимый маркер сборки в GUI (аудит умной ходьбы)
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
