@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v25.0  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
+-- ║         LINEOFBOTS v25.1  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -221,7 +221,12 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v25.0 LOADED")  -- v25.0: мега-умная ходьба — бегство без пинг-понга (обязательство курса 16×3 кандидатов, re-arm, отдышка), лестничная походка (плотные точки, без среза углов, без прыжков в потолок), осмысленное блуждание (курс+анти-реверс+тесные комнаты)
+-- v25.1: ЕДИНСТВЕННЫЙ ИСТОЧНИК ВЕРСИИ (отчёт Claude A17): раньше версия была
+-- строкой в трёх местах (константа лоадера, GUI-подзаголовок, print) — в v25.0
+-- два из них остались «v24.8», и моды видели api.version = "v24.8".
+LOB_VERSION = "v25.1"  -- мега-умная ходьба v25.0 + hardened мод-лоадер v25.1
+LOB_KIT     = 6        -- номер кита (README/архив LineOfBots_Modding_Kit_v6.zip)
+print("LOB VERSION: " .. LOB_VERSION .. " LOADED (Kit " .. LOB_KIT .. ")")  -- v25.1: hardened мод-лоадер — песочница модов с правами, hook без дублей оригинала, таймеры с само-стопом, onUnload-список, exports-очистка, перехват chat/action, кириллица в командах, UI-спека переигрывается, цепочки патчей, зависимости модов
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -4652,7 +4657,7 @@ LOB_STATE.executeAction = function(actionName, sourcePlayer, cleanText, original
 
         -- Фикс спина: ИИ путает dance/spin — если юзер просил крутиться а ИИ написал dance, заменяем
         if actionName == "dance" and originalUserMsg then
-            local m = originalUserMsg:lower()
+            local m = lobLower(originalUserMsg)  -- v25.1 (A8): «КРУТИСЬ» с заглавной тоже крутит
             if m:find("крут") or m:find("spin") or m:find("кружи") or m:find("поверн") or m:find("twirl") then
                 actionName = "spin"
             end
@@ -4660,6 +4665,18 @@ LOB_STATE.executeAction = function(actionName, sourcePlayer, cleanText, original
 
         LOB_STATE._lastUserMsgBeta2 = originalUserMsg or ''
         local handler = ACTION_HANDLERS[actionName]
+        -- v25.1 ФИКС (A11, отчёт Claude): ПЕРЕХВАТ ДЕЙСТВИЯ ДО ВЫПОЛНЕНИЯ.
+        -- БАГ ДО: событие "action" шло ПОСЛЕ выполнения тега — отменить действие
+        -- или подменить аргумент можно было только записью в ACTION_HANDLERS.
+        -- Теперь: ctx.cancel — тег не выполняется; ctx.arg — подмена аргумента;
+        -- ctx.handler — полная замена обработчика (для ОДНОГО вызова).
+        if handler and LOB_MODS and LOB_MODS.fire then
+            local actx = { tag = actionName, arg = actionArg, cancel = false }
+            pcall(LOB_MODS.fire, "actionIntercept", actionName, sourcePlayer, actx)
+            if actx.cancel then handler = nil end
+            if type(actx.arg) == "string" then actionArg = actx.arg end
+            if type(actx.handler) == "function" then handler = actx.handler end
+        end
         if handler then
             task.spawn(function()
                 local ok, err = pcall(handler, sourcePlayer, actionArg)
@@ -5843,7 +5860,7 @@ function lobDangerActive()
     return ClientSettings.DangerSense == true and ClientSettings.GameUnderstanding == true
 end
 function lobHasThreatWords(msg)
-    for tok in tostring(msg or ""):lower():gmatch("%S+") do
+    for tok in lobLower(msg):gmatch("%S+") do  -- v25.1 (A8): кириллица («УБЕЙ» тоже угроза)
         local w = tok:gsub("^[%p%c%d]+", ""):gsub("[%p%c%d]+$", "")
         if w ~= "" and _THREAT_WORDS[w] then return true end
     end
@@ -6914,8 +6931,31 @@ function lobSmartInStuckZone(pos)
     return false
 end
 
+-- v25.1 (A8, отчёт Claude): utf8-понижение регистра с КИРИЛЛИЦЕЙ. string.lower
+-- в Luau трогает только ASCII, поэтому «Уйди/ПОКА/КРУТИСЬ» не совпадали со
+-- словарями команд. Замена байтовая (длина строки сохраняется, позиции идут).
+function lobLower(s)
+    s = tostring(s or ""):lower()  -- ASCII A-Z
+    local ok, out = pcall(function()
+        local buf = {}
+        for _, code in utf8.codes(s) do
+            if code >= 0x0410 and code <= 0x042F then code = code + 32        -- А-Я → а-я
+            elseif code == 0x0401 then code = 0x0451                          -- Ё → ё
+            elseif code >= 0x0400 and code <= 0x040F then code = code + 80    -- Ѐ-Џ → ѐ-џ
+            elseif code == 0x0490 then code = 0x0491 end                      -- Ґ → ґ
+            buf[#buf + 1] = utf8.char(code)
+        end
+        return table.concat(buf)
+    end)
+    return (ok and out) or s
+end
+
 function lobIsLeaveCommand(msg)
-    local m = tostring(msg or ""):lower()
+    -- v25.1 ФИКС (A8, отчёт Claude): string.lower в Luau меняет ТОЛЬКО ASCII —
+    -- «Уйди», «ПОКА», «КРУТИСЬ» с заглавной кириллицей не совпадали со списками
+    -- в нижнем регистре. Все команды-словари теперь сравниваются через lobLower
+    -- (utf8-понижение А-Я/Ё/Ѐ-Џ/Ґ), байтовые длины сохраняются.
+    local m = lobLower(msg)
     -- v24.8 FIX: убрано «не надо» — оно ловило «не надо, останься!» / «мне не надо домой»
     -- как «уйди»: бот уходил и ставил 60с бан человеку, который просил ОСТАТЬСЯ.
     local words = { "уйди", "уходи", "отстань", "отвали", "иди отсюда", "не подходи", "отойди",
@@ -6926,7 +6966,7 @@ function lobIsLeaveCommand(msg)
 end
 
 function lobIsFarewellCommand(msg)
-    local m = tostring(msg or ""):lower()
+    local m = lobLower(msg)  -- v25.1 (A8): кириллица («Пока!» тоже прощание)
     local words = { "пока", "покеда", "до связи", "до встречи", "прощай", "увидимся",
         "хорошего дня", "спокойной ночи", "bye", "goodbye", "cya", "see ya", "see you", "farewell" }
     -- v23.3 FIX: раньше совпадение шло по подстроке — «покажи биту» содержало «пока», «nice to see you»
@@ -7322,7 +7362,7 @@ function lobFearRec(uid)
 end
 
 function lobSootheWords(m)
-    m = tostring(m or ""):lower()
+    m = lobLower(m)  -- v25.1 (A8): кириллица («МИР», «НЕ ТРОНУ» тоже добрые слова)
     for _, w in ipairs(_SOOTHE_WORDS) do
         if m:find(w, 1, true) then return true end
     end
@@ -10719,8 +10759,17 @@ Players.LocalPlayer:GetPropertyChangedSignal("DisplayName"):Connect(function()
     LOB_STATE._cachedMyDispLow = Players.LocalPlayer.DisplayName:lower()
 end)
 local function processChatMessage(player, rawMessage)
-    -- v24: МОД-ЛоАДЕР — событие "chat" (ходит ВСЕГДА, даже при выключенном боте)
-    if LOB_MODS and LOB_MODS.fire then pcall(LOB_MODS.fire, "chat", player, rawMessage) end
+    -- v24: МОД-ЛоАДЕР — событие "chat" (ходит ВСЕГДА, даже при выключенном боте).
+    -- v25.1 ФИКС (A11, отчёт Claude): событие теперь ПЕРЕХВАТ: третий аргумент ctx.
+    --   ctx.cancel = true  — сообщение не обрабатывается вовсе (игнор-лист, антифлуд)
+    --   ctx.text = "..."   — бот увидит изменённый текст (фильтр слов)
+    -- Старые подписки function(player, msg) работают без изменений.
+    do
+        local ctx = { player = player, text = rawMessage, cancel = false }
+        if LOB_MODS and LOB_MODS.fire then pcall(LOB_MODS.fire, "chat", player, rawMessage, ctx) end
+        if ctx.cancel then return end
+        if type(ctx.text) == "string" and ctx.text ~= rawMessage then rawMessage = ctx.text end
+    end
     local settings = ClientSettings
     
     -- [HARD DISABLE] Stop everything if disabled or silent
@@ -12335,15 +12384,25 @@ end
 --   lob.ui.setTexts{ {old=…, new=…}, … }    — менять тексты родного GUI (после
 --                                             пересборки темы применяются заново)
 --   lob.ui.addTheme(name, t) / setThemeColor(k, c) / rebuild() — темы GUI
---   lob.on("chat"|"botSay"|"action"|"tick"|"playerJoin"|"playerLeave"|
---          "uiRebuild"|"modsLoaded"|"modLoaded"|"libLoaded"|"libDefined", fn)
---   lob.every(сек, fn) / lob.delay(сек, fn) / lob.connect(signal, fn) — авто-очистка
---   lob.data() / lob.saveData()             — хранилище мода (LineOfBots/configs/data)
---   lob.notify(title, body) / lob.log(...)
+--   lob.on("chat"|"actionIntercept"|"botSay"|"action"|"tick"|"playerJoin"|"playerLeave"|
+--          "uiRebuild"|"modsLoaded"|"modLoaded"|"modUnloaded"|"modError"|"libLoaded"|"libDefined", fn)
+--      v25.1: "chat" и "actionIntercept" — ПЕРЕХВАТЫ (ctx.cancel/ctx.text/ctx.arg);
+--      "action" после выполнения (старое поведение сохранено)
+--   lob.every(сек, fn) / lob.delay(сек, fn) / lob.connect(signal, fn) — авто-очистка;
+--      v25.1: ошибки таймеров пишутся в журнал, после 5 сбоев подряд таймер останавливается
+--   lob.data() / lob.saveData()             — хранилище мода (LineOfBots/configs/data);
+--      v25.1: файлы данных исполняются в ПУСТОМ окружении — только данные, не код
+--   lob.notify(title, body) / lob.log(...) / lob.logExport()
+--   lob.fs.read/write/list / lob.http.request / lob.unsafe.{loadstring,hookfunction,getgenv}
+--      v25.1: доступ по правам lob.meta{permissions={"fs","net","keys","unsafe"}};
+--      файлы ключей lob_*key*.txt — только с правом "keys"
+--   lob.scope()                             — v25.1: контейнер ресурсов мода (destroy())
+--   lob.state = LOB_STATE                   — v25.1: 72 функции движка и всё состояние
 --   lob.hint(text) / lob.removeHint(text)     — подсказки в промпт ИИ (v24.5, официально)
 --   lob.ability(name, desc) / lob.say(text)   — способности бота + реплики в чат (v24.5)
 --   lob.version                               — версия кита для проверки совместимости (v24.5)
---   lob.onUnload(fn) / lob.onUIRebuild(fn)  — приборка при выгрузке/пересборке UI
+--   lob.onUnload(fn) / lob.onUIRebuild(fn)  — приборка при выгрузке/пересборке UI;
+--      v25.1: onUnload — СПИСОК (несколько обработчиков, LIFO)
 --   lob.loader                              — САМ МОД-ЛОАДЕР: чините/меняйте что угодно
 -- ═══════════════════════════════════════════════════════════════════════════
 LOB_UI = nil  -- публикуется createInterface() в конце сборки GUI (мост к локалам UI)
@@ -12361,6 +12420,10 @@ LOB_CORE = {
     Themes          = Themes,
     makeSystemPrompt = makeSystemPrompt,
     saveSettings    = saveSettings,
+    -- v25.1 (Q1, отчёт Claude «самый дешёвый большой выигрыш»): ПРЯМОЙ доступ модов
+    -- к 72 функциям движка и всему состоянию (LOB_STATE) БЕЗ hookfunction:
+    -- api.state.moveToPosition(...), api.state.lobSmartWalkStart() и т.д.
+    state           = LOB_STATE,
     -- v24.2: локали движка, нужные модам (иначе до них не добраться никак)
     sendChat        = sendChatMessage,       -- отправить реплику от имени бота
     processChat     = processChatMessage,    -- обработка входящего сообщения чата
@@ -12380,7 +12443,7 @@ LOB_MODS = {
     PENDING_FILE  = "mods_pending.txt",    -- «перезайдите»: желаемое состояние, применится при перезаходе
     METACACHE_FILE = "mods_meta.txt",      -- кэш меты модов (иконка/название/перезапуск) для выключенных
     EXAMPLE_FILE  = "example_mod.lua",
-    VERSION       = "v24.8",  -- v24.8: аудит умной ходьбы — 6 фиксов (полигон T7, 23/23)
+    VERSION       = LOB_VERSION,  -- v25.1 (A17): единый источник версии — раньше строка-литерал отставала от шапки
     mods          = {},   -- name -> handle мода
     order         = {},   -- порядок для GUI-списка
     logBuf        = {},   -- кольцевой лог (80 строк)
@@ -12393,6 +12456,8 @@ LOB_MODS = {
     libLoaded     = {},   -- v24.1: имя -> true (библиотека уже загружена)
     exports       = {},   -- v24.1: экспорт модов для api.require("имя мода")
     metaCache     = {},   -- v24.1: кэш меты по именам модов
+    patchChains   = {},   -- v25.1 (A16): ЕДИНЫЙ реестр цепочек патчей (имя → база + звенья)
+    logMax        = 500,  -- v25.1 (A13): размер кольцевого журнала (настраивается)
 }
 pcall(function() if getfenv then LOB_MODS.env = getfenv() or _G end end)
 
@@ -12401,8 +12466,17 @@ function LOB_MODS.log(...)
     for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end
     local msg = table.concat(parts, " ")
     table.insert(LOB_MODS.logBuf, os.date("%H:%M:%S") .. "  " .. msg)
-    if #LOB_MODS.logBuf > 80 then table.remove(LOB_MODS.logBuf, 1) end
+    -- v25.1 (A13, отчёт Claude): кольцо 80 → LOB_MODS.logMax (500 по умолчанию) —
+    -- шумный мод больше не вытесняет полезные записи за секунды
+    if #LOB_MODS.logBuf > (LOB_MODS.logMax or 500) then table.remove(LOB_MODS.logBuf, 1) end
     print("[MODS] " .. msg)
+end
+
+-- v25.1 (A13): выгрузка журнала в файл — api.logExport() или LOB_MODS.exportLog()
+function LOB_MODS.exportLog()
+    local ok = LOB_MODS.writeFile(LOB_MODS.CONFIGS .. "/lob_log.txt", table.concat(LOB_MODS.logBuf, "\n"))
+    if ok then LOB_MODS.log("журнал выгружен: configs/lob_log.txt") end
+    return ok
 end
 
 function LOB_MODS.notify(title, body)
@@ -12496,6 +12570,57 @@ function LOB_MODS.loadChunk(src, chunkname)
     return res, nil
 end
 
+-- v25.1 ФИКС (A2, отчёт Claude): файлы ДАННЫХ и кэш меты исполняются в ПУСТОМ
+-- окружении. БАГ ДО: loadChunk("return "..raw) выполнял чанк с ПОЛНЫМ окружением
+-- скрипта — файл вида `return game:GetService("HttpService"):...` исполнялся как
+-- код (и мог отправить что угодно наружу). Теперь в пустом окружении любой вызов
+-- глобала падает → данные считаются повреждёнными, бот не страдает.
+function LOB_MODS.execDataTable(src, chunkname)
+    local fn, err = LOB_MODS.loadChunk(src, chunkname)
+    if not fn then return nil, err end
+    pcall(function() if setfenv then setfenv(fn, {}) end end)
+    local ok, res = pcall(fn)
+    if ok and type(res) == "table" then return res, nil end
+    return nil, ok and "not-a-table" or tostring(res)
+end
+
+-- v25.1 (A14): неудовлетворённые зависимости мода — lob.meta{requires={"модA","libX"}}
+function LOB_MODS.depsMissing(meta)
+    local req = type(meta) == "table" and meta.requires
+    if type(req) ~= "table" then return nil end
+    local missing = {}
+    for _, dep in ipairs(req) do
+        dep = tostring(dep)
+        if LOB_MODS.exports[dep] == nil and LOB_MODS.libs[dep] == nil then
+            missing[#missing + 1] = dep
+        end
+    end
+    if #missing == 0 then return nil end
+    return missing
+end
+
+-- v25.1 (A16, отчёт Claude): ЕДИНЫЙ РЕЕСТР ЦЕПОЧЕК ПАТЧЕЙ.
+-- БАГ ДО: у каждого мода был свой стек «old» — выгрузка ПЕРВОГО из двух модов,
+-- патчивших одно имя, rawset'ом возвращала его «old», и патч второго мода молча
+-- умирал; стек второго мода потом поднимал мёртвую обёртку. Теперь цепочка одна
+-- на имя: выгрузка ЛЮБОГО звена пересобирает эффективную функцию из базы.
+function LOB_MODS.rebuildPatch(name)
+    local chain = LOB_MODS.patchChains[name]
+    if not chain then return end
+    local alive = {}
+    for _, l in ipairs(chain.links) do
+        if l.mod and l.mod.alive then alive[#alive + 1] = l end
+    end
+    chain.links = alive
+    local cur = chain.base
+    rawset(LOB_MODS.env, name, cur)
+    for _, l in ipairs(chain.links) do
+        cur = l.make(cur)
+        rawset(LOB_MODS.env, name, cur)
+    end
+    if #chain.links == 0 then LOB_MODS.patchChains[name] = nil end
+end
+
 -- v24.1: отключённые моды — configs/mods_disabled.txt (фолбэк-чтение старого _disabled.txt)
 function LOB_MODS.disabledSet()
     local set = {}
@@ -12555,11 +12680,10 @@ function LOB_MODS.loadMetaCache()
     LOB_MODS._metaCacheLoaded = true
     local raw = LOB_MODS.readFile(LOB_MODS.CONFIGS .. "/" .. LOB_MODS.METACACHE_FILE)
     if raw then
-        local fn = LOB_MODS.loadChunk(raw, "=metacache")  -- v24.6: было голое loadstring
-        if fn then
-            local ok, res = pcall(fn)
-            if ok and type(res) == "table" then LOB_MODS.metaCache = res end
-        end
+        -- v25.1 (A2): кэш меты — только данные, пустое окружение (раньше — полный _G)
+        local res, err = LOB_MODS.execDataTable(raw, "=metacache")
+        if res then LOB_MODS.metaCache = res
+        elseif err then LOB_MODS.log("metacache: повреждённые данные (" .. tostring(err) .. ")") end
     end
 end
 
@@ -12586,6 +12710,30 @@ function LOB_MODS.fire(event, ...)
     end
 end
 
+-- v25.1 (A10, отчёт Claude): ПЕРЕИГРЫВАНИЕ СПЕКИ UI. После пересборки GUI
+-- (смена темы/размера) все add* мода восстанавливаются сами — вкладки больше
+-- не пустеют. Вызовы идут в исходном порядке через mod.api.ui (флаг
+-- _replaying не даёт спеке разрастись).
+function LOB_MODS.uiReplaySpec(mod)
+    local spec = mod and mod.uiSpec
+    if not (spec and #spec > 0 and mod.api and mod.api.ui) then return end
+    mod._replaying = true
+    for _, e in ipairs(spec) do
+        pcall(function()
+            local ui = mod.api.ui
+            if e.k == "section" then ui.addSection(e.tab, e.title, e.sub)
+            elseif e.k == "label" then ui.addLabel(e.tab, e.text)
+            elseif e.k == "toggle" then ui.addToggle(e.tab, e.sec, e.label, e.desc, e.initial, e.cb)
+            elseif e.k == "button" then ui.addButton(e.tab, e.sec, e.text, e.cb)
+            elseif e.k == "slider" then ui.addSlider(e.tab, e.sec, e.label, e.desc, e.min, e.max, e.value, e.cb)
+            elseif e.k == "dropdown" then ui.addDropdown(e.tab, e.sec, e.label, e.desc, e.values, e.default, e.cb)
+            elseif e.k == "textbox" then ui.addTextbox(e.tab, e.sec, e.label, e.desc, e.ph, e.cb)
+            end
+        end)
+    end
+    mod._replaying = false
+end
+
 -- Пересборка UI (смена темы/размера): пересоздаём вкладки модов и зовём их onUIRebuild
 function LOB_MODS.handleRebuild()
     for name, mod in pairs(LOB_MODS.mods) do
@@ -12593,6 +12741,8 @@ function LOB_MODS.handleRebuild()
             for _, tabName in ipairs(mod.tabs) do
                 pcall(LOB_MODS.uiEnsureTab, mod, tabName, mod.tabIcons and mod.tabIcons[tabName])
             end
+            -- v25.1 (A10): переигрываем спеку add* — вкладка НЕ пустеет
+            pcall(LOB_MODS.uiReplaySpec, mod)
             -- v24.1: повторно применяем замену текстов мода после пересборки GUI
             pcall(LOB_MODS.uiApplyTexts, mod)
             if type(mod.rebuildFn) == "function" then
@@ -12838,50 +12988,67 @@ function LOB_MODS.makeAPI(mod)
         rawset(LOB_MODS.env, name, value)
         return value
     end
+    -- v25.1 (A16): общая регистрация звена цепочки для patch/override
+    local function chainLink(name, make)
+        name = tostring(name)
+        local chain = LOB_MODS.patchChains[name]
+        if not chain then
+            chain = { base = LOB_MODS.env[name], links = {} }
+            LOB_MODS.patchChains[name] = chain
+        end
+        table.insert(chain.links, { mod = mod, make = make })
+        mod.patchedNames = mod.patchedNames or {}
+        mod.patchedNames[name] = true
+        LOB_MODS.rebuildPatch(name)
+        return chain.base
+    end
     -- заменить функцию скрипта целиком (исправление багов)
     function api.override(name, fn)
-        local old = LOB_MODS.env[name]
-        mod.patches[name] = mod.patches[name] or {}
-        table.insert(mod.patches[name], old)
-        -- v24.6 ФИКС: замена тоже fail-safe (тот же класс аварий, что api.hook до v24.5):
-        -- ошибка внутри замены мода не летит в ядро — журнал с именем мода,
-        -- прозрачный вызов оригинала
-        local safeFn = function(...)
-            local args = table.pack(...)
-            local okO, res = pcall(function() return table.pack(fn(table.unpack(args, 1, args.n))) end)
-            if okO then return table.unpack(res, 1, res.n) end
-            LOB_MODS.log("[" .. mod.name .. "] override '" .. tostring(name) .. "' ERROR (работает оригинал): " .. tostring(res))
-            if type(old) == "function" then return old(table.unpack(args, 1, args.n)) end
-            return nil
+        -- v25.1 (A16): через единую цепочку — выгрузка соседа по имени не ломает
+        -- этот override (fail-safe v24.6 сохранён: ошибка мода → работает оригинал)
+        local make = function(oldFn)
+            return function(...)
+                local args = table.pack(...)
+                local okO, res = pcall(function() return table.pack(fn(table.unpack(args, 1, args.n))) end)
+                if okO then return table.unpack(res, 1, res.n) end
+                LOB_MODS.log("[" .. mod.name .. "] override '" .. tostring(name) .. "' ERROR (работает оригинал): " .. tostring(res))
+                if type(oldFn) == "function" then return oldFn(table.unpack(args, 1, args.n)) end
+                return nil
+            end
         end
-        rawset(LOB_MODS.env, name, safeFn)
+        local base = chainLink(name, make)
         LOB_MODS.log(mod.name .. ": override → " .. tostring(name))
-        return old
+        return base
     end
     -- обернуть функцию скрипта: wrapper(old, ...) → результат
     function api.patch(name, wrapper)
-        local old = LOB_MODS.env[name]
-        -- v24.6 ФИКС: fail-safe обёртка — ошибка мода внутри wrapper пишется в журнал
-        -- С ИМЕНЕМ МОДА, вызов прозрачно уходит в оригинал (раньше падало на каждом вызове)
-        local newFn = function(...)
-            local args = table.pack(...)
-            local okP, res = pcall(function() return table.pack(wrapper(old, table.unpack(args, 1, args.n))) end)
-            if okP then return table.unpack(res, 1, res.n) end
-            LOB_MODS.log("[" .. mod.name .. "] patch '" .. tostring(name) .. "' ERROR (работает оригинал): " .. tostring(res))
-            if type(old) == "function" then return old(table.unpack(args, 1, args.n)) end
-            return nil
+        -- v25.1 (A16): через единую цепочку (fail-safe v24.6 сохранён)
+        local make = function(oldFn)
+            return function(...)
+                local args = table.pack(...)
+                local okP, res = pcall(function() return table.pack(wrapper(oldFn, table.unpack(args, 1, args.n))) end)
+                if okP then return table.unpack(res, 1, res.n) end
+                LOB_MODS.log("[" .. mod.name .. "] patch '" .. tostring(name) .. "' ERROR (работает оригинал): " .. tostring(res))
+                if type(oldFn) == "function" then return oldFn(table.unpack(args, 1, args.n)) end
+                return nil
+            end
         end
-        mod.patches[name] = mod.patches[name] or {}
-        table.insert(mod.patches[name], old)
-        rawset(LOB_MODS.env, name, newFn)
+        local base = chainLink(name, make)
         LOB_MODS.log(mod.name .. ": patch → " .. tostring(name))
-        return old
+        return base
     end
     function api.restore(name)
-        local stack = mod.patches[name]
-        if stack and #stack > 0 then
-            rawset(LOB_MODS.env, name, table.remove(stack))
-            return true
+        -- v25.1 (A16): снимает ПОСЛЕДНЕЕ звено ЭТОГО мода и пересобирает цепочку
+        name = tostring(name)
+        local chain = LOB_MODS.patchChains[name]
+        if not chain then return false end
+        for i = #chain.links, 1, -1 do
+            if chain.links[i].mod == mod then
+                table.remove(chain.links, i)
+                LOB_MODS.rebuildPatch(name)
+                mod.patchedNames[name] = nil
+                return true
+            end
         end
         return false
     end
@@ -12896,18 +13063,71 @@ function LOB_MODS.makeAPI(mod)
 
     -- ══ СОБЫТИЯ ══
     function api.on(event, fn) LOB_MODS.apiOn(mod, event, fn) end
-    function api.onUnload(fn) if type(fn) == "function" then mod.unloadFn = fn end end
+    -- v25.1 (A5, отчёт Claude): onUnload — СПИСОК, а не один слот. БАГ ДО: второй
+    -- вызов api.onUnload ЗАТИРАЛ первый — библиотеки не могли навесить свою уборку.
+    -- Возвращает handle { off = ... } для снятия. Выполняются в обратном порядке.
+    function api.onUnload(fn)
+        if type(fn) ~= "function" then return nil end
+        mod.unloadFns = mod.unloadFns or {}
+        table.insert(mod.unloadFns, fn)
+        return { off = function()
+            for i = #mod.unloadFns, 1, -1 do
+                if mod.unloadFns[i] == fn then table.remove(mod.unloadFns, i) break end
+            end
+        end }
+    end
     function api.onUIRebuild(fn) if type(fn) == "function" then mod.rebuildFn = fn end end
+    -- v25.1 (A5): контейнер ресурсов мода — всё, что в нём зарегистрировано,
+    -- чистится одним sc.destroy() (и самим лоадером при выгрузке)
+    function api.scope()
+        local sc = { alive = true, conns = {}, insts = {}, fns = {} }
+        function sc.on(signal, fn)
+            if type(fn) ~= "function" or signal == nil then return nil end
+            local okC, c = pcall(function() return signal:Connect(fn) end)
+            if okC and c then table.insert(sc.conns, c) end
+            return c
+        end
+        function sc.instance(o) table.insert(sc.insts, o) return o end
+        function sc.cleanup(fn) if type(fn) == "function" then table.insert(sc.fns, fn) end end
+        function sc.destroy()
+            if not sc.alive then return end
+            sc.alive = false
+            for i = #sc.fns, 1, -1 do pcall(sc.fns[i]) end
+            for i = #sc.conns, 1, -1 do pcall(function() if sc.conns[i] then sc.conns[i]:Disconnect() end end) end
+            for i = #sc.insts, 1, -1 do pcall(function() if sc.insts[i] and sc.insts[i].Parent then sc.insts[i]:Destroy() end end) end
+        end
+        mod.scopes = mod.scopes or {}
+        table.insert(mod.scopes, sc)
+        return sc
+    end
 
     -- ══ ТАЙМЕРЫ И СВЯЗИ (авто-очистка при выгрузке) ══
+    -- v25.1 (A4, отчёт Claude): ошибки таймера БОЛЬШЕ НЕ ИСЧЕЗАЮТ: пишутся в журнал
+    -- (не чаще раза в 10с на таймер), после 5 СБОЕВ ПОДРЯД таймер останавливается
+    -- с уведомлением. БАГ ДО: сломанный таймер молча вызывался вечно.
     function api.every(sec, fn)
         if type(fn) ~= "function" then return nil end  -- v24.6: битый колбэк не спамит журнал каждый тик
         sec = math.max(tonumber(sec) or 1, 0.05)
+        local fails, lastLogAt = 0, 0
         local th = task.spawn(function()
             while mod.alive do
                 task.wait(sec)
                 if not mod.alive then break end
-                pcall(fn)
+                local okE, errE = pcall(fn)
+                if not okE then
+                    fails = fails + 1
+                    if os.clock() - lastLogAt > 10 then
+                        lastLogAt = os.clock()
+                        LOB_MODS.log("[" .. mod.name .. "] every(" .. tostring(sec) .. "): " .. tostring(errE) .. " (сбоев подряд: " .. fails .. ")")
+                    end
+                    if fails >= 5 then
+                        LOB_MODS.log("[" .. mod.name .. "] every(" .. tostring(sec) .. "): ОСТАНОВЛЕН после 5 сбоев подряд")
+                        pcall(function() if LOB_MODS.notify then LOB_MODS.notify("Мод: " .. mod.name, "Таймер every(" .. tostring(sec) .. "с) остановлен после 5 сбоев") end end)
+                        break
+                    end
+                else
+                    fails = 0
+                end
             end
         end)
         table.insert(mod.timers, th)
@@ -12916,7 +13136,10 @@ function LOB_MODS.makeAPI(mod)
     function api.delay(sec, fn)
         if type(fn) ~= "function" then return nil end  -- v24.6
         local th = task.delay(tonumber(sec) or 0, function()
-            if mod.alive then pcall(fn) end
+            if not mod.alive then return end
+            -- v25.1 (A4): ошибка delay теперь видна в журнале (раньше исчезала без следа)
+            local okD, errD = pcall(fn)
+            if not okD then LOB_MODS.log("[" .. mod.name .. "] delay(" .. tostring(sec) .. "): " .. tostring(errD)) end
         end)
         table.insert(mod.timers, th)
         return th
@@ -12944,11 +13167,11 @@ function LOB_MODS.makeAPI(mod)
             local raw = LOB_MODS.readFile(LOB_MODS.CONFIGS .. "/data/" .. mod.name .. ".data")
             if not raw then raw = LOB_MODS.readFile(mod.path .. ".data") end  -- фолбэк v24
             if raw then
-                local fn = LOB_MODS.loadChunk("return " .. raw, "=moddata")  -- v24.6: было голое loadstring
-                if fn then
-                    local ok, res = pcall(fn)
-                    if ok and type(res) == "table" then mod.store = res end
-                end
+                -- v25.1 (A2): хранилище мода — только данные, пустое окружение.
+                -- БАГ ДО: `return game:GetService(...)...` в файле данных ИСПОЛНЯЛСЯ.
+                local res, err = LOB_MODS.execDataTable("return " .. raw, "=moddata")
+                if res then mod.store = res
+                elseif err then LOB_MODS.log("[" .. mod.name .. "] data: повреждённые данные (" .. tostring(err) .. ") — старт с пустым хранилищем") end
             end
         end
         return mod.store
@@ -12964,6 +13187,21 @@ function LOB_MODS.makeAPI(mod)
     end
 
     -- ══ UI (вкладки/секции/элементы — в любые вкладки, даже родные) ══
+    -- v25.1 (A10, отчёт Claude): каждый add* пишется в ДЕКЛАРАТИВНУЮ СПЕКУ мода
+    -- (mod.uiSpec) и ПЕРЕИГРЫВАЕТСЯ после пересборки GUI (смена темы/размера).
+    -- БАГ ДО: вкладки модов после пересборки пустели — элементы нигде не хранились,
+    -- мод обязан был пересоздавать всё сам в onUIRebuild.
+    local function recSpec(entry)
+        if not mod._replaying then
+            mod.uiSpec = mod.uiSpec or {}
+            entry.id = #mod.uiSpec + 1
+            mod.uiSpec[entry.id] = entry
+        end
+        return entry.id
+    end
+    local function tagRow(row, id)
+        if row and id then pcall(function() row:SetAttribute("LobSpecId", id) end) end
+    end
     local uiAPI = {}
     function uiAPI.bridge() return LOB_MODS.bridge() end
     function uiAPI.tabExists(tabName)
@@ -12977,19 +13215,23 @@ function LOB_MODS.makeAPI(mod)
         if b then pcall(b.switchTab, tostring(tabName)) end
     end
     function uiAPI.addSection(tabName, title, subtitle)
+        recSpec({ k = "section", tab = tostring(tabName or ""), title = tostring(title or ""), sub = subtitle and tostring(subtitle) or nil })
         return LOB_MODS.uiSection(mod, tabName, title, subtitle)
     end
     function uiAPI.addLabel(tabName, text)
+        local id = recSpec({ k = "label", tab = tostring(tabName or ""), text = tostring(text or "") })
         local b = LOB_MODS.bridge()
         local scroll = LOB_MODS.uiEnsureTab(mod, tabName)
         if not (b and scroll) then return nil end
         local lbl = b.makeTextLabel(scroll, tostring(text), 13, "medium")
         lbl.TextColor3 = THEME.TextDim
         lbl.Size = UDim2.new(1, -8, 0, 18)
+        tagRow(lbl, id)
         table.insert(mod.instances, lbl)
         return lbl
     end
     function uiAPI.addToggle(tabName, sectionTitle, label, desc, initial, cb)
+        local id = recSpec({ k = "toggle", tab = tostring(tabName or ""), sec = sectionTitle and tostring(sectionTitle) or nil, label = tostring(label or ""), desc = desc and tostring(desc) or nil, initial = initial and true or false, cb = cb })
         local b = LOB_MODS.bridge()
         local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
         if not (b and content) then return nil end
@@ -12999,10 +13241,12 @@ function LOB_MODS.makeAPI(mod)
                 if cb then local okC, errC = pcall(cb, v) if not okC then LOB_MODS.log("[" .. mod.name .. "] toggle: " .. tostring(errC)) end end
             end)
         if not okR then return nil end
+        tagRow(row, id)
         table.insert(mod.instances, row)
         return row
     end
     function uiAPI.addButton(tabName, sectionTitle, text, cb)
+        local id = recSpec({ k = "button", tab = tostring(tabName or ""), sec = sectionTitle and tostring(sectionTitle) or nil, text = tostring(text or ""), cb = cb })
         local b = LOB_MODS.bridge()
         local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
         if not (b and content) then return nil end
@@ -13011,10 +13255,12 @@ function LOB_MODS.makeAPI(mod)
         if cb then
             btn.MouseButton1Click:Connect(function() pcall(cb) end)
         end
+        tagRow(btn, id)
         table.insert(mod.instances, btn)
         return btn
     end
     function uiAPI.addSlider(tabName, sectionTitle, label, desc, minVal, maxVal, value, cb)
+        local id = recSpec({ k = "slider", tab = tostring(tabName or ""), sec = sectionTitle and tostring(sectionTitle) or nil, label = tostring(label or ""), desc = desc and tostring(desc) or nil, min = tonumber(minVal) or 0, max = tonumber(maxVal) or 100, value = tonumber(value) or 0, cb = cb })
         local b = LOB_MODS.bridge()
         local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
         if not (b and content) then return nil end
@@ -13023,10 +13269,12 @@ function LOB_MODS.makeAPI(mod)
                 if cb then local okC, errC = pcall(cb, v) if not okC then LOB_MODS.log("[" .. mod.name .. "] slider: " .. tostring(errC)) end end
             end)
         if not okS then return nil end
+        tagRow(row, id)
         table.insert(mod.instances, row)
         return row
     end
     function uiAPI.addDropdown(tabName, sectionTitle, label, desc, values, default, cb)
+        local id = recSpec({ k = "dropdown", tab = tostring(tabName or ""), sec = sectionTitle and tostring(sectionTitle) or nil, label = tostring(label or ""), desc = desc and tostring(desc) or nil, values = values, default = default, cb = cb })
         local b = LOB_MODS.bridge()
         local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
         if not (b and content) then return nil end
@@ -13037,10 +13285,12 @@ function LOB_MODS.makeAPI(mod)
                 if cb then local okC, errC = pcall(cb, v) if not okC then LOB_MODS.log("[" .. mod.name .. "] dropdown: " .. tostring(errC)) end end
             end)
         if okD and dd and dd.Frame then pcall(function() dd.Frame.Size = UDim2.new(1, 0, 1, 0) end) end
+        tagRow(row, id)
         table.insert(mod.instances, row)
         return row
     end
     function uiAPI.addTextbox(tabName, sectionTitle, label, desc, placeholder, cb)
+        local id = recSpec({ k = "textbox", tab = tostring(tabName or ""), sec = sectionTitle and tostring(sectionTitle) or nil, label = tostring(label or ""), desc = desc and tostring(desc) or nil, ph = placeholder and tostring(placeholder) or nil, cb = cb })
         local b = LOB_MODS.bridge()
         local content = LOB_MODS.uiSection(mod, tabName, sectionTitle, "Изменено модом: " .. mod.name)
         if not (b and content) then return nil end
@@ -13054,6 +13304,7 @@ function LOB_MODS.makeAPI(mod)
                 pcall(cb, box.Text)
             end)
         end
+        tagRow(row, id)
         table.insert(mod.instances, row)
         return row
     end
@@ -13063,6 +13314,9 @@ function LOB_MODS.makeAPI(mod)
             for i, ins in ipairs(mod.instances) do
                 if ins == rowInstance then table.remove(mod.instances, i) break end
             end
+            -- v25.1 (A10): строка убирается и из спеки — переигрывание её не воскресит
+            local okA, sid = pcall(function() return rowInstance:GetAttribute("LobSpecId") end)
+            if okA and sid and mod.uiSpec and mod.uiSpec[sid] then mod.uiSpec[sid] = nil end
         end
     end
     -- ══ v24.1: ТЕКСТЫ, ФРЕЙМЫ, ТЕМЫ — менять родной GUI как угодно ══
@@ -13153,9 +13407,12 @@ function LOB_MODS.makeAPI(mod)
     function api.meta(tbl)
         if type(tbl) ~= "table" then return mod.meta end
         for k, v in pairs(tbl) do mod.meta[k] = v end
-        -- кэш: чтобы иконка/название были видны даже когда мод выключен
+        -- кэш: чтобы иконка/название/зависимости были видны даже когда мод выключен.
+        -- v25.1 (A1/A14): в мете живут права (permissions), зависимости (requires)
+        -- и минимальная версия кита (apiVersion) — все кэшируются.
         local cached = {}
-        for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin" }) do
+        for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin",
+                             "requires", "apiVersion", "id", "version" }) do
             cached[k] = mod.meta[k]
         end
         LOB_MODS.metaCache[mod.name] = cached
@@ -13181,27 +13438,53 @@ function LOB_MODS.makeAPI(mod)
         -- хук автоматически снимается, вызов прозрачно уходит в оригинал — ядро не страдает.
         -- Конвенция документации §6.8 теперь работает ПО-НАСТОЯЩЕМУ: replacement(оригинал, ...аргументы).
         -- Совместимость: если документированный вызов упал, пробуется старый replacement(...аргументы).
+        -- v25.1 ФИКС (A3, отчёт Claude): ОРИГИНАЛ ВЫПОЛНЯЕТСЯ РОВНО ОДИН РАЗ.
+        -- БАГ ДО: ошибка мода ПОСЛЕ old(...) вела к повторам — пробовалась вторая
+        -- конвенция replacement(...), затем снимался хук и оригинал вызывался ЗАНОВО:
+        -- одна ошибка мода = 2-3 дубля реплики/тега/записи в историю. Теперь old
+        -- передаётся моду через «сторожа»: если оригинал уже выполнился, при ошибке
+        -- возвращается СОХРАНЁННЫЙ результат (новых вызовов нет — ни мода, ни оригинала).
         local safeReplacement
         local origRef = nil
         safeReplacement = function(...)
             local args = table.pack(...)
             if origRef then
-                -- 1) документированная конвенция: первый аргумент — оригинал
+                local calledOrig, lastOK = false, nil
+                local guarded = function(...)
+                    calledOrig = true
+                    local packArgs = table.pack(...)
+                    local okO, r = pcall(function()
+                        return table.pack(origRef(table.unpack(packArgs, 1, packArgs.n)))
+                    end)
+                    if okO then lastOK = r; return table.unpack(r, 1, r.n) end
+                    -- оригинал упал внутри replacement — наружу пойдёт ошибка replacement,
+                    -- здесь возвращаем nil (дублей всё равно не делаем)
+                end
+                -- 1) документированная конвенция: replacement(оригинал-сторож, ...)
                 local okR, res = pcall(function()
-                    return table.pack(replacement(origRef, table.unpack(args, 1, args.n)))
+                    return table.pack(replacement(guarded, table.unpack(args, 1, args.n)))
                 end)
                 if okR then return table.unpack(res, 1, res.n) end
-                -- 2) старая (сырая) конвенция без оригинала — совместимость со старыми модами
-                local okL, resL = pcall(function()
-                    return table.pack(replacement(table.unpack(args, 1, args.n)))
-                end)
-                if okL then return table.unpack(resL, 1, resL.n) end
-                -- 3) обе попытки упали → журнал + уведомление + автоснятие хука + оригинал
-                LOB_MODS.log("[" .. mod.name .. "] hook ERROR (хук снят, работает оригинал): " .. tostring(resL))
+                -- 2) старая (сырая) конвенция без оригинала — ТОЛЬКО если оригинал ещё
+                -- не выполнялся (иначе это уже повтор!)
+                if not calledOrig then
+                    local okL, resL = pcall(function()
+                        return table.pack(replacement(table.unpack(args, 1, args.n)))
+                    end)
+                    if okL then return table.unpack(resL, 1, resL.n) end
+                end
+                -- 3) обе попытки не удались → журнал + уведомление + автоснятие хука
+                LOB_MODS.log("[" .. mod.name .. "] hook ERROR (хук снят): " .. tostring(res))
                 pcall(function()
                     if LOB_MODS.notify then LOB_MODS.notify("Мод: " .. mod.name, "Ошибка в api.hook — хук снят, бот работает как без мода") end
                 end)
                 pcall(hf, safeReplacement, origRef)  -- авто-откат: target снова ведёт себя как оригинал
+                if calledOrig then
+                    -- v25.1: оригинал УЖЕ выполнился (и вернул результат) — НЕ дублируем
+                    if lastOK then return table.unpack(lastOK, 1, lastOK.n) end
+                    return nil
+                end
+                -- оригинал ещё не выполнялся — прозрачный вызов (ровно один)
                 return origRef(table.unpack(args, 1, args.n))
             end
             -- origRef ещё не присвоен (hookfunction не вернулся) — крайне редкий путь
@@ -13220,10 +13503,120 @@ function LOB_MODS.makeAPI(mod)
         return orig
     end
 
+    -- ══ v25.1 (A1, отчёт Claude): ПРАВА МОДА ══
+    -- lob.meta{permissions={"fs","net","keys","unsafe","all"}} выдаёт права:
+    --   fs     — api.fs (чтение/запись файлов, кроме файлов КЛЮЧЕЙ)
+    --   net    — api.http.request (сеть)
+    --   keys   — чтение configs/lob_*key*.txt (НЕ выдавай без нужды!)
+    --   unsafe — api.unsafe (loadstring/hookfunction/getgenv/…)
+    -- Прямые опасные глобалы в окружении мода ЗАПРЕЩЕНЫ по умолчанию (см. loadOne).
+    -- Старое поведение: lob.meta{legacyEnv=true}.
+    local PERMISSIONS = { fs = true, net = true, keys = true, unsafe = true, all = true }
+    mod._perm = function(p)
+        if not PERMISSIONS[p] then return false end
+        local perms = mod.meta and mod.meta.permissions
+        if type(perms) == "table" then
+            for _, x in ipairs(perms) do if x == p or x == "all" then return true end end
+        end
+        return false
+    end
+    function api.hasPerm(p) return mod._perm(p) end
+
+    -- ══ v25.1 (A1): файлы — только через api.fs с правом "fs" ══
+    local fsAPI = {}
+    local function keyFilePath(p)
+        return tostring(p or ""):lower():find("lob_[%w_]*key", 1, false) ~= nil
+    end
+    function fsAPI.list(dir)
+        if not mod._perm("fs") then return nil end
+        local ok, res = pcall(listfiles, tostring(dir or LOB_MODS.FOLDER))
+        return (ok and type(res) == "table") and res or nil
+    end
+    function fsAPI.read(path)
+        if not mod._perm("fs") then
+            LOB_MODS.log("[" .. mod.name .. "] fs.read запрещён — нет права \"fs\"")
+            return nil
+        end
+        -- v25.1: файлы КЛЮЧЕЙ API не отдаём без отдельного права "keys"
+        if keyFilePath(path) and not mod._perm("keys") then
+            LOB_MODS.log("[" .. mod.name .. "] fs.read запрещён — файл ключей, нужно право \"keys\"")
+            return nil
+        end
+        return LOB_MODS.readFile(tostring(path or ""))
+    end
+    function fsAPI.write(path, content)
+        if not mod._perm("fs") then
+            LOB_MODS.log("[" .. mod.name .. "] fs.write запрещён — нет права \"fs\"")
+            return false
+        end
+        if keyFilePath(path) and not mod._perm("keys") then
+            LOB_MODS.log("[" .. mod.name .. "] fs.write запрещён — файл ключей, нужно право \"keys\"")
+            return false
+        end
+        return LOB_MODS.writeFile(tostring(path or ""), content)
+    end
+    api.fs = fsAPI
+
+    -- ══ v25.1 (A1): сеть — только через api.http с правом "net" ══
+    api.http = {
+        request = function(opts)
+            if not mod._perm("net") then
+                LOB_MODS.log("[" .. mod.name .. "] http.request запрещён — нет права \"net\" (lob.meta{permissions={\"net\"}})")
+                return nil, nil, "permission-denied"
+            end
+            return lobHttpRequest(opts)
+        end,
+    }
+
+    -- ══ v25.1 (A1): опасное — только через api.unsafe с правом "unsafe" ══
+    api.unsafe = {
+        loadstring = function(src, name)
+            if not mod._perm("unsafe") then LOB_MODS.log("[" .. mod.name .. "] unsafe.loadstring запрещён") return nil end
+            return LOB_MODS.loadChunk(tostring(src or ""), tostring(name or "=@unsafe"))
+        end,
+        hookfunction = function(target, repl)
+            if not mod._perm("unsafe") then LOB_MODS.log("[" .. mod.name .. "] unsafe.hookfunction запрещён") return nil end
+            local hf = hookfunction or hookfunc
+            if type(hf) ~= "function" then return nil end
+            local okH, res = pcall(hf, target, repl)
+            return okH and res or nil
+        end,
+        getgenv = function()
+            if not mod._perm("unsafe") then return nil end
+            return (type(getgenv) == "function") and getgenv() or _G
+        end,
+    }
+
+    -- ══ v25.1 (A9, отчёт Claude): api.core.ACTION_HANDLERS ПОД НАБЛЮДЕНИЕМ ══
+    -- Замена/добавление тега через api.core запоминает прежнее значение и откатывается
+    -- при выгрузке мода (раньше §6.9 честно предупреждал: «родной тег не вернётся»).
+    -- Прямая запись в глобал LOB_CORE не отслеживается — используй api.core.
+    local ahProxy = setmetatable({}, {
+        __index = LOB_CORE.ACTION_HANDLERS,
+        __newindex = function(_, k, v)
+            if mod.savedHandlers[k] == nil then
+                mod.savedHandlers[k] = LOB_CORE.ACTION_HANDLERS[k] or false  -- false = родного не было
+            end
+            mod.ownActions[k] = true
+            LOB_CORE.ACTION_HANDLERS[k] = v
+        end,
+    })
+    local coreProxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "ACTION_HANDLERS" then return ahProxy end
+            return LOB_CORE[k]
+        end,
+        __newindex = function(_, k, v)
+            if k == "ACTION_HANDLERS" and type(v) ~= "table" then LOB_CORE[k] = v return end
+            rawset(LOB_CORE, k, v)
+        end,
+    })
+
     -- ══ v24.1: МОСТ К ЯДРУ + ПРЯМЫЕ ССЫЛКИ ══
-    -- core.ACTION_HANDLERS (добавить/заменить [DO:тег]), core.Themes, core.makeSystemPrompt,
-    -- core.saveSettings, core.smartWalk, core.SW, core.rel — см. LOB_CORE в коде скрипта
-    api.core     = LOB_CORE
+    -- core.ACTION_HANDLERS (добавить/заменить [DO:тег] — с откатом при выгрузке),
+    -- core.state (v25.1: 72 функции движка и всё состояние), core.Themes,
+    -- core.makeSystemPrompt, core.saveSettings, core.smartWalk, core.SW, core.rel
+    api.core     = coreProxy
     api.settings = ClientSettings  -- прямая ссылка: менять любые ключи настроек
 
     -- ══ v24.1: СВОЙ [DO:ТЕГ] — обработчик + подсказка для ИИ ══
@@ -13360,6 +13753,8 @@ function LOB_MODS.makeAPI(mod)
     function api.log(...)
         LOB_MODS.log("[" .. mod.name .. "]", ...)
     end
+    -- v25.1 (A13): выгрузить журнал лоадера в configs/lob_log.txt
+    function api.logExport() return LOB_MODS.exportLog() end
     function api.notify(title, body)
         LOB_MODS.notify(tostring(title or "Мод") .. " — " .. mod.name, body)
     end
@@ -13367,7 +13762,7 @@ function LOB_MODS.makeAPI(mod)
 end
 
 -- ── ЗАГРУЗКА / ВЫГРУЗКА ────────────────────────────────────────────────────
-function LOB_MODS.loadOne(path, preDisabled)
+function LOB_MODS.loadOne(path, preDisabled, registerOnly)
     local fname = path:match("([^/\\]+)$") or path
     local base = fname:gsub("%.[^%.]*$", "")
     if LOB_MODS.mods[base] then LOB_MODS.unloadOne(base, true) end
@@ -13376,7 +13771,10 @@ function LOB_MODS.loadOne(path, preDisabled)
         status = preDisabled and "отключён" or "загрузка…", err = nil,
         conns = {}, timers = {}, instances = {}, patches = {}, tabs = {}, tabIcons = {},
         sections = {}, events = {}, store = {}, storeLoaded = false,
-        unloadFn = nil, rebuildFn = nil, loadedAt = os.clock(),
+        unloadFn = nil, unloadFns = {}, scopes = {}, patchedNames = {},  -- v25.1: A5/A16
+        uiSpec = {}, _replaying = false, api = nil,                      -- v25.1: A10 (спека UI)
+        waitingDeps = nil,                                               -- v25.1: A14
+        loadedAt = os.clock(),
         meta = {}, ownActions = {}, ownHints = {}, ownAbilities = {}, hooks = {}, textPatches = {},  -- v24.1 + ownAbilities v24.5
         savedHandlers = {},  -- v24.6: родные [DO:обработчики], снятые модом — возвращаются при выгрузке
     }
@@ -13391,6 +13789,32 @@ function LOB_MODS.loadOne(path, preDisabled)
     LOB_MODS.mods[base] = mod
     table.insert(LOB_MODS.order, base)
     if preDisabled then return mod end
+    if registerOnly then
+        -- v25.1 (A14): регистрация БЕЗ выполнения — мод «ожидает» зависимости
+        mod.status = "ожидает"
+        return mod
+    end
+    -- v25.1 (A14): гейт apiVersion ДО выполнения (по кэшу меты прошлой загрузки).
+    -- Мод, требующий более новый кит, не запускается с понятным статусом вместо
+    -- падения посреди chunk'а.
+    do
+        local av = mod.meta and mod.meta.apiVersion
+        if av and LOB_MODS.VERSION then
+            local function vn(v)
+                local a, b, c = tostring(v or ""):match("v?(%d+)%.(%d+)%.?(%d*)")
+                return tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0
+            end
+            local ma, mb, mc = vn(LOB_MODS.VERSION)
+            local na, nb, nc = vn(av)
+            if na > ma or (na == ma and nb > mb) or (na == ma and nb == mb and nc > mc) then
+                mod.status, mod.err = "старый кит",
+                    "моду нужен лоадер " .. tostring(av) .. " (сейчас " .. tostring(LOB_MODS.VERSION) .. ")"
+                LOB_MODS.log(mod.name .. ": " .. mod.err)
+                if LOB_MODS.fire then pcall(LOB_MODS.fire, "modError", base, mod.err) end
+                return mod
+            end
+        end
+    end
     local src = LOB_MODS.readFile(path)
     if not src then
         mod.status, mod.err = "ошибка", "файл не читается"
@@ -13401,28 +13825,83 @@ function LOB_MODS.loadOne(path, preDisabled)
     if not chunk then
         mod.status, mod.err = "ошибка синтаксиса", tostring(lerr)
         LOB_MODS.log("СИНТАКСИС " .. base .. ": " .. tostring(lerr))
+        if LOB_MODS.fire then pcall(LOB_MODS.fire, "modError", base, tostring(lerr)) end  -- v25.1 (A7)
         return mod
     end
     local api = LOB_MODS.makeAPI(mod)
-    -- окружение мода: читает все глобалы скрипта; присвоение глобала = правка скрипта
-    pcall(setfenv, chunk, setmetatable({ lob = api, api = api }, {
-        __index = LOB_MODS.env,
-        __newindex = function(_, k, v) rawset(LOB_MODS.env, k, v) end,
-    }))
+    mod.api = api  -- v25.1 (A10): спека UI переигрывается через mod.api.ui.*
+    -- v25.1 (A1, отчёт Claude): ОКРУЖЕНИЕ МОДА — ПЕСОЧНИЦА ПО УМОЛЧАНИЮ.
+    -- БАГ ДО: окружение с __index = _G отдавало моду ВСЁ (readfile/writefile/request/
+    -- loadstring/hookfunction/getgenv/debug) — любой файл в mods/ читал файлы ключей
+    -- и мог отправить их наружу, а опечатка в глобале молча портила бота.
+    -- Теперь: опасные глобалы не видны напрямую (только api.fs/api.http/api.unsafe
+    -- с правами из lob.meta{permissions={...}}), присвоение глобала из мода попадает
+    -- в ПРИВАТНУЮ таблицу мода (в _G — через api.set или lob.meta{legacyGlobals=true}).
+    -- Обратная совместимость: lob.meta{legacyEnv=true} возвращает старое поведение.
+    do
+        local privateGlobals = {}
+        local DENY = {
+            readfile = "fs", writefile = "fs", appendfile = "fs", delfile = "fs",
+            delfolder = "fs", listfiles = "fs", makefolder = "fs", isfolder = "fs",
+            loadstring = "unsafe", load = "unsafe", request = "net", http_request = "net",
+            syn = "unsafe", http = "net", fluxus = "net",
+            getgenv = "unsafe", hookfunction = "unsafe", hookfunc = "unsafe",
+            getfenv = "unsafe", setfenv = "unsafe", getgc = "unsafe", debug = "unsafe",
+            setclipboard = "unsafe", identifyexecutor = "unsafe",
+        }
+        local deniedWarned = {}
+        local function legacyMode()
+            local m = mod.meta or {}
+            return m.legacyEnv == true or m.legacyGlobals == true
+        end
+        local env = setmetatable({ lob = api, api = api }, {
+            __index = function(_, k)
+                if legacyMode() then return LOB_MODS.env[k] end
+                local need = DENY[k]
+                if need and not mod._perm(need) then
+                    if not deniedWarned[k] then
+                        deniedWarned[k] = true
+                        LOB_MODS.log("[" .. mod.name .. "] доступ «" .. tostring(k) ..
+                            "» запрещён — выдай право (lob.meta{permissions={\"" .. need ..
+                            "\"}}) или используй api.fs/api.http/api.unsafe")
+                    end
+                    return nil
+                end
+                return LOB_MODS.env[k]
+            end,
+            __newindex = function(_, k, v)
+                if legacyMode() then
+                    rawset(LOB_MODS.env, k, v)
+                else
+                    -- v25.1: глобал мода живёт в приватной таблице (бот не сломан опечаткой);
+                    -- в _G — только api.set или lob.meta{legacyGlobals=true}
+                    privateGlobals[k] = v
+                end
+            end,
+        })
+        mod.privateGlobals = privateGlobals
+        pcall(setfenv, chunk, env)
+    end
     local ok, res = pcall(chunk, api)
     if ok then
         if type(res) == "table" then
-            if type(res.onUnload) == "function" then mod.unloadFn = res.onUnload end
+            -- v25.1 (A5): return { onUnload = ... } ДОБАВЛЯЕТСЯ в список (не затирает)
+            if type(res.onUnload) == "function" then
+                mod.unloadFns = mod.unloadFns or {}
+                table.insert(mod.unloadFns, res.onUnload)
+            end
             if type(res.onUIRebuild) == "function" then mod.rebuildFn = res.onUIRebuild end
             -- v24.1: мета можно вернуть и таблицей: return { title=…, icon=…, instant=false }
             local src = rawget(res, "meta")
             if type(src) ~= "table" then src = res end
-            for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin" }) do
+            for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin",
+                                 "requires", "apiVersion", "id", "version" }) do
                 local v = rawget(src, k)
                 if v ~= nil then mod.meta[k] = v end
             end
             local cached = {}
-            for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin" }) do
+            for _, k in ipairs({ "title", "icon", "description", "instant", "requiresRejoin",
+                                 "requires", "apiVersion", "id", "version" }) do
                 cached[k] = mod.meta[k]
             end
             LOB_MODS.metaCache[base] = cached
@@ -13436,6 +13915,8 @@ function LOB_MODS.loadOne(path, preDisabled)
         mod.status, mod.err = "ошибка", tostring(res)
         LOB_MODS.log("ОШИБКА мода " .. base .. ": " .. tostring(res))
         LOB_MODS.notify("Ошибка мода: " .. base, tostring(res):sub(1, 120))
+        -- v25.1 (A7): событие ошибки мода (было в списке отсутствующих у отчёта Claude)
+        if LOB_MODS.fire then pcall(LOB_MODS.fire, "modError", base, tostring(res)) end
     end
     LOB_MODS.refreshGUI()
     return mod
@@ -13445,7 +13926,22 @@ function LOB_MODS.unloadOne(name, silent)
     local mod = LOB_MODS.mods[name]
     if not mod then return false end
     mod.alive = false
-    pcall(function() if mod.unloadFn then mod.unloadFn() end end)
+    -- v25.1 (A5): уборка — список unloadFns в ОБРАТНОМ порядке, каждый под pcall
+    -- (баг-до: один слот, второй api.onUnload затирал первый)
+    if mod.unloadFns then
+        for i = #mod.unloadFns, 1, -1 do
+            pcall(mod.unloadFns[i])
+        end
+        mod.unloadFns = {}
+    end
+    pcall(function() if mod.unloadFn then mod.unloadFn() end end)  -- legacy-слот (старые моды)
+    -- v25.1 (A5): уничтожаем scope-контейнеры мода
+    if mod.scopes then
+        for i = #mod.scopes, 1, -1 do
+            pcall(function() if mod.scopes[i] then mod.scopes[i].destroy() end end)
+        end
+        mod.scopes = {}
+    end
     for i = #mod.timers, 1, -1 do pcall(task.cancel, mod.timers[i]) end
     for i = #mod.conns, 1, -1 do
         pcall(function() if mod.conns[i] then mod.conns[i]:Disconnect() end end)
@@ -13509,9 +14005,20 @@ function LOB_MODS.unloadOne(name, silent)
             ClientSettings._sysPromptBuilt = nil
         end
     end
-    -- откат патчей (в обратном порядке)
-    for fname, stack in pairs(mod.patches) do
-        while #stack > 0 do rawset(LOB_MODS.env, fname, table.remove(stack)) end
+    -- v25.1 (A16): откат патчей через ЕДИНУЮ цепочку — выгрузка любого звена
+    -- пересобирает эффективную функцию из базы (раньше откат первого мода ломал
+    -- патчи второго, патчившего то же имя)
+    do
+        local touched = 0
+        for fname in pairs(mod.patchedNames or {}) do
+            if LOB_MODS.patchChains[fname] then
+                LOB_MODS.rebuildPatch(fname)
+                touched = touched + 1
+            end
+        end
+        if touched > 0 then LOB_MODS.log("[" .. tostring(name) .. "] откачено патчей: " .. touched) end
+        mod.patchedNames = {}
+        mod.patches = {}
     end
     -- v24.2: вернуть тексты родного GUI, заменённые модом (мгновенный тоггл — чисто)
     pcall(LOB_MODS.uiRevertTexts, mod)
@@ -13535,6 +14042,14 @@ function LOB_MODS.unloadOne(name, silent)
     for i, n in ipairs(LOB_MODS.order) do
         if n == name then table.remove(LOB_MODS.order, i) break end
     end
+    -- v25.1 (A6, отчёт Claude): экспорты выгруженного мода УДАЛЯЮТСЯ.
+    -- БАГ ДО: LOB_MODS.exports[имя] жил вечно — api.require отдавал «зомби»-таблицу
+    -- функций мёртвого мода. Событие modUnloaded уведомляет зависимых.
+    if LOB_MODS.exports[name] then
+        LOB_MODS.exports[name] = nil
+        LOB_MODS.log("[" .. tostring(name) .. "] экспорты сняты (api.require больше не отдаёт)")
+    end
+    LOB_MODS.fire("modUnloaded", name)
     if not silent then
         LOB_MODS.log("мод выгружен: " .. tostring(name))
         LOB_MODS.refreshGUI()
@@ -13624,6 +14139,11 @@ function LOB_MODS.loadAll()
     local count = 0
     if files then
         table.sort(files)
+        -- v25.1 (A14, отчёт Claude): ДВУХПРОХОДНАЯ ЗАГРУЗКА вместо слепого алфавитного
+        -- порядка. Моды с lob.meta{requires={...}} из кэша меты прошлой загрузки идут
+        -- во ВТОРОЙ проход — к тому моменту их зависимости уже загружены. Мод с
+        -- недоступной зависимостью регистрируется со статусом «ожидает», не падая молча.
+        local deferred = {}
         for _, path in ipairs(files) do
             local fname = path:match("([^/\\]+)$") or path
             local base = fname:gsub("%.[^%.]*$", "")
@@ -13634,9 +14154,27 @@ function LOB_MODS.loadAll()
                 if disabled[base] then
                     LOB_MODS.loadOne(path, true)  -- зарегистрировать как «отключён»
                 else
-                    LOB_MODS.loadOne(path)
-                    count = count + 1
+                    local miss = LOB_MODS.depsMissing(LOB_MODS.metaCache[base])
+                    if miss then
+                        deferred[#deferred + 1] = { path = path, base = base, miss = miss }
+                    else
+                        LOB_MODS.loadOne(path)
+                        count = count + 1
+                    end
                 end
+            end
+        end
+        -- второй проход: зависимости могли появиться после первого
+        for _, d in ipairs(deferred) do
+            local miss = LOB_MODS.depsMissing(LOB_MODS.metaCache[d.base])
+            if miss then
+                local m = LOB_MODS.loadOne(d.path, nil, true)
+                if m then m.status, m.err = "ожидает", "нет: " .. table.concat(miss, ", ") end
+                LOB_MODS.log(d.base .. ": статус «ожидает» — зависимости: " .. table.concat(miss, ", "))
+                LOB_MODS.fire("modError", d.base, "ожидает зависимости: " .. table.concat(miss, ", "))
+            else
+                LOB_MODS.loadOne(d.path)
+                count = count + 1
             end
         end
     end
@@ -13649,25 +14187,36 @@ function LOB_MODS.loadAll()
 end
 
 -- ── ПРИМЕР МОДА (создаётся в папке модов) ──────────────────────────────────
-LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v24.7)
+LOB_MODS.EXAMPLE_SRC = [==[--[[  ПРИМЕР МОДА  LineOfBots  (v25.1)
   Кладите свои моды (.lua) в папку  LineOfBots/mods  рядом с инжектором.
   Общие библиотеки — в  LineOfBots/libs  (api.lib("имя файла")).
   Управление — вкладка «Моды»: иконка, название, тоггл вкл/выкл.
   Мод с ошибкой синтаксиса НЕ запустится и не уронит бот — ошибка будет в журнале.
   Файл можно удалить или переименовать с «_» в начале — мод отключится.
-  Мод получает API через глобал lob (или аргументом: return function(lob) ... end).  ]]
+  Мод получает API через глобал lob (или аргументом: return function(lob) ... end).
+
+  ПЕСОЧНИЦА (v25.1): мод видит api.*, api.core, api.settings и общие глобалы,
+  но опасные вещи (файлы/сеть/хуки) — ТОЛЬКО через api.fs/api.http/api.unsafe
+  с правами из lob.meta{permissions={...}}. Прямое присвоение глобала пишет
+  в приватную таблицу мода (в _G — через api.set). Старое поведение целиком:
+  lob.meta{legacyEnv=true}.  ]]
 
 local api = lob or (...)  -- lob — API мода; (...) — тот же API аргументом чанка (запасной путь)
 
--- ── 0. МЕТА МОДА: иконка, название, описание, поведение тоггла ──────────────
+-- ── 0. МЕТА МОДА: иконка, название, описание, права, поведение тоггла ───────
 -- По умолчанию тоггл «Модов» мгновенно выгружает/загружает мод (всё созданное
 -- модом убирается автоматически). Если моду нужен перезапуск игры:
 --   instant = false  или  requiresRejoin = true  → покажет «перезайдите…».
+-- ПРАВА (v25.1): permissions = {"fs","net","keys","unsafe"} — файлы, сеть,
+-- чтение ключей, опасные функции. apiVersion = минимальный кит, requires =
+-- имена модов/библиотек, которые должны быть загружены раньше этого мода.
 lob.meta{
     title       = "Пример мода",
     icon        = "🧩",                -- эмодзи ИЛИ "rbxassetid://123456"
     description = "Демонстрация 100% контроля над LineOfBots",
     instant     = true,                -- true = вкл/выкл без перезахода
+    -- permissions = { "fs" },     -- раскомментируй, если моду нужен api.fs
+    -- apiVersion  = "v25.1",      -- мод не запустится на более старом ките
 }
 
 api.log("пример мода запущен!")
@@ -14016,7 +14565,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v24.8 · Kit 4", 10, "semibold")  -- v24.8: видимый маркер сборки в GUI (аудит умной ходьбы)
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, tostring(LOB_VERSION or "v25.1") .. " · Kit " .. tostring(LOB_KIT or 6), 10, "semibold")  -- v25.1 (A17): версия из константы — раньше литерал отставал (в v25.0 показывал «v24.8 · Kit 4»)
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
