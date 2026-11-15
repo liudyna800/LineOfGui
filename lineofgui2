@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         LINEOFBOTS v24.8  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
+-- ║         LINEOFBOTS v25.0  —  ОГЛАВЛЕНИЕ / FILE MAP                  ║
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
@@ -221,7 +221,7 @@
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v24.8 LOADED")  -- v24.8: аудита умной ходьбы — 6 фиксов (ложное «уйди», pending при «уйди», threat-бан партнёра, MIN_STAY при переключении, «передумал» в winddown, «уйди» сквозь фокус)
+print("LOB VERSION: v25.0 LOADED")  -- v25.0: мега-умная ходьба — бегство без пинг-понга (обязательство курса 16×3 кандидатов, re-arm, отдышка), лестничная походка (плотные точки, без среза углов, без прыжков в потолок), осмысленное блуждание (курс+анти-реверс+тесные комнаты)
 
 -- ═══ v24.1: ЕДИНАЯ ПАПКА «LineOfBots» В ПАПКЕ ИНЖЕКТОРА ════════════════════
 -- Всё, что скрипт хранит на диске, живёт здесь:
@@ -3509,14 +3509,22 @@ LOB_STATE.moveToPosition = function(targetPos, followMode)
 
     local PathfindingService = game:GetService("PathfindingService")
     local ok = pcall(function()
-        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5 })
+        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4 })
         path:ComputeAsync(root.Position, targetPos)
         if path.Status == Enum.PathStatus.Success then
+            local rpM = RaycastParams.new()
+            rpM.FilterType = Enum.RaycastFilterType.Exclude
+            rpM.FilterDescendantsInstances = { Players.LocalPlayer.Character }
             for _, wp in ipairs(path:GetWaypoints()) do
                 if followMode and not _isFollowing then break end
                 if not followMode and not _isGoing then break end
+                -- v25: прыжок по маршруту — только при свободном потолке
+                -- (арки/низкие своды больше не «бодаем» головой)
                 if wp.Action == Enum.PathWaypointAction.Jump then
-                    humanoid.Jump = true
+                    local rC = getLocalRootPart()
+                    if rC and not workspace:Raycast(rC.Position, Vector3.new(0, 6, 0), rpM) then
+                        humanoid.Jump = true
+                    end
                 end
                 humanoid:MoveTo(wp.Position)
                 -- Таймаут 2с вместо 3с + проверка флагов каждые 0.1с
@@ -3529,7 +3537,25 @@ LOB_STATE.moveToPosition = function(targetPos, followMode)
                     task.wait(0.1); waited2 = waited2 + 0.1
                 end
                 pcall(function() conn2:Disconnect() end)
-                if not arrived then break end
+                if not arrived then
+                    -- v25 FIX: раньше здесь был break — бот ЗАМИРАЛ на середине
+                    -- маршрута (особенно на ступеньках, где MoveTo дольше обычного).
+                    -- Один потолок-безопасный прыжок + ещё 1.5с: типичное
+                    -- «зацепился за ступеньку» — и идём дальше по маршруту.
+                    local rJ = getLocalRootPart()
+                    if rJ and not workspace:Raycast(rJ.Position, Vector3.new(0, 6, 0), rpM) then
+                        pcall(function() humanoid.Jump = true end)
+                    end
+                    pcall(function() humanoid:MoveTo(wp.Position) end)
+                    local waited3 = 0
+                    while not arrived and waited3 < 1.5 do
+                        if followMode and not _isFollowing then break end
+                        if not followMode and not _isGoing then break end
+                        task.wait(0.1); waited3 = waited3 + 0.1
+                    end
+                    pcall(function() conn2:Disconnect() end)
+                    if not arrived then break end
+                end
             end
         else
             humanoid:MoveTo(targetPos)
@@ -6750,6 +6776,29 @@ _SW = {
     SWITCH_SOFT_CD = 45,   -- после одного вежливого перехода минимум столько до следующего (анти-кружение)
     HOLD_LINE_CD   = 60,   -- не чаще этого говорим партнёру «секунду» при переключении
     CHAT_LEASH     = 18,   -- с ЖИВЫМ собеседником подходим заново только если он отошёл дальше этого
+    -- ── v25: МЕГА-УМНАЯ ХОДЬБА (бегство без пинг-понга, ступеньки, осмысленное блуждание) ──
+    FLEE_REARM_R   = 14,   -- повторная паника от ТОГО ЖЕ врага: только если он подошёл ближе этого
+    FLEE_REARM_SEC = 18,   -- ...или прошло столько секунд после конца отхода (обычная бдительность)
+    FLEE_CHASE_SPD = 8,    -- враг сближается быстрее (студ/с) — паника немедленно (погоня)
+    FLEE_MAXSEC    = 6,    -- секунд на один заход отхода (было 0.7 — бот дёргался каждые полшага)
+    FLEE_COMMIT_R  = 4,    -- точку отхода не меняем, пока не дошли/не провалились (анти-дёрганье)
+    FLEE_MOMENTUM  = 8,    -- бонус направлению «по курсу бегства» (не разворачиваемся на 180°)
+    FLEE_REVERSE_PEN = 55, -- штраф точке рядом с прошлой точкой отхода («туда-сюда» запрещено)
+    SETTLE_TIME    = 8,    -- после отхода «отдышка»: стоим, осматриваемся, не суетимся
+    SETTLE_WATCH_R = 13,   -- во время отдышки враг ближе этого — снова отход
+    EVADE_MIN_INT  = 2.5,  -- мин пауза между боковыми шагами от настороженного (анти «лево-право»)
+    EVADE_CLOSE    = 8,    -- боковый шаг: враг ближе этого ИЛИ реально идёт на нас
+    STAIR_WP       = 2.5,  -- плотные точки пути на лестнице (закруглённые ступени не срезаем)
+    STAIR_ARRIVE   = 1.8,  -- порог прибытия на точку пути на лестнице (было 3.5 — срезал ступени)
+    STAIR_SLOW     = 0.8,  -- скорость ×0.8 на лестнице (меньше соскальзываний, живой вид)
+    STAIR_RISE     = 0.35, -- подъём пола между соседними точками пути = «лестница»
+    STAIR_PATIENCE = 3.2,  -- терпение на точку пути на лестнице (было 2.0)
+    CEIL_CLEAR     = 6,    -- прыжок только если над головой столько свободы (арки/потолки не бодаем)
+    WANDER_CONT    = 8,    -- бонус блужданию «по курсу» (анти-шатание туда-сюда)
+    WANDER_REVPEN  = 28,   -- штраф блужданию «обратно» (разворот >135°)
+    ROOM_SIZE      = 22,   -- «тесное помещение»: кандидаты ближе этого → режим «пожить тут»
+    DWELL_MIN      = 2.5,  -- в тесном помещении живём на точке дольше (осматриваемся)
+    DWELL_MAX      = 6,    -- верх той же паузы
 }
 
 function lobSmartWalkNoteChat(userId, name)
@@ -7407,21 +7456,29 @@ function lobSmartDangerScan(radius)
 end
 
 -- Не стоять вплотную к опасному: короткий шаг в более открытую сторону. true — сделали шаг.
+-- v25: анти-дёрганье — боковой шаг только если враг реально близко ИЛИ надвигается;
+-- между шагами пауза EVADE_MIN_INT, сторона держится несколько шагов подряд
+-- (лечит «бот пляшет лево-право у стоящего страшного игрока»).
 function lobSmartEvadeDanger(now)
     now = now or os.clock()
     local gw = _smartWalk
     if (gw.fleeUntil or 0) > now then return false end
     -- только РЕАЛЬНАЯ угроза (ALERT): от «лёгкой» настороженности бот бы только дёргался
-    local cand, _, cscore = lobSmartDangerScan(_SW.SWD_CLOSE)
+    local cand, cd, cscore = lobSmartDangerScan(_SW.SWD_CLOSE)
     local threat = (cand and (cscore or 0) >= _SW.SWD_ALERT) and cand or nil
     if not threat then return false end
     local root = getLocalRootPart()
     local hum = getLocalHumanoid()
     local tr = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
     if not root or not hum or not tr then return false end
+    -- v25: стоящий страшный на дистанции — повод СЛЕДИТЬ, а не плясать
+    local agg = 0
+    pcall(function() agg = lobSightAggression(threat, root, now) end)
+    if (cd or 0) > _SW.EVADE_CLOSE and agg < 0.3 then return false end
     gw.avoid[threat.UserId] = now + _SW.AVOID_SEC
     if gw.target and gw.target.UserId == threat.UserId then gw.target = nil gw.targetSince = 0 end
     pcall(lobSmartMarkDanger, tr.Position)
+    gw.fleeWatchPos = tr.Position  -- v25: куда смотрим во время «отдышки»
     -- во время разговора не стоим рядом с угрозой: вежливо сворачиваемся.
     -- v24.8 FIX: помечаем ПРИЧИНУ сворачивания — раньше winddown от ПОСТОРОННЕЙ
     -- угрозы завершался баном ПАРТНЁРА на RETURN_CD_TALK (180с), хотя он ни при чём.
@@ -7431,8 +7488,8 @@ function lobSmartEvadeDanger(now)
         gw.windReason = "threat"
         gw.windReengaged = true  -- угроза рядом: возврат к разговору не отменяет отход
     end
-    if (now - (gw.caughtAt or 0)) < 1.0 then return true end
-    gw.caughtAt = now
+    if (now - (gw.evadeAt or 0)) < _SW.EVADE_MIN_INT then return true end
+    gw.evadeAt = now
     local away = Vector3.new(root.Position.X - tr.Position.X, 0, root.Position.Z - tr.Position.Z)
     if away.Magnitude < 0.1 then away = root.CFrame.LookVector * -1 end
     local base = away.Unit
@@ -7450,9 +7507,14 @@ function lobSmartEvadeDanger(now)
     if (hitL and not hitR) then
         dir = right
     elseif (hitL and hitR) then
-        -- обе стороны заняты — шагаем назад со смещением по памяти
-        dir = base + root.CFrame.RightVector * (gw.offsetSide or 1)
-        gw.offsetSide = -(gw.offsetSide or 1)
+        -- обе стороны заняты — шагаем назад со смещением; сторона держится
+        -- несколько шагов подряд (v25: анти «лево-право-лево»)
+        gw.evadeStreak = (gw.evadeStreak or 0) + 1
+        if gw.evadeStreak >= 3 then
+            gw.evadeStreak = 0
+            gw.evadeSide = -(gw.evadeSide or 1)
+        end
+        dir = base + root.CFrame.RightVector * (gw.evadeSide or 1)
     end
     pcall(function() hum:MoveTo(root.Position + dir.Unit * _SW.SWD_STEP) end)
     return true
@@ -7565,24 +7627,30 @@ function lobSmartDangerLine(p)
     if okQ then runChatQueue(qk) end
 end
 
--- Отойти от врага (точка в сторону от него, с проверкой земли)
--- Отход от врага: PATHFINDING (сам обходит стены) с переоценкой маршрута
--- каждые ~0.7с; выбираем свободное направление рейкастами, если пути нет —
--- аварийное прямое движение вбок/прыжок.
+-- Отход от врага v25: ПАНИКА С ОБЯЗАТЕЛЬСТВОМ КУРСА.
+-- Один раз выбираем ТОЧКУ ОТХОДА (16 направлений × 3 дальности; открытость,
+-- даль от врага, «к своим»/«от чужих врагов», память «откуда убежали»), затем
+-- ИДЁМ К НЕЙ ДО КОНЦА (подход до 6с) — старый код пересматривал маршрут каждые
+-- ~0.7с и дёргался «туда-сюда» по комнате. Если в замкнутом помещении путь не
+-- нашёлся ни к одному кандидату — пробуем ДАЛЬНИЕ точки за стеной: pathfinding
+-- сам выведет к выходу/двери. Совсем ничего — короткий шаг в свободную сторону;
+-- прыжок только при свободном потолке. После отхода главный цикл ставит
+-- «отдышку» (settleUntil): стоим и следим, а не блуждаем туда-сюда.
 function lobSmartFlee(threat)
     local PathfindingService = game:GetService("PathfindingService")
-    local hum = getLocalHumanoid()
-    local char = Players.LocalPlayer.Character
-    if not hum or not char then return end
+    local gw = _smartWalk
+    gw.fleeing = true  -- v25: threatAbort не должен прерывать само бегство
     local t0 = os.clock()
     local stepAngle = math.random() * 360  -- меняется при неудаче, чтобы обходить угол
-    while os.clock() - t0 < 2.5 and (_smartWalk.fleeUntil or 0) > os.clock() do
-        local root = getLocalRootPart()
+    while os.clock() - t0 < 12 and (gw.fleeUntil or 0) > os.clock() do
+        local char = Players.LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
         local tr = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
-        if not root or not tr then break end
+        if not hum or not root or not tr then break end
         local away = root.Position - tr.Position
         away = Vector3.new(away.X, 0, away.Z)
-        if away.Magnitude > _SW.FLEE_RADIUS + 4 then break end
+        if away.Magnitude > _SW.FLEE_RADIUS + 6 then break end
         if away.Magnitude < 1 then away = root.CFrame.LookVector * -1 end
         local base = away.Unit
 
@@ -7590,101 +7658,112 @@ function lobSmartFlee(threat)
         rp.FilterType = Enum.RaycastFilterType.Exclude
         rp.FilterDescendantsInstances = { char }
 
-        -- КАНДИДАТЫ «куда отойти»: 8 сторон, приземляем, оцениваем открытость,
-        -- прямую видимость и даль от врага. Затем идём к ДОСТИЖИМОМУ кандидату.
-        local cands = {}
-        for i = 0, 7 do
-            local dir = CFrame.Angles(0, math.rad(i * 45), 0) * base
-            local g = workspace:Raycast(root.Position + dir * _SW.FLEE_DIST + Vector3.new(0, 60, 0),
-                Vector3.new(0, -120, 0), rp)
-            if g and g.Position then
-                local gp = g.Position
-                local open = 0
-                for _, a2 in ipairs({ 0, 90, 180, 270 }) do
-                    local d2 = CFrame.Angles(0, math.rad(a2), 0) * Vector3.new(1, 0, 0)
-                    if not workspace:Raycast(gp + Vector3.new(0, 3, 0), d2 * 8, rp) then open = open + 1 end
-                end
-                local losClear = not workspace:Raycast(root.Position + Vector3.new(0, 3, 0), gp - root.Position, rp)
-                local score = (gp - tr.Position).Magnitude + open * 6 + (losClear and 10 or 0)
-                if lobSmartInDangerZone(gp) then score = score - 120 end
-                table.insert(cands, { pos = gp, score = score })
-            end
-        end
-        -- штраф кандидатам, ведущим в сторону ДРУГИХ врагов
-        do
-            local others = {}
-            for _, q in ipairs(Players:GetPlayers()) do
-                if q ~= Players.LocalPlayer and q ~= threat and q.Character then
-                    local qr = q.Character:FindFirstChild("HumanoidRootPart")
-                    if qr then
-                        local ok, th = pcall(lobSmartIsThreat, q)
-                        if ok and th then table.insert(others, qr.Position) end
-                    end
-                end
-            end
-            if #others > 0 then
-                for _, c in ipairs(cands) do
-                    for _, op in ipairs(others) do
-                        if (c.pos - op).Magnitude < _SW.OTHER_ENEMY_R then c.score = c.score - 40 end
-                    end
-                end
-            end
-        end
-        -- v23: БОНУС «К СВОИМ» — кандидаты в сторону мирных игроков безопаснее:
-        -- толпа своих = свидетели/помощь, бегать в пустоту где второй враг — хуже
-        do
-            local allies = {}
-            for _, q in ipairs(Players:GetPlayers()) do
-                if q ~= Players.LocalPlayer and q ~= threat and q.Character then
-                    local qr = q.Character:FindFirstChild("HumanoidRootPart")
-                    if qr then
-                        local okQ2, th2 = pcall(lobSmartIsThreat, q)
-                        if (not okQ2) or (not th2) then table.insert(allies, qr.Position) end
-                    end
-                end
-            end
-            if #allies > 0 then
-                for _, c in ipairs(cands) do
-                    local bonus = 0
-                    for _, ap in ipairs(allies) do
-                        if (c.pos - ap).Magnitude < 30 then
-                            bonus = bonus + 6
-                            if bonus >= 18 then break end
-                        end
-                    end
-                    c.score = c.score + math.min(18, bonus)
-                end
-            end
-        end
-        table.sort(cands, function(a, b) return a.score > b.score end)
-
-        local chosen = nil
-        local reachable = false
-        for k = 1, math.min(3, #cands) do
-            local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
-            local ok = pcall(function() path:ComputeAsync(root.Position, cands[k].pos) end)
-            if ok and path.Status == Enum.PathStatus.Success then chosen = cands[k].pos reachable = true break end
-        end
-
-        local p0 = root.Position
-        local res = "nopath"
-        if reachable and chosen then
-            _smartWalk.fleeDest = chosen
-            res = lobSmartApproach(function() return _smartWalk.fleeDest end, function()
-                if not _smartWalk.active then return true end
-                if (_smartWalk.fleeUntil or 0) <= os.clock() then return true end
+        -- ОБЯЗАТЕЛЬСТВО: пока точка отхода жива и не взята — не пересматриваем маршрут
+        if gw.fleeDest and (root.Position - gw.fleeDest).Magnitude > _SW.FLEE_COMMIT_R then
+            local res = lobSmartApproach(function() return gw.fleeDest end, function()
+                if not gw.active then return true end
+                if (gw.fleeUntil or 0) <= os.clock() then return true end
                 local r = getLocalRootPart()
                 local t2 = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
-                if r and t2 and (r.Position - t2.Position).Magnitude > _SW.FLEE_RADIUS + 5 then return true end
+                if r and t2 and (r.Position - t2.Position).Magnitude > _SW.FLEE_RADIUS + 6 then return true end
                 return false
-            end, 4, 0.7)
+            end, 4, _SW.FLEE_MAXSEC)
+            if res == "nopath" or res == "stuck" or res == "fail" or res == "arrived" then
+                gw.fleeDest = nil  -- дошли или провалились — следующая итерация выберет заново
+            elseif res == "cancelled" then
+                break  -- время паники кончилось
+            end
+        else
+            gw.fleeDest = nil
+            -- ВЫБОР ТОЧКИ ОТХОДА: 16 направлений × 3 дальности, без дубликатов
+            local others, allies = {}, {}
+            for _, q in ipairs(Players:GetPlayers()) do
+                if q ~= Players.LocalPlayer and q ~= threat and q.Character then
+                    local qr = q.Character:FindFirstChild("HumanoidRootPart")
+                    if qr then
+                        local okT, th2 = pcall(lobSmartIsThreat, q)
+                        if okT and th2 then table.insert(others, qr.Position)
+                        else table.insert(allies, qr.Position) end
+                    end
+                end
+            end
+            local cands = {}
+            for i = 0, 15 do
+                local ang = i * (math.pi / 8)
+                local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
+                for _, fd in ipairs({ _SW.FLEE_DIST, math.floor(_SW.FLEE_DIST * 0.65), 14 }) do
+                    local g = workspace:Raycast(root.Position + dir * fd + Vector3.new(0, 60, 0),
+                        Vector3.new(0, -120, 0), rp)
+                    if g and g.Position then
+                        local gp = g.Position
+                        local dup = false
+                        for _, c in ipairs(cands) do
+                            if (c.pos - gp).Magnitude < 6 then dup = true break end
+                        end
+                        if not dup then
+                            local open = 0
+                            for _, a2 in ipairs({ 0, 90, 180, 270 }) do
+                                local d2 = CFrame.Angles(0, math.rad(a2), 0) * Vector3.new(1, 0, 0)
+                                if not workspace:Raycast(gp + Vector3.new(0, 3, 0), d2 * 8, rp) then open = open + 1 end
+                            end
+                            local losClear = not workspace:Raycast(root.Position + Vector3.new(0, 3, 0), gp - root.Position, rp)
+                            local score = (gp - tr.Position).Magnitude + open * 4 + (losClear and 8 or 0)
+                            if lobSmartInDangerZone(gp) then score = score - 120 end
+                            if gw.fleePrevDest and (gp - gw.fleePrevDest).Magnitude < 12 then
+                                score = score - _SW.FLEE_REVERSE_PEN  -- не гоняем «туда-сюда»
+                            end
+                            if gw.fleeDir and dir:Dot(gw.fleeDir) > 0.5 then
+                                score = score + _SW.FLEE_MOMENTUM  -- держим курс бегства
+                            end
+                            for _, op in ipairs(others) do
+                                if (gp - op).Magnitude < _SW.OTHER_ENEMY_R then score = score - 40 break end
+                            end
+                            local ab = 0
+                            for _, ap in ipairs(allies) do
+                                if (gp - ap).Magnitude < 30 then
+                                    ab = ab + 6
+                                    if ab >= 18 then break end
+                                end
+                            end
+                            score = score + math.min(18, ab)
+                            table.insert(cands, { pos = gp, score = score })
+                        end
+                    end
+                end
+            end
+            table.sort(cands, function(a, b) return a.score > b.score end)
+
+            -- путь к лучшим 5 кандидатам; если ни один не берётся (замкнутое
+            -- помещение) — ДАЛЬНЯЯ точка за стеной: pathfinding выведет к выходу
+            local chosen = nil
+            for k = 1, math.min(5, #cands) do
+                local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4 })
+                local ok = pcall(function() path:ComputeAsync(root.Position, cands[k].pos) end)
+                if ok and path.Status == Enum.PathStatus.Success then chosen = cands[k].pos break end
+            end
+            if not chosen then
+                for i = 0, 15 do
+                    local ang = i * (math.pi / 8)
+                    local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
+                    local gp = root.Position + dir * 55
+                    local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
+                    local ok = pcall(function() path:ComputeAsync(root.Position, gp) end)
+                    if ok and path.Status == Enum.PathStatus.Success then chosen = gp break end
+                end
+            end
+            if chosen then
+                gw.fleeDest = chosen
+                gw.fleePrevDest = chosen
+                local fd = chosen - root.Position
+                fd = Vector3.new(fd.X, 0, fd.Z)
+                gw.fleeDir = (fd.Magnitude > 0.1) and fd.Unit or nil
+            end
         end
 
-        local r2 = getLocalRootPart()
-        local moved = r2 and (r2.Position - p0).Magnitude or 0
-        if (not reachable) or res == "nopath" or res == "stuck" or res == "fail" or (moved < 0.25 and res ~= "arrived") then
-            -- путь не найден/не двигаемся: КОРОТКИЙ шаг в самую свободную сторону,
-            -- угол обхода поворачивается с каждой неудачей
+        -- НИЧЕГО НЕ ВЫБРАЛОСЬ: короткий шаг в самую свободную сторону (угол
+        -- поиска поворачивается с каждой неудачей); прыжок только при свободном
+        -- потолке — «бодание» в арку выглядит глупо и застревает
+        if not gw.fleeDest then
             local bestDir, bestScore = nil, -1e9
             for k = 0, 11 do
                 local d = CFrame.Angles(0, math.rad(k * 30 + stepAngle), 0) * base
@@ -7695,13 +7774,16 @@ function lobSmartFlee(threat)
             end
             stepAngle = stepAngle + 47
             if bestDir then
-                pcall(function() hum:MoveTo(root.Position + bestDir * 10) end)
-            else
+                pcall(function() hum:MoveTo(root.Position + bestDir.Unit * 10) end)
+            end
+            if not workspace:Raycast(root.Position, Vector3.new(0, _SW.CEIL_CLEAR, 0), rp) then
                 pcall(function() hum.Jump = true end)
             end
             task.wait(0.2)
         end
     end
+    gw.fleeDest = nil
+    gw.fleeing = false
 end
 
 -- Выбор лучшего собеседника: свежесть чата, близость, спокойствие, взгляд в нашу сторону
@@ -7905,6 +7987,20 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
     local t0 = os.clock()
     local lastPos, stuckTicks = nil, 0
     local jitter = nil  -- боковое смещение цели после упора в стену (пробуем другой маршрут)
+    -- v25: ЛЕСТНИЧНАЯ ПОХОДКА. Лестницу/пандус проходим плотно по точкам пути,
+    -- без срезания углов и без прыжковых «боданий»; скорость чуть ниже —
+    -- закруглённые ступени больше не «стопорят» бота.
+    local stair = false
+    local slowWS = nil
+    local function unslow(res)
+        if slowWS then
+            local c = Players.LocalPlayer.Character
+            local h = c and c:FindFirstChildOfClass("Humanoid")
+            if h then pcall(function() h.WalkSpeed = slowWS end) end
+            slowWS = nil
+        end
+        return res
+    end
     -- v24.7 FIX («иди сюда» игнорится в пути): пока бот идёт по своему маршруту,
     -- идёт ВЕСЬ подход — командное движение ([DO:goto]/[DO:follow]/UI-follow),
     -- стартовавшее посреди подхода, билось с нашим MoveTo (0.1с цикл перебивал
@@ -7914,26 +8010,82 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
         if cancelFn and cancelFn() then return true end
         return _isGoing or _isFollowing or _followMgrActive
     end
+    -- v25: ПАНИКА-В-ПУТИ. Подход блокирует главный цикл до 10с — враг успевал
+    -- подойти вплотную, пока бот «доигрывал» маршрут к собеседнику. Сканируем
+    -- врага прямо отсюда (кэш 0.5с) и отдаём управление главному циклу: он
+    -- возьмёт панику на ближайшем тике.
+    local tchkAt = 0
+    local function threatAbort()
+        if not _smartWalk.active then return false end
+        if _smartWalk.fleeing then return false end  -- v25: само бегство не прерываем
+        if (os.clock() - tchkAt) < 0.5 then return false end
+        tchkAt = os.clock()
+        local th, td = lobSmartThreatScan()
+        if not th then return false end
+        local see = false
+        pcall(function() see = lobSmartCanSee(th) end)
+        if not see then return false end
+        if not td or td > _SW.FLEE_RADIUS then return false end
+        return true
+    end
     while true do
-        if cancelled() then return "cancelled" end
-        if (os.clock() - t0) > maxT then return "timeout" end
+        if cancelled() then return unslow("cancelled") end
+        if threatAbort() then return unslow("cancelled") end
+        if (os.clock() - t0) > maxT then return unslow("timeout") end
         local ch = Players.LocalPlayer.Character
         local root = ch and ch:FindFirstChild("HumanoidRootPart")
         local hum = ch and ch:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health <= 0 then return "fail" end
+        if not root or not hum or hum.Health <= 0 then return unslow("fail") end
         local pos = root.Position
         local targetPos = getPos()
-        if not targetPos then return "cancelled" end
-        if (pos - targetPos).Magnitude <= stopD then return "arrived" end
+        if not targetPos then return unslow("cancelled") end
+        if (pos - targetPos).Magnitude <= stopD then return unslow("arrived") end
 
         local pathGoal = targetPos
         if jitter then pathGoal = targetPos + jitter end
         local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
         local ok = pcall(function() path:ComputeAsync(pos, pathGoal) end)
-        if not ok or path.Status ~= Enum.PathStatus.Success then return "nopath" end
+        if not ok or path.Status ~= Enum.PathStatus.Success then return unslow("nopath") end
         jitter = nil
 
         local wps = path:GetWaypoints()
+
+        -- v25: ДЕТЕКЦИЯ ЛЕСТНИЦЫ по точкам пути — соседние точки ПОДНИМАЮТСЯ
+        -- (подъём > STAIR_RISE при малом шаге по горизонтали). Лестница/пандус →
+        -- пересчитываем путь ПЛОТНЫМИ точками и включаем лестничную походку.
+        stair = false
+        do
+            local riseRun, anyRise = 0, false
+            for si = 2, #wps do
+                local dv = wps[si].Position.Y - wps[si - 1].Position.Y
+                local dh = Vector3.new(wps[si].Position.X - wps[si - 1].Position.X, 0,
+                    wps[si].Position.Z - wps[si - 1].Position.Z).Magnitude
+                if dv > _SW.STAIR_RISE and dh < 9 then
+                    riseRun = riseRun + 1
+                    anyRise = true
+                    if riseRun >= 2 then stair = true break end
+                else
+                    riseRun = 0
+                end
+            end
+            if (not stair) and anyRise and (#wps >= 2)
+                and (wps[#wps].Position.Y - wps[1].Position.Y) >= 5 then stair = true end
+        end
+        if stair then
+            local path2 = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = _SW.STAIR_WP })
+            local ok2 = pcall(function() path2:ComputeAsync(pos, pathGoal) end)
+            if ok2 and path2.Status == Enum.PathStatus.Success then
+                path = path2
+                wps = path2:GetWaypoints()
+            end
+            if not slowWS then
+                slowWS = hum.WalkSpeed
+                pcall(function() hum.WalkSpeed = math.max(8, slowWS * _SW.STAIR_SLOW) end)
+            end
+        elseif slowWS then
+            unslow(nil)  -- сошли с лестницы — обычная скорость
+        end
+
         local iterStart = os.clock()
         local goal0 = targetPos
         local rpLOS = RaycastParams.new()
@@ -7943,7 +8095,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
 
         local idx = 2
         while idx <= #wps do
-            if cancelled() then return "cancelled" end
+            if cancelled() then return unslow("cancelled") end
             -- если цель ушла далеко от исходной точки пути — пересчитываем сразу
             local moved = 0
             local gp = getPos()
@@ -7953,42 +8105,52 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
 
             local c0 = Players.LocalPlayer.Character
             local r0 = c0 and c0:FindFirstChild("HumanoidRootPart")
-            if not r0 then return "fail" end
+            if not r0 then return unslow("fail") end
             -- ШОРТКАТ: если дальше по маршруту видно по прямой — срезаем углы
             -- v23: кап на глубину проверки (SHORTCUT_CAP точек вперёд) — на длинных
             -- маршрутах полный скан давал до ~48 лишних рейкастов на каждую точку
-            local eye = r0.Position + Vector3.new(0, 2, 0)
-            for j = math.min(#wps, idx + _SW.SHORTCUT_CAP), idx + 1, -1 do
-                local dir = wps[j].Position - eye
-                if dir.Magnitude > 3 and not workspace:Raycast(eye, dir, rpLOS) then idx = j break end
+            -- v25: НА ЛЕСТНИЦЕ среза НЕТ — прямая «насквозь» кладёт бота в ступеньку
+            if not stair then
+                local eye = r0.Position + Vector3.new(0, 2, 0)
+                for j = math.min(#wps, idx + _SW.SHORTCUT_CAP), idx + 1, -1 do
+                    local dir = wps[j].Position - eye
+                    if dir.Magnitude > 3 and not workspace:Raycast(eye, dir, rpLOS) then idx = j break end
+                end
             end
 
             local wp = wps[idx]
             local c1 = Players.LocalPlayer.Character
             local r1 = c1 and c1:FindFirstChild("HumanoidRootPart")
             local h1 = c1 and c1:FindFirstChildOfClass("Humanoid")
-            if not r1 or not h1 or h1.Health <= 0 then return "fail" end
+            if not r1 or not h1 or h1.Health <= 0 then return unslow("fail") end
             if wp.Action == Enum.PathWaypointAction.Jump then pcall(function() h1.Jump = true end) end
             pcall(function() h1:MoveTo(wp.Position) end)
             local wt, wstuck, wlast = 0, 0, r1.Position
             local wjumps = 0  -- v23: счётчик прыжков на этой точке (анти-«битьё головой в потолок»)
             local blocked = 0
             local abortPath = false
-            while wt < 2.0 do
-                if cancelled() then return "cancelled" end
-                if (os.clock() - t0) > maxT then return "timeout" end
+            while wt < (stair and _SW.STAIR_PATIENCE or 2.0) do
+                if cancelled() then return unslow("cancelled") end
+                if threatAbort() then return unslow("cancelled") end
+                if (os.clock() - t0) > maxT then return unslow("timeout") end
                 task.wait(0.1); wt = wt + 0.1
                 local c2 = Players.LocalPlayer.Character
                 local r2 = c2 and c2:FindFirstChild("HumanoidRootPart")
                 local h2 = c2 and c2:FindFirstChildOfClass("Humanoid")
-                if not r2 or not h2 then return "fail" end
-                if (r2.Position - wp.Position).Magnitude < 3.5 then break end
+                if not r2 or not h2 then return unslow("fail") end
+                if (r2.Position - wp.Position).Magnitude < (stair and _SW.STAIR_ARRIVE or 3.5) then break end
 
                 -- локальный объезд: низкое — прыжок, стена — пересчёт, обрыв — стоп, человек — вбок
                 local steer = nil
                 pcall(function() steer = lobSmartSteer(r2, h2, wp.Position, rpLOS) end)
                 if steer == "jump" then
-                    pcall(function() h2.Jump = true end)
+                    if stair then
+                        -- v25: на ступеньках НЕ прыгаем — человечек сам встаёт на
+                        -- ступень; прыжок тут = бодание в потолок и соскальзывание
+                        pcall(function() h2:MoveTo(wp.Position) end)
+                    else
+                        pcall(function() h2.Jump = true end)
+                    end
                 elseif steer == "wall" then
                     blocked = blocked + 1
                     if blocked >= 2 then abortPath = true break end
@@ -8006,7 +8168,21 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
                         -- со смещением цели вбок (jitter) заведёт в обход
                         wjumps = wjumps + 1
                         if wjumps >= _SW.STUCK_JUMPS then abortPath = true break end
-                        pcall(function() h2.Jump = true end)
+                        if stair then
+                            -- v25: на лестнице прыжок — в последнюю очередь и только
+                            -- при свободном потолке; сначала «дожим» и боковой сдвиг
+                            if wjumps == 1 then
+                                pcall(function() h2:MoveTo(wp.Position) end)
+                            elseif not workspace:Raycast(r2.Position + Vector3.new(0, 4.5, 0),
+                                Vector3.new(0, _SW.CEIL_CLEAR, 0), rpLOS) then
+                                pcall(function() h2.Jump = true end)
+                            else
+                                pcall(function() h2:MoveTo(r2.Position + r2.CFrame.RightVector
+                                    * ((wjumps % 2 == 0) and 2 or -2)) end)
+                            end
+                        else
+                            pcall(function() h2.Jump = true end)
+                        end
                         wstuck = 0
                     end
                 else
@@ -8015,11 +8191,17 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
                 end
             end
             if abortPath then
-                -- упёрлись: следующий расчёт пути — со смещением цели вбок (другой маршрут)
+                -- упёрлись: следующий расчёт пути — со смещением цели (другой маршрут)
+                -- v25: на лестнице смещение ВДОЛЬ марша — поперечное выкидывало
+                -- цель в ступени/перила и давало nopath
                 local d = Vector3.new(targetPos.X - r1.Position.X, 0, targetPos.Z - r1.Position.Z)
                 if d.Magnitude > 1 then
-                    local perp = Vector3.new(-d.Unit.Z, 0, d.Unit.X)
-                    jitter = perp * ((math.random() < 0.5) and -1 or 1) * math.random(3, 6)
+                    if stair then
+                        jitter = d.Unit * ((math.random() < 0.5) and -1 or 1) * math.random(3, 6)
+                    else
+                        local perp = Vector3.new(-d.Unit.Z, 0, d.Unit.X)
+                        jitter = perp * ((math.random() < 0.5) and -1 or 1) * math.random(3, 6)
+                    end
                 end
                 break
             end
@@ -8036,7 +8218,7 @@ function lobSmartApproach(getPos, cancelFn, stopDist, maxSec)
             stuckTicks = 0
         end
         lastPos = cur
-        if stuckTicks >= _SW.STUCK_LIMIT then return "stuck" end
+        if stuckTicks >= _SW.STUCK_LIMIT then return unslow("stuck") end
     end
 end
 
@@ -8123,9 +8305,23 @@ function lobSmartForceStep()
     local root = getLocalRootPart()
     local hum = getLocalHumanoid()
     if not root or not hum then return end
+    -- v25: не «шагаем» сквозь недавнюю угрозу — направление конусом ОТ неё
+    local watch = _smartWalk.fleeWatchPos
+    local watchFresh = watch and ((os.clock() - (_smartWalk.lastThreatAt or -1e9)) < 60)
     local ang = math.random() * math.pi * 2
+    if watchFresh then
+        local away = math.atan2(root.Position.Z - watch.Z, root.Position.X - watch.X)
+        ang = away + (math.random() - 0.5) * math.rad(200)
+    end
     pcall(function() hum:MoveTo(root.Position + Vector3.new(math.cos(ang) * 12, 0, math.sin(ang) * 12)) end)
-    pcall(function() hum.Jump = true end)
+    -- v25: прыжок только при свободном потолке — «бодание» в арку/свод убрали
+    local rpF = RaycastParams.new()
+    rpF.FilterType = Enum.RaycastFilterType.Exclude
+    local chF = Players.LocalPlayer.Character
+    rpF.FilterDescendantsInstances = chF and { chF } or {}
+    if not workspace:Raycast(root.Position, Vector3.new(0, _SW.CEIL_CLEAR, 0), rpF) then
+        pcall(function() hum.Jump = true end)
+    end
 end
 
 function lobSmartWander(cancelFn)
@@ -8134,6 +8330,15 @@ function lobSmartWander(cancelFn)
     if not root then return "fail" end
     local gw = _smartWalk
     local now = os.clock()
+
+    -- v25: в ТЕСНОМ ПОМЕЩЕНИИ не shuttle'имся точка-точка каждые 8с: пожили на
+    -- точке (осмотрелись) — потом следующая. Лечит «бродит туда-сюда по комнате».
+    if (gw.roomDwellUntil or 0) > now then
+        local ang2 = math.random() * math.pi * 2
+        lobSmartFace(root.Position + Vector3.new(math.cos(ang2) * 10, 0, math.sin(ang2) * 10))
+        task.wait(math.min(1.5, (gw.roomDwellUntil or 0) - now))
+        return "arrived"
+    end
 
     -- ПРОДОЛЖАЕМ идти к уже выбранной точке — не меняем курс каждый вызов
     if gw.wanderDest and (now - (gw.wanderAt or 0)) < 30
@@ -8150,6 +8355,8 @@ function lobSmartWander(cancelFn)
                 table.insert(gw.stuckZones, { pos = rp.Position, expireAt = now + _SW.STUCK_ZONE_SEC })
             end
             lobSmartForceStep()
+        elseif r == "arrived" and gw._roomMode then
+            gw.roomDwellUntil = now + math.random(_SW.DWELL_MIN * 10, _SW.DWELL_MAX * 10) / 10
         end
         return r
     end
@@ -8246,9 +8453,24 @@ function lobSmartWander(cancelFn)
     end
     if #novel > 0 then cands = novel end
 
-    -- v21: сортируем точки по открытости — меньше риск упереться в угол/стену
+    -- v25: ОСМЫСЛЕННОЕ БЛУЖДАНИЕ (анти «шатание туда-сюда»): продолжаем общий
+    -- курс, разворот >135° штрафуется, после недавнего отхода держимся подальше
+    -- от того места И не выбираем точки, чей прямой путь проходит СКВОЗЬ недавнюю
+    -- угрозу (раньше бот шёл «напролом» и тёрся в 4 студах от страшного).
     do
+        local cont = gw.wanderDir
+        local awayPos = gw.fleeWatchPos
+        local awayFresh = awayPos and ((now - (gw.lastThreatAt or -1e9)) < 60)
+        local function segDist(ax, az, bx, bz, px, pz)
+            local vx, vz = bx - ax, bz - az
+            local L2 = vx * vx + vz * vz
+            local t = 0
+            if L2 > 0 then t = math.max(0, math.min(1, ((px - ax) * vx + (pz - az) * vz) / L2)) end
+            local dx, dz = px - (ax + vx * t), pz - (az + vz * t)
+            return math.sqrt(dx * dx + dz * dz)
+        end
         local scored = {}
+        local farthest = 0
         for _, c in ipairs(cands) do
             local rp = RaycastParams.new()
             rp.FilterType = Enum.RaycastFilterType.Exclude
@@ -8258,12 +8480,30 @@ function lobSmartWander(cancelFn)
                 local d2 = CFrame.Angles(0, math.rad(a2), 0) * Vector3.new(1, 0, 0)
                 if not workspace:Raycast(c + Vector3.new(0, 3, 0), d2 * 12, rp) then open = open + 1 end
             end
-            table.insert(scored, { pos = c, open = open })
+            local sc = open * 10
+            local dc = c - root.Position
+            local dd = dc.Magnitude
+            if dd > farthest then farthest = dd end
+            if cont and dd > 1 then
+                local dot = dc.Unit:Dot(cont)
+                if dot > 0.3 then sc = sc + _SW.WANDER_CONT      -- по курсу — приятно
+                elseif dot < -0.6 then sc = sc - _SW.WANDER_REVPEN end  -- обратно — зачем?
+            end
+            if awayFresh then
+                local dT = (c - awayPos).Magnitude
+                if dT < _SW.FLEE_RADIUS then sc = sc - 80        -- к месту угрозы — нет
+                else sc = sc + math.min(20, dT * 0.3) end        -- подальше — спокойнее
+                -- прямой путь к точке проходит ближе 10 студов от угрозы — штраф
+                if segDist(root.Position.X, root.Position.Z, c.X, c.Z,
+                    awayPos.X, awayPos.Z) < 10 then sc = sc - 60 end
+            end
+            table.insert(scored, { pos = c, sc = sc })
         end
-        table.sort(scored, function(a, b) return a.open > b.open end)
+        table.sort(scored, function(a, b) return a.sc > b.sc end)
         local out = {}
         for _, s in ipairs(scored) do table.insert(out, s.pos) end
         cands = out
+        gw._roomMode = farthest < _SW.ROOM_SIZE  -- тесное помещение: пожить на точке
     end
 
     local dest = nil
@@ -8285,6 +8525,13 @@ function lobSmartWander(cancelFn)
 
     gw.wanderDest = dest
     gw.wanderAt = now
+    -- v25: запоминаем курс блуждания — следующий выбор «по курсу» приятнее,
+    -- «обратно» штрафуется (анти-шатание туда-сюда)
+    do
+        local wd = dest - root.Position
+        wd = Vector3.new(wd.X, 0, wd.Z)
+        gw.wanderDir = (wd.Magnitude > 1) and wd.Unit or gw.wanderDir
+    end
     local r = lobSmartApproach(function() return gw.wanderDest end, function()
         return (cancelFn and cancelFn()) or (gw.wanderDest ~= dest)
     end, 4, 8)
@@ -8381,7 +8628,10 @@ function lobSmartWalkStart()
                         gw.lastMoveAt = tnow
                     end
                     gw.lastPos = root.Position
-                    if (not gw.target) and (tnow - (gw.lastMoveAt or tnow)) > 3.5 then
+                    -- v25: «отдышка» после отхода от врага — это НЕ залипание,
+                    -- принудительный шаг её не ломает
+                    if (not gw.target) and ((gw.settleUntil or 0) <= tnow)
+                        and (tnow - (gw.lastMoveAt or tnow)) > 3.5 then
                         gw.lastMoveAt = tnow
                         gw.wanderDest = nil
                         lobSmartForceStep()
@@ -8402,7 +8652,14 @@ function lobSmartWalkStart()
                 end
                 if not gw.home then gw.home = root.Position end  -- дом = текущая точка
 
-                -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим
+                -- ВРАГ РЯДОМ: не делаем вид, что никого нет — замечаем и отходим.
+                -- v25: ПАНИКА С ПОВТОРНЫМ ВООРУЖЕНИЕМ (анти пинг-понг по комнате).
+                -- Один полноценный отход → «отдышка» на месте (следим за врагом).
+                -- Снова убегаем ТОЛЬКО если: враг ДРУГОЙ / подошёл ближе
+                -- FLEE_REARM_R / надвигается бегом (погоня) / враг у самой отдышки
+                -- (SETTLE_WATCH_R) / прошло FLEE_REARM_SEC обычной бдительности.
+                -- Старый код перезапускал бегство каждые ~2.5с — отсюда «бродит
+                -- туда-сюда по помещению, будто не понимает, зачем он здесь».
                 do
                     local threat, tdist = lobSmartThreatScan()
                     -- из кэша враг мог оказаться за стеной — тогда не паникуем
@@ -8416,6 +8673,7 @@ function lobSmartWalkStart()
                         pcall(function()
                             local tp = threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
                             lobSmartMarkDanger(tp and tp.Position or root.Position)
+                            gw.fleeWatchPos = tp and tp.Position or nil  -- v25: куда смотрим на отдышке
                         end)
                         gw.avoid[threat.UserId] = now + 60
                         gw.reachFail[threat.UserId] = now + 45
@@ -8427,21 +8685,65 @@ function lobSmartWalkStart()
                             gw.targetSince = 0
                         end
                         lobSmartDangerLine(threat)
-                        if tdist and tdist <= _SW.FLEE_RADIUS then
-                            gw.state = "wander"
-                            gw.target = nil
-                            gw.targetSince = 0
-                            gw.leaveAt = 0
-                            -- v21: чем больше привыкли — тем КОРОЧЕ убегаем
-                            local fk = 1
-                            local ff = _smartWalk.fear and _smartWalk.fear[threat.UserId]
-                            if ff then fk = 1 - (ff.habit or 0) end
-                            gw.fleeUntil = now + 2.2 * math.max(0.4, fk)
-                            gw.fleeFrom = threat.UserId
-                            lobSmartFlee(threat)
-                            task.wait(0.2)
-                            return
+                        -- v25: скорость сближения считаем КАЖДЫЙ тик, пока враг виден —
+                        -- и когда он ещё ЗА радиусом паники тоже. Иначе closing считается
+                        -- от устаревшей дистанции (отрицательной) и погоня опаздывает:
+                        -- враг успевал подойти почти вплотную до повторной паники.
+                        local closing = 0
+                        if (gw.threatDistAt or 0) > 0 and now > (gw.threatDistAt or now) and tdist then
+                            closing = math.max(0, ((gw.threatDistPrev or 1e9) - tdist) / (now - gw.threatDistAt))
                         end
+                        if tdist then
+                            gw.threatDistPrev = tdist
+                            gw.threatDistAt = now
+                        end
+                        if tdist and tdist <= _SW.FLEE_RADIUS then
+                            local sinceFlee = now - (gw.fleeEndAt or -1e9)
+                            local canPanic = (gw.fleeFrom ~= threat.UserId)
+                                or ((gw.settleUntil or 0) > now and tdist <= _SW.SETTLE_WATCH_R)
+                                -- близко и уже остыл (≥8с) — не ждём полных 18с
+                                or (tdist <= _SW.FLEE_REARM_R and sinceFlee >= 8)
+                                or (closing >= _SW.FLEE_CHASE_SPD)
+                                -- v25: на отдышке устойчиво приближается (>3 студ/с) —
+                                -- отходим ЗАРАНЕЕ, не дожидаясь дистанции 13
+                                or ((gw.settleUntil or 0) > now and closing >= 3)
+                                or (sinceFlee >= _SW.FLEE_REARM_SEC)
+                            if canPanic then
+                                gw.state = "wander"
+                                gw.target = nil
+                                gw.targetSince = 0
+                                gw.leaveAt = 0
+                                gw.settleUntil = 0
+                                -- v21: чем больше привыкли — тем КОРОЧЕ убегаем
+                                local fk = 1
+                                local ff = _smartWalk.fear and _smartWalk.fear[threat.UserId]
+                                if ff then fk = 1 - (ff.habit or 0) end
+                                gw.fleeUntil = now + 4.5 * math.max(0.4, fk)
+                                gw.fleeFrom = threat.UserId
+                                gw.fleeEndAt = 0
+                                lobSmartFlee(threat)
+                                -- v25: конец паники → «отдышка»: стоим и следим, не суетимся
+                                gw.fleeEndAt = os.clock()
+                                gw.settleUntil = os.clock() + _SW.SETTLE_TIME
+                                task.wait(0.2)
+                                return
+                            elseif (gw.settleUntil or 0) > now then
+                                -- «отдышка»: повторно не убегаем, но и не блуждаем — стоим и следим
+                                if gw.fleeWatchPos then pcall(lobSmartFace, gw.fleeWatchPos) end
+                                task.wait(0.35)
+                                return
+                            elseif closing > 1 and gw.fleeFrom == threat.UserId then
+                                -- v25: «настороженное следящее»: недавний повод для паники
+                                -- продолжает подходить — не буждаем по своим делам (не идём
+                                -- навстречу), стоим и следим; паника заберёт при подходе ближе
+                                if gw.fleeWatchPos then pcall(lobSmartFace, gw.fleeWatchPos) end
+                                gw.settleUntil = math.max(gw.settleUntil or 0, now + 2)
+                                task.wait(0.35)
+                                return
+                            end
+                        end
+                    elseif (now - (gw.lastThreatAt or -1e9)) > 8 then
+                        gw.fleeFrom = nil  -- враг пропал из вида — тревога взводится заново
                     end
                     -- снимаем метку/игнор с тех, кто больше не враг (сменил команду, PvP кончился)
                     for uid in pairs(gw.threatSet) do
@@ -8549,7 +8851,13 @@ function lobSmartWalkStart()
                         gw.arrivedAt or 0,
                         gw.targetSince or 0
                     )
-                    if (now - curContact) > 20 then
+                    -- v25 FIX: ветка v23 не должна обходить MIN_STAY социального визита.
+                    -- «Контакт» считал и приглашающую реплику партнёра (она СТАРШЕ визита),
+                    -- поэтому при быстром подходе бот бросал партнёра уже через ~15с
+                    -- («ушёл рано»). Ждём полные MIN_STAY у собеседника.
+                    local socialLong = (gw.state ~= "social")
+                        or ((now - (gw.socialSince or now)) >= _SW.MIN_STAY)
+                    if (now - curContact) > 20 and socialLong then
                         local sp = Players:GetPlayerByUserId(spkUid)
                         local spOk = false
                         if sp and sp.Parent and sp.Character then
@@ -8656,8 +8964,11 @@ function lobSmartWalkStart()
                             -- "sw:uid" не пишет botReplyAt → partnerQuiet = «вечность»),
                             -- через ~10с терял бота: приветствие ещё не успело дойти, а бот
                             -- уже ушёл к отложенному чужому (и бан 20с на партнёра).
+                            -- v25 FIX: свежий визит (<MIN_STAY) не покидаем ВООБЩЕ.
+                            -- Прежний guard v24.8 требовал ещё и partnerQuiet >= MIN_STAY:
+                            -- при быстром ответе партнёру (тишина 8-19с) защита НЕ работала
+                            -- и бот уходил уже через ~11с («ушёл рано» на полигоне).
                             local visitFresh = (now - (gw.socialSince or now)) < _SW.MIN_STAY
-                                and partnerQuiet >= _SW.MIN_STAY
                             if okPend
                                 and (not visitFresh)
                                 and partnerQuiet >= _SW.POLITE_PAUSE
@@ -9020,6 +9331,13 @@ function lobSmartWalkStart()
 
                 if not gw.target then
                     gw.state = "wander"
+                    -- v25: «отдышка» после отхода — стоим и осматриваемся (следим,
+                    -- откуда пришла угроза), блуждание начнётся после SETTLE_TIME
+                    if (gw.settleUntil or 0) > now then
+                        if gw.fleeWatchPos then pcall(lobSmartFace, gw.fleeWatchPos) end
+                        task.wait(0.4)
+                        return
+                    end
                     -- короткая пауза перед уходом — не разворачиваемся рывком на 180°
                     if (now - (gw.leaveAt or 0)) < 1.5 then task.wait(0.3) return end
                     -- v23: бормотание наедине (обещано в описании тумблера) — до блуждания:
